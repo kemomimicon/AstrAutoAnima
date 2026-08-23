@@ -1,0 +1,68 @@
+{
+  "schema_version": "1.0",
+  "registry_revision": 1,
+  "workflows": [
+    {
+      "id": "quick_txt2img_v1",
+      "version": "1.0.0",
+      "category": "generate",
+      "workflow_file": "",
+      "config_path_key": "workflow_path",
+      "profiles": {},
+      "required_nodes": ["11", "19"],
+      "node_mapping": {"positive": "11", "negative": "12", "sampler": "19", "latent": "28"},
+      "capability": {"txt2img": true, "default_profile": ""}
+    },
+    {
+      "id": "reverse_anime_v1",
+      "version": "1.0.0-beta.5",
+      "category": "analyze",
+      "workflow_file": "",
+      "config_path_key": "reverse_workflow_path",
+      "profiles": {},
+      "required_nodes": ["1", "7", "8"],
+      "node_mapping": {"image": "1", "compiler": "7", "saver": "8"},
+      "capability": {"reverse": true, "default_profile": ""}
+    },
+    {
+      "id": "hq_txt2img_anima_v1",
+      "version": "1.0.0-beta.1",
+      "category": "generate",
+      "workflow_file": "",
+      "config_path_key": "hq_workflow_path",
+      "profiles": {
+        "stable": {
+          "sampling": {"sampler_name": "er_sde", "scheduler": "normal", "steps": 34, "cfg": 4.5, "denoise": 1.0},
+          "enhance": {"scale": 1.25, "sampler_name": "er_sde", "scheduler": "normal", "steps": 18, "cfg": 4.5, "denoise": 0.28}
+        },
+        "beauty": {
+          "sampling": {"sampler_name": "dpmpp_2m_sde_gpu", "scheduler": "normal", "steps": 38, "cfg": 4.5, "denoise": 1.0},
+          "enhance": {"scale": 1.5, "sampler_name": "dpmpp_2m_sde_gpu", "scheduler": "normal", "steps": 20, "cfg": 4.5, "denoise": 0.3}
+        }
+      },
+      "required_nodes": ["11", "12", "19", "28", "29", "30"],
+      "node_mapping": {"positive": "11", "negative": "12", "sampler": "19", "latent": "28", "upscale": "29", "refiner_sampler": "30"},
+      "capability": {"txt2img": true, "highres": true, "default_profile": "stable", "detailer_default": false, "tile_default": false}
+    },
+    {
+      "id": "refine_existing_v1",
+      "version": "1.0.0-beta.1",
+      "category": "refine",
+      "workflow_file": "",
+      "config_path_key": "refine_workflow_path",
+      "profiles": {
+        "light": {
+          "sampling": {"sampler_name": "er_sde", "scheduler": "normal", "steps": 18, "cfg": 4.5, "denoise": 0.25},
+          "enhance": {"scale": 1.25, "denoise": 0.25}
+        },
+        "medium": {
+          "sampling": {"sampler_name": "dpmpp_2m_sde_gpu", "scheduler": "normal", "steps": 22, "cfg": 4.5, "denoise": 0.35},
+          "enhance": {"scale": 1.5, "denoise": 0.35}
+        }
+      },
+      "required_nodes": ["1", "2", "3", "11", "12", "19"],
+      "node_mapping": {"image": "1", "upscale": "2", "vae_encode": "3", "positive": "11", "negative": "12", "sampler": "19"},
+      "capability": {"img2img": true, "default_profile": "light", "detailer_default": false, "tile_default": false}
+    }
+  ]
+}

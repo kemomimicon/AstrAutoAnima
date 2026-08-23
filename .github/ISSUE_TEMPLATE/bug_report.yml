@@ -1,0 +1,39 @@
+name: Bug report
+description: 报告可复现的 AstrAutoAnima 问题（先脱敏）
+title: "[Bug] "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: 请勿提交令牌、QQ 登录数据、真实 QQ 号、私人图片或完整生产配置。
+  - type: input
+    id: versions
+    attributes:
+      label: 组件版本
+      description: 插件、Hub、客户端、AstrBot、Anima Master、ComfyUI
+    validations:
+      required: true
+  - type: dropdown
+    id: deployment
+    attributes:
+      label: 部署方式
+      options: [Linux 服务器, Windows 本地, 其他]
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: 复现步骤
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 预期与实际结果
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: 已脱敏日志
+      render: text

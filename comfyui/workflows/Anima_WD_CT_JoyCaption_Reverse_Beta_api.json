@@ -1,0 +1,188 @@
+{
+  "1": {
+    "inputs": {
+      "image": "reverse_input.png",
+      "upload": "image"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "反推输入图片"
+    }
+  },
+  "2": {
+    "inputs": {
+      "model_name": "wd-eva02-large-tagger-v3",
+      "replace_underscore": true
+    },
+    "class_type": "Load Booru Tagger",
+    "_meta": {
+      "title": "加载 WD-EVA02"
+    }
+  },
+  "3": {
+    "inputs": {
+      "tagger_model": [
+        "2",
+        0
+      ],
+      "tagger_info": [
+        "2",
+        1
+      ],
+      "image": [
+        "1",
+        0
+      ],
+      "threshold": 0.45,
+      "character_threshold": 0.85,
+      "use_best_threshold": false,
+      "trailing_comma": false,
+      "sort_tags": false,
+      "exclude_tags": ""
+    },
+    "class_type": "Booru Tagger",
+    "_meta": {
+      "title": "WD-EVA02 反推"
+    }
+  },
+  "4": {
+    "inputs": {
+      "model_name": "cl-tagger-v2-v2_00",
+      "replace_underscore": true
+    },
+    "class_type": "Load Booru Tagger",
+    "_meta": {
+      "title": "加载 CL Tagger v2.00"
+    }
+  },
+  "5": {
+    "inputs": {
+      "tagger_model": [
+        "4",
+        0
+      ],
+      "tagger_info": [
+        "4",
+        1
+      ],
+      "image": [
+        "1",
+        0
+      ],
+      "threshold": 0.55,
+      "character_threshold": 0.55,
+      "use_best_threshold": false,
+      "trailing_comma": false,
+      "sort_tags": false,
+      "exclude_tags": ""
+    },
+    "class_type": "Booru Tagger",
+    "_meta": {
+      "title": "CL Tagger v2.00 反推"
+    }
+  },
+  "6": {
+    "inputs": {
+      "image": [
+        "1",
+        0
+      ],
+      "gguf_model": "llama-joycaption-beta-one-hf-llava.Q6_K.gguf",
+      "mmproj_file": "llama-joycaption-beta-one-llava-mmproj-model-f16.gguf",
+      "n_gpu_layers": -1,
+      "n_ctx": 4096,
+      "system_prompt": "You are the visual analysis branch of an Anima reverse-prompt compiler. Return one valid JSON object only. Do not use markdown. Use concise lowercase English Danbooru-style tags inside arrays. Do not invent artist names, copyright names, model names, quality tags, or hidden details. If uncertain, omit the item. Safety must follow the visible image, not assumptions.",
+      "user_query": "Analyze the image and return exactly this JSON shape: {\"scene\":[],\"action\":[],\"character\":[],\"appearance\":[],\"clothing\":[],\"composition\":[],\"other\":[],\"safety\":{\"level\":\"normal|nsfw|sexual|uncertain\",\"reasons\":[]}}. Scene covers environment, time, weather and lighting. Action covers pose, interaction and movement. Character covers recognized identity only when visually reliable. Appearance covers visible physical features. Clothing covers garments and accessories. Composition covers shot type, angle, viewpoint and depth of field. The safety policy is: normal includes ordinary content, underwear and non-explicit body exposure up to approximately R15; nsfw includes complete nudity without sexual activity; sexual includes sexual acts or emphasized genitals. Output JSON only.",
+      "max_new_tokens": 768,
+      "temperature": 0.2,
+      "top_p": 0.9,
+      "top_k": 40,
+      "seed": 12345,
+      "unload_after_generate": false
+    },
+    "class_type": "JJC_JoyCaption_Custom_GGUF",
+    "_meta": {
+      "title": "JoyCaption Beta One Q6_K"
+    }
+  },
+  "7": {
+    "inputs": {
+      "wd_tags": [
+        "3",
+        0
+      ],
+      "wd_general": [
+        "3",
+        1
+      ],
+      "wd_rating": [
+        "3",
+        2
+      ],
+      "wd_character": [
+        "3",
+        3
+      ],
+      "ct_tags": [
+        "5",
+        0
+      ],
+      "ct_general": [
+        "5",
+        1
+      ],
+      "ct_rating": [
+        "5",
+        2
+      ],
+      "ct_character": [
+        "5",
+        3
+      ],
+      "joy_caption": [
+        "6",
+        0
+      ],
+      "preset": "full",
+      "include_scene": true,
+      "include_action": true,
+      "include_character": true,
+      "include_appearance": true,
+    "include_clothing": true,
+    "include_composition": true,
+    "include_other": true,
+    "include_safety": true
+    },
+    "class_type": "AnimaReverseCompiler",
+    "_meta": {
+      "title": "Anima 反推 Compiler"
+    }
+  },
+  "8": {
+    "inputs": {
+      "image": [
+        "1",
+        0
+      ],
+      "structured_json": [
+        "7",
+        1
+      ],
+      "anima_prompt": [
+        "7",
+        0
+      ],
+      "storage_root": "astr_auto_anima/reverse_history",
+      "qq_user_id": "",
+      "session_type": "unknown",
+      "session_id": "",
+      "role_preset": "",
+      "style_preset": "",
+      "save_thumbnail": false
+    },
+    "class_type": "AnimaReverseResultSaver",
+    "_meta": {
+      "title": "保存反推记录"
+    }
+  }
+}

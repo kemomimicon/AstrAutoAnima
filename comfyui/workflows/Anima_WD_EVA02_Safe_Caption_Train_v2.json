@@ -1,0 +1,1060 @@
+{
+  "id": "e0e11b31-a9c4-4a22-9e57-8fbfb3915139",
+  "revision": 0,
+  "last_node_id": 13,
+  "last_link_id": 14,
+  "nodes": [
+    {
+      "id": 1,
+      "type": "AnimaBatchFolderLoader",
+      "pos": [
+        40,
+        80
+      ],
+      "size": [
+        360,
+        174
+      ],
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "dataset_root",
+          "name": "dataset_root",
+          "type": "STRING",
+          "widget": {
+            "name": "dataset_root"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "image_extensions",
+          "name": "image_extensions",
+          "type": "STRING",
+          "widget": {
+            "name": "image_extensions"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "folder_filter",
+          "name": "folder_filter",
+          "type": "STRING",
+          "widget": {
+            "name": "folder_filter"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "include_root_images",
+          "name": "include_root_images",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "include_root_images"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "max_images_per_folder",
+          "name": "max_images_per_folder",
+          "type": "INT",
+          "widget": {
+            "name": "max_images_per_folder"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "TASK_LIST",
+          "name": "TASK_LIST",
+          "type": "TASK_LIST",
+          "slot_index": 0,
+          "links": [
+            1
+          ]
+        },
+        {
+          "localized_name": "scan_log",
+          "name": "scan_log",
+          "type": "STRING",
+          "slot_index": 1,
+          "links": null
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "AnimaBatchFolderLoader"
+      },
+      "widgets_values": [
+        "YOUR_TRAINING_DATASET_DIR",
+        ".png,.jpg,.jpeg,.webp,.bmp",
+        "",
+        false,
+        0
+      ]
+    },
+    {
+      "id": 2,
+      "type": "AnimaLoadCaptionImageBatch",
+      "pos": [
+        460,
+        80
+      ],
+      "size": [
+        340,
+        214
+      ],
+      "flags": {},
+      "order": 5,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "TASK_LIST",
+          "name": "TASK_LIST",
+          "type": "TASK_LIST",
+          "link": 1
+        },
+        {
+          "localized_name": "task_index",
+          "name": "task_index",
+          "type": "INT",
+          "widget": {
+            "name": "task_index"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "start_index",
+          "name": "start_index",
+          "type": "INT",
+          "widget": {
+            "name": "start_index"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "max_images",
+          "name": "max_images",
+          "type": "INT",
+          "widget": {
+            "name": "max_images"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "image_size",
+          "name": "image_size",
+          "type": "INT",
+          "widget": {
+            "name": "image_size"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "skip_existing_caption",
+          "name": "skip_existing_caption",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "skip_existing_caption"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "images",
+          "name": "images",
+          "type": "IMAGE",
+          "slot_index": 0,
+          "links": [
+            2
+          ]
+        },
+        {
+          "localized_name": "IMAGE_RECORDS",
+          "name": "IMAGE_RECORDS",
+          "type": "IMAGE_RECORDS",
+          "slot_index": 1,
+          "links": [
+            6,
+            13
+          ]
+        },
+        {
+          "localized_name": "TASK_LIST",
+          "name": "TASK_LIST",
+          "type": "TASK_LIST",
+          "slot_index": 2,
+          "links": [
+            7
+          ]
+        },
+        {
+          "localized_name": "load_log",
+          "name": "load_log",
+          "type": "STRING",
+          "slot_index": 3,
+          "links": null
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "AnimaLoadCaptionImageBatch"
+      },
+      "widgets_values": [
+        0,
+        0,
+        2048,
+        896,
+        true
+      ]
+    },
+    {
+      "id": 7,
+      "type": "AnimaSaveLlamaCppCaptions",
+      "pos": [
+        1840,
+        120
+      ],
+      "size": [
+        380,
+        170
+      ],
+      "flags": {},
+      "order": 8,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "TASK_LIST",
+          "name": "TASK_LIST",
+          "type": "TASK_LIST",
+          "link": 7
+        },
+        {
+          "localized_name": "IMAGE_RECORDS",
+          "name": "IMAGE_RECORDS",
+          "type": "IMAGE_RECORDS",
+          "link": 6
+        },
+        {
+          "localized_name": "caption_list",
+          "name": "caption_list",
+          "type": "STRING",
+          "link": 14
+        },
+        {
+          "localized_name": "overwrite_existing_caption",
+          "name": "overwrite_existing_caption",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "overwrite_existing_caption"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "TASK_LIST",
+          "name": "TASK_LIST",
+          "type": "TASK_LIST",
+          "slot_index": 0,
+          "links": [
+            9
+          ]
+        },
+        {
+          "localized_name": "caption_log",
+          "name": "caption_log",
+          "type": "STRING",
+          "slot_index": 1,
+          "links": null
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "AnimaSaveLlamaCppCaptions"
+      },
+      "widgets_values": [
+        false
+      ]
+    },
+    {
+      "id": 11,
+      "type": "AnimaBatchCheckStatus",
+      "pos": [
+        3260,
+        160
+      ],
+      "size": [
+        360,
+        120
+      ],
+      "flags": {},
+      "order": 11,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "job_id",
+          "name": "job_id",
+          "type": "STRING",
+          "widget": {
+            "name": "job_id"
+          },
+          "link": 12
+        },
+        {
+          "localized_name": "tail_lines",
+          "name": "tail_lines",
+          "type": "INT",
+          "widget": {
+            "name": "tail_lines"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "status_log",
+          "name": "status_log",
+          "type": "STRING",
+          "slot_index": 0,
+          "links": null
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "AnimaBatchCheckStatus"
+      },
+      "widgets_values": [
+        80,
+        80
+      ]
+    },
+    {
+      "id": 10,
+      "type": "AnimaBatchStartTrain",
+      "pos": [
+        2820,
+        160
+      ],
+      "size": [
+        360,
+        140
+      ],
+      "flags": {},
+      "order": 10,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "TASK_LIST",
+          "name": "TASK_LIST",
+          "type": "TASK_LIST",
+          "link": 10
+        },
+        {
+          "localized_name": "ANIMA_TRAIN_CONFIG",
+          "name": "ANIMA_TRAIN_CONFIG",
+          "type": "ANIMA_TRAIN_CONFIG",
+          "link": 11
+        },
+        {
+          "localized_name": "start_now",
+          "name": "start_now",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "start_now"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "job_id",
+          "name": "job_id",
+          "type": "STRING",
+          "slot_index": 0,
+          "links": [
+            12
+          ]
+        },
+        {
+          "localized_name": "train_log",
+          "name": "train_log",
+          "type": "STRING",
+          "slot_index": 1,
+          "links": null
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "AnimaBatchStartTrain"
+      },
+      "widgets_values": [
+        false
+      ]
+    },
+    {
+      "id": 8,
+      "type": "AnimaCaptionPrepare",
+      "pos": [
+        2280,
+        120
+      ],
+      "size": [
+        380,
+        190
+      ],
+      "flags": {},
+      "order": 9,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "TASK_LIST",
+          "name": "TASK_LIST",
+          "type": "TASK_LIST",
+          "link": 9
+        },
+        {
+          "localized_name": "trigger_mode",
+          "name": "trigger_mode",
+          "type": "COMBO",
+          "widget": {
+            "name": "trigger_mode"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "normalize_existing_caption",
+          "name": "normalize_existing_caption",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "normalize_existing_caption"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "create_missing_caption",
+          "name": "create_missing_caption",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "create_missing_caption"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "default_caption_body",
+          "name": "default_caption_body",
+          "type": "STRING",
+          "widget": {
+            "name": "default_caption_body"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "TASK_LIST",
+          "name": "TASK_LIST",
+          "type": "TASK_LIST",
+          "slot_index": 0,
+          "links": [
+            10
+          ]
+        },
+        {
+          "localized_name": "prepare_log",
+          "name": "prepare_log",
+          "type": "STRING",
+          "slot_index": 1,
+          "links": null
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "AnimaCaptionPrepare"
+      },
+      "widgets_values": [
+        "folder_name",
+        false,
+        false,
+        "anime illustration"
+      ]
+    },
+    {
+      "id": 9,
+      "type": "AnimaBatchTrainConfig",
+      "pos": [
+        2280,
+        380
+      ],
+      "size": [
+        470,
+        640
+      ],
+      "flags": {},
+      "order": 4,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "train_script_path",
+          "name": "train_script_path",
+          "type": "STRING",
+          "widget": {
+            "name": "train_script_path"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "python_executable",
+          "name": "python_executable",
+          "type": "STRING",
+          "widget": {
+            "name": "python_executable"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "base_model_path",
+          "name": "base_model_path",
+          "type": "STRING",
+          "widget": {
+            "name": "base_model_path"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "output_dir",
+          "name": "output_dir",
+          "type": "STRING",
+          "widget": {
+            "name": "output_dir"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "resolution",
+          "name": "resolution",
+          "type": "STRING",
+          "widget": {
+            "name": "resolution"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "train_batch_size",
+          "name": "train_batch_size",
+          "type": "INT",
+          "widget": {
+            "name": "train_batch_size"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "max_train_epochs",
+          "name": "max_train_epochs",
+          "type": "INT",
+          "widget": {
+            "name": "max_train_epochs"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "save_every_n_epochs",
+          "name": "save_every_n_epochs",
+          "type": "INT",
+          "widget": {
+            "name": "save_every_n_epochs"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "network_dim",
+          "name": "network_dim",
+          "type": "INT",
+          "widget": {
+            "name": "network_dim"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "network_alpha",
+          "name": "network_alpha",
+          "type": "INT",
+          "widget": {
+            "name": "network_alpha"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "learning_rate",
+          "name": "learning_rate",
+          "type": "STRING",
+          "widget": {
+            "name": "learning_rate"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "mixed_precision",
+          "name": "mixed_precision",
+          "type": "COMBO",
+          "widget": {
+            "name": "mixed_precision"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "optimizer_type",
+          "name": "optimizer_type",
+          "type": "STRING",
+          "widget": {
+            "name": "optimizer_type"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "shuffle_caption",
+          "name": "shuffle_caption",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "shuffle_caption"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "keep_tokens",
+          "name": "keep_tokens",
+          "type": "INT",
+          "widget": {
+            "name": "keep_tokens"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "caption_separator",
+          "name": "caption_separator",
+          "type": "STRING",
+          "widget": {
+            "name": "caption_separator"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "caption_extension",
+          "name": "caption_extension",
+          "type": "STRING",
+          "widget": {
+            "name": "caption_extension"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "extra_args",
+          "name": "extra_args",
+          "type": "STRING",
+          "widget": {
+            "name": "extra_args"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "stop_on_error",
+          "name": "stop_on_error",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "stop_on_error"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "training_preset",
+          "name": "training_preset",
+          "type": "COMBO",
+          "widget": {
+            "name": "training_preset"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "training_strength_mode",
+          "name": "training_strength_mode",
+          "type": "COMBO",
+          "widget": {
+            "name": "training_strength_mode"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "target_steps_per_lora",
+          "name": "target_steps_per_lora",
+          "type": "INT",
+          "widget": {
+            "name": "target_steps_per_lora"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "num_repeats",
+          "name": "num_repeats",
+          "type": "INT",
+          "widget": {
+            "name": "num_repeats"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "save_strategy",
+          "name": "save_strategy",
+          "type": "COMBO",
+          "widget": {
+            "name": "save_strategy"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "ANIMA_TRAIN_CONFIG",
+          "name": "ANIMA_TRAIN_CONFIG",
+          "type": "ANIMA_TRAIN_CONFIG",
+          "slot_index": 0,
+          "links": [
+            11
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "AnimaBatchTrainConfig"
+      },
+      "widgets_values": [
+        "YOUR_TRAIN_WRAPPER.py",
+        "YOUR_TRAIN_PYTHON",
+        "YOUR_ANIMA_MODEL_PATH",
+        "YOUR_LORA_OUTPUT_DIR",
+        "1024,1024",
+        1,
+        10,
+        2,
+        32,
+        32,
+        "2e-5",
+        "bf16",
+        "AdamW8bit",
+        true,
+        1,
+        ",",
+        ".txt",
+        "--qwen3 YOUR_ANIMA_CLIP_PATH --vae YOUR_ANIMA_VAE_PATH --save_model_as safetensors --network_module networks.lora_anima --network_train_unet_only --lr_scheduler constant --timestep_sampling sigmoid --discrete_flow_shift 1.0 --gradient_checkpointing --cache_latents --vae_chunk_size 64 --vae_disable_cache --max_data_loader_n_workers 0",
+        true,
+        "standard",
+        "target_steps",
+        3001,
+        1,
+        "every_n_epochs"
+      ]
+    },
+    {
+      "id": 12,
+      "type": "WD14Tagger|pysssss",
+      "pos": [
+        930,
+        120
+      ],
+      "size": [
+        410,
+        320
+      ],
+      "flags": {},
+      "order": 6,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "image",
+          "name": "image",
+          "type": "IMAGE",
+          "link": 2
+        },
+        {
+          "localized_name": "model",
+          "name": "model",
+          "type": "COMBO",
+          "widget": {
+            "name": "model"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "threshold",
+          "name": "threshold",
+          "type": "FLOAT",
+          "widget": {
+            "name": "threshold"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "character_threshold",
+          "name": "character_threshold",
+          "type": "FLOAT",
+          "widget": {
+            "name": "character_threshold"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "replace_underscore",
+          "name": "replace_underscore",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "replace_underscore"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "trailing_comma",
+          "name": "trailing_comma",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "trailing_comma"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "exclude_tags",
+          "name": "exclude_tags",
+          "type": "STRING",
+          "widget": {
+            "name": "exclude_tags"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "STRING",
+          "name": "STRING",
+          "type": "STRING",
+          "shape": 6,
+          "slot_index": 0,
+          "links": [
+            8
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "WD14Tagger|pysssss"
+      },
+      "widgets_values": [
+        "wd-eva02-large-tagger-v3",
+        0.45,
+        1.0,
+        true,
+        false,
+        ""
+      ]
+    },
+    {
+      "id": 13,
+      "type": "AnimaCaptionBatchGuard",
+      "pos": [
+        1390.0,
+        105.0
+      ],
+      "size": [
+        390.0,
+        260.0
+      ],
+      "flags": {},
+      "order": 7,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "caption_list",
+          "name": "caption_list",
+          "type": "STRING",
+          "link": 8
+        },
+        {
+          "localized_name": "image_records",
+          "name": "image_records",
+          "type": "IMAGE_RECORDS",
+          "link": 13
+        },
+        {
+          "localized_name": "min_tags",
+          "name": "min_tags",
+          "type": "INT",
+          "widget": {
+            "name": "min_tags"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "max_tags",
+          "name": "max_tags",
+          "type": "INT",
+          "widget": {
+            "name": "max_tags"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "max_duplicate_ratio",
+          "name": "max_duplicate_ratio",
+          "type": "FLOAT",
+          "widget": {
+            "name": "max_duplicate_ratio"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "stop_on_error",
+          "name": "stop_on_error",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "stop_on_error"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "validated_caption_list",
+          "name": "validated_caption_list",
+          "type": "STRING",
+          "shape": 6,
+          "slot_index": 0,
+          "links": [
+            14
+          ]
+        },
+        {
+          "localized_name": "qa_log",
+          "name": "qa_log",
+          "type": "STRING",
+          "slot_index": 1,
+          "links": null
+        },
+        {
+          "localized_name": "passed",
+          "name": "passed",
+          "type": "BOOLEAN",
+          "slot_index": 2,
+          "links": null
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "AnimaCaptionBatchGuard"
+      },
+      "widgets_values": [
+        5,
+        80,
+        0.35,
+        true
+      ]
+    }
+  ],
+  "links": [
+    [
+      1,
+      1,
+      0,
+      2,
+      0,
+      "TASK_LIST"
+    ],
+    [
+      2,
+      2,
+      0,
+      12,
+      0,
+      "IMAGE"
+    ],
+    [
+      6,
+      2,
+      1,
+      7,
+      1,
+      "IMAGE_RECORDS"
+    ],
+    [
+      7,
+      2,
+      2,
+      7,
+      0,
+      "TASK_LIST"
+    ],
+    [
+      9,
+      7,
+      0,
+      8,
+      0,
+      "TASK_LIST"
+    ],
+    [
+      10,
+      8,
+      0,
+      10,
+      0,
+      "TASK_LIST"
+    ],
+    [
+      11,
+      9,
+      0,
+      10,
+      1,
+      "ANIMA_TRAIN_CONFIG"
+    ],
+    [
+      12,
+      10,
+      0,
+      11,
+      0,
+      "STRING"
+    ],
+    [
+      8,
+      12,
+      0,
+      13,
+      0,
+      "STRING"
+    ],
+    [
+      13,
+      2,
+      1,
+      13,
+      1,
+      "IMAGE_RECORDS"
+    ],
+    [
+      14,
+      13,
+      0,
+      7,
+      2,
+      "STRING"
+    ]
+  ],
+  "groups": [],
+  "config": {},
+  "extra": {
+    "ds": {
+      "scale": 0.6082149427254829,
+      "offset": [
+        -1815.7711540530474,
+        -140.9369152097678
+      ]
+    },
+    "workflow_notes": {
+      "architecture": "Preserves the original eight-node training chain and all existing switches.",
+      "image_size": "896 for formal tagging; change node 2 back to 512 for fast preview.",
+      "required_custom_node": "ComfyUI-AstrAutoAnima-Workflow-Tools / AnimaCaptionBatchGuard"
+    }
+  },
+  "version": 0.4
+}

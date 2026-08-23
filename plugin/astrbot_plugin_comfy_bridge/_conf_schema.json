@@ -1,0 +1,369 @@
+{
+  "comfyui_base_url": {
+    "description": "ComfyUI API 地址",
+    "type": "string",
+    "default": "http://127.0.0.1:8188",
+    "hint": "填写 AstrBot 服务器能够访问的 ComfyUI 地址。"
+  },
+  "workflow_path": {
+    "description": "ComfyUI API 工作流 JSON 路径",
+    "type": "string",
+    "default": "/workspace/ComfyUI/user/default/workflows/anima_custom_flow_api.json",
+    "hint": "必须是 Save (API Format) 导出的 JSON。绝对路径或相对插件目录均可。"
+  },
+  "workflow_registry_path": {
+    "description": "Workflow Registry JSON 路径",
+    "type": "string",
+    "default": "data/workflow_registry.json",
+    "hint": "统一登记 Quick、Reverse、HQ 和 Refine 的版本、节点映射与 Profile。相对路径按插件目录解析。"
+  },
+  "hq_workflow_path": {
+    "description": "HQ ComfyUI API 工作流 JSON 路径",
+    "type": "string",
+    "default": "/workspace/ComfyUI/user/default/workflows/Anima_HQ_Txt2Img_Beta_api.json",
+    "hint": "HQ Stable/Beauty 共用一份拓扑，由 Profile 决定采样、放大和重绘参数。"
+  },
+  "refine_workflow_path": {
+    "description": "放大精修 ComfyUI API 工作流 JSON 路径",
+    "type": "string",
+    "default": "/workspace/ComfyUI/user/default/workflows/Anima_Refine_Existing_Beta_api.json",
+    "hint": "Refine Light/Medium 共用一份拓扑；Beta 默认不开启 Detailer 或 Tile。"
+  },
+  "job_store_path": {
+    "description": "统一 Job / Asset 记录目录",
+    "type": "string",
+    "default": "/workspace/astrbot-runtime/data/plugin_data/astrbot_plugin_comfy_bridge/job_store",
+    "hint": "使用独立 JSON 保存任务、父子关系、采样参数、LoRA 计划和图片哈希，不迁移现有数据库。"
+  },
+  "positive_prompt_node_id": {
+    "description": "正面提示词节点 ID",
+    "type": "string",
+    "default": "11",
+    "hint": "目标节点 inputs 中必须存在 text。"
+  },
+  "negative_prompt_node_id": {
+    "description": "负面提示词节点 ID",
+    "type": "string",
+    "default": "12",
+    "hint": "留空则不修改工作流里的负面提示词。"
+  },
+  "negative_prompt": {
+    "description": "固定负面提示词",
+    "type": "text",
+    "default": "",
+    "hint": "留空时保留 API 工作流原值。"
+  },
+  "positive_prefix": {
+    "description": "正面提示词前缀",
+    "type": "text",
+    "default": "",
+    "hint": "会放在用户提示词之前；留空不添加。"
+  },
+  "positive_suffix": {
+    "description": "正面提示词后缀",
+    "type": "text",
+    "default": "",
+    "hint": "会放在用户提示词之后；留空不添加。"
+  },
+  "preset_store_path": {
+    "description": "角色与画风预设 JSON 路径",
+    "type": "string",
+    "default": "/workspace/astrbot-runtime/data/plugin_data/astrbot_plugin_comfy_bridge/presets.json",
+    "hint": "管理员指令创建的预设会持久化到这里。"
+  },
+  "prompt_pool_path": {
+    "description": "随机好图提示词池 JSON 路径",
+    "type": "string",
+    "default": "/workspace/astrbot-runtime/data/plugin_data/astrbot_plugin_comfy_bridge/anima_random_prompt_pool.json",
+    "hint": "首次使用会复制插件内置提示词库；之后可通过管理指令查询、导入、导出和维护，升级时保留用户修改与删除墓碑。"
+  },
+  "sexual_protected_characters": {
+    "description": "S 组禁用角色名单",
+    "type": "text",
+    "default": "",
+    "hint": "填写后，这些角色即使被显式请求 S 组，也会强制改为 N/H。多个角色可用英文逗号、中文逗号、分号或换行分隔；按角色=名称进行不区分大小写的精确匹配。"
+  },
+  "random_quality_enabled": {
+    "description": "来张好图启用通用质量词",
+    "type": "bool",
+    "default": true
+  },
+  "random_quality_preset_name": {
+    "description": "来张好图质量词预设名",
+    "type": "string",
+    "default": "general",
+    "hint": "默认读取提示词池 quality_presets.general。"
+  },
+  "random_quality_prompt": {
+    "description": "来张好图质量词覆盖",
+    "type": "text",
+    "default": "",
+    "hint": "留空时使用提示词池内置预设；填写后完全覆盖。"
+  },
+  "text_provider_id": {
+    "description": "/aicn 文本模型 Provider ID",
+    "type": "string",
+    "default": "",
+    "hint": "留空时依次使用当前会话模型和 AstrBot 默认文本模型。"
+  },
+  "image_caption_provider_id": {
+    "description": "/aip 旧视觉模型 Provider ID",
+    "type": "string",
+    "default": "",
+    "hint": "仅在关闭专用反推工作流时使用；正常情况下无需配置。"
+  },
+  "llm_prompt_max_tokens": {
+    "description": "中文转换/旧反推最大输出 tokens",
+    "type": "int",
+    "default": 700
+  },
+  "show_converted_tags": {
+    "description": "/aicn 生图前回显转换 tags",
+    "type": "bool",
+    "default": true
+  },
+  "show_reversed_tags": {
+    "description": "/aip 生图前回显反推 tags",
+    "type": "bool",
+    "default": true
+  },
+  "image_wait_seconds": {
+    "description": "/aip 等待下一张图片秒数",
+    "type": "int",
+    "default": 60,
+    "hint": "只捕获同一用户在同一会话发送的第一张图片。"
+  },
+  "input_dir": {
+    "description": "反推输入图片临时目录",
+    "type": "string",
+    "default": "/workspace/astrbot-runtime/data/plugin_data/astrbot_plugin_comfy_bridge/inputs"
+  },
+  "reverse_workflow_enabled": {
+    "description": "/aip 启用专用反推工作流",
+    "type": "bool",
+    "default": true,
+    "hint": "启用后使用 WD-EVA02 + CLTagger v2 + JoyCaption Beta One 的 ComfyUI API 工作流。"
+  },
+  "reverse_workflow_path": {
+    "description": "反推 ComfyUI API 工作流 JSON 路径",
+    "type": "string",
+    "default": "/workspace/ComfyUI/user/default/workflows/Anima_WD_CT_JoyCaption_Reverse_Beta_api.json",
+    "hint": "使用工作流安装包内的 API 版本，不是普通界面工作流。"
+  },
+  "reverse_default_preset": {
+    "description": "/aip 默认反推模式",
+    "type": "string",
+    "default": "full",
+    "options": ["full", "scene", "action", "character", "safe", "raw"],
+    "hint": "指令可用 模式=场景 临时覆盖。"
+  },
+  "reverse_image_node_id": {
+    "description": "反推输入图片节点 ID",
+    "type": "string",
+    "default": "1"
+  },
+  "reverse_compiler_node_id": {
+    "description": "反推 Compiler 节点 ID",
+    "type": "string",
+    "default": "7"
+  },
+  "reverse_saver_node_id": {
+    "description": "反推结果保存节点 ID",
+    "type": "string",
+    "default": "8"
+  },
+  "reverse_history_dir": {
+    "description": "反推历史数据目录",
+    "type": "string",
+    "default": "/workspace/astrbot-runtime/data/plugin_data/astrbot_plugin_comfy_bridge/reverse_history",
+    "hint": "结构化结果默认标记为 pending_review，供以后审核并入随机提示词库。"
+  },
+  "reverse_save_thumbnail": {
+    "description": "反推历史保存 512px 缩略图",
+    "type": "bool",
+    "default": false,
+    "hint": "关闭可节省空间；结构化结果和图片哈希仍会保存。"
+  },
+  "five_draw_cooldown_seconds": {
+    "description": "非管理员五连抽冷却（秒）",
+    "type": "int",
+    "default": 150,
+    "hint": "按发送者账号独立计算；AstrBot 管理员不受冷却限制。设为 0 可关闭。"
+  },
+  "latent_node_id": {
+    "description": "画布尺寸节点 ID",
+    "type": "string",
+    "default": "28",
+    "hint": "当前工作流为 EmptyLatentImage 节点 28，必须同时包含 width 与 height。"
+  },
+  "default_width": {
+    "description": "默认画布宽度",
+    "type": "int",
+    "default": 1024
+  },
+  "default_height": {
+    "description": "默认画布高度",
+    "type": "int",
+    "default": 1536
+  },
+  "max_canvas_pixels": {
+    "description": "单张画布最大像素数",
+    "type": "int",
+    "default": 2359296,
+    "hint": "默认约等于 1536×1536，用于防止用户提交过大的画布。"
+  },
+  "style_lora_node_ids": {
+    "description": "画风 LoRA 槽位节点 ID",
+    "type": "string",
+    "default": "46,47,48,49",
+    "hint": "按工作流连接顺序填写，以英文逗号分隔。预设未使用的尾部槽位会在本次任务中旁路。"
+  },
+  "style_lora_mode": {
+    "description": "画风 LoRA 加载模式",
+    "type": "string",
+    "default": "dynamic",
+    "options": ["dynamic", "fixed"],
+    "hint": "dynamic 会在每次任务的内存工作流中创建标准 LoraLoader 链，不再受四槽限制；fixed 保持旧工作流槽位模式。"
+  },
+  "dynamic_style_node_id_start": {
+    "description": "动态画风节点起始 ID",
+    "type": "int",
+    "default": 900100,
+    "hint": "动态创建的标准 LoraLoader 从该 ID 开始递增，不能与工作流现有节点冲突。"
+  },
+  "max_dynamic_style_loras": {
+    "description": "单个画风最大 LoRA 数",
+    "type": "int",
+    "default": 16
+  },
+  "character_lora_node_id": {
+    "description": "动态角色 LoRA 节点 ID",
+    "type": "string",
+    "default": "900001",
+    "hint": "仅在选择角色预设时动态创建，必须避免与工作流现有节点 ID 重复。"
+  },
+  "default_style_preset": {
+    "description": "默认画风预设",
+    "type": "string",
+    "default": "",
+    "hint": "留空时不套用预设，保留基础工作流当前的 LoRA 构成。"
+  },
+  "style_auto_match": {
+    "description": "根据提示词字符串自动匹配画风预设",
+    "type": "bool",
+    "default": true,
+    "hint": "管理员可用 --match 为画风预设配置一个或多个识别字符串。"
+  },
+  "sampler_node_id": {
+    "description": "采样器节点 ID",
+    "type": "string",
+    "default": "19",
+    "hint": "用于修改 seed；留空则完全保留工作流种子。"
+  },
+  "dpm_sampler_name": {
+    "description": "DPM++ 2M 预设的采样器名称",
+    "type": "string",
+    "default": "dpmpp_2m",
+    "hint": "使用 采样器=dpm 时写入 KSampler.inputs.sampler_name。若想使用传统 DPM2，可改为 dpm_2。"
+  },
+  "dpm_sampler_steps": {
+    "description": "DPM++ 2M 预设采样步数",
+    "type": "int",
+    "default": 30
+  },
+  "dpm_sampler_cfg": {
+    "description": "DPM++ 2M 预设 CFG",
+    "type": "float",
+    "default": 6.0
+  },
+  "dpm_sampler_scheduler": {
+    "description": "DPM++ 2M 预设调度器",
+    "type": "string",
+    "default": "normal",
+    "hint": "保留当前工作流的 normal 调度器；需要时可改为 ComfyUI 支持的其他 scheduler。"
+  },
+  "dpm_2m_sde_sampler_name": {
+    "description": "DPM++ 2M SDE 预设的采样器名称",
+    "type": "string",
+    "default": "dpmpp_2m_sde",
+    "hint": "使用 采样器=2m_sde 时写入 KSampler.inputs.sampler_name。"
+  },
+  "dpm_2m_sde_sampler_steps": {
+    "description": "DPM++ 2M SDE 预设采样步数",
+    "type": "int",
+    "default": 30
+  },
+  "dpm_2m_sde_sampler_cfg": {
+    "description": "DPM++ 2M SDE 预设 CFG",
+    "type": "float",
+    "default": 6.0
+  },
+  "dpm_2m_sde_sampler_scheduler": {
+    "description": "DPM++ 2M SDE 预设调度器",
+    "type": "string",
+    "default": "normal"
+  },
+  "dpm_2m_sde_gpu_sampler_name": {
+    "description": "DPM++ 2M SDE GPU 预设的采样器名称",
+    "type": "string",
+    "default": "dpmpp_2m_sde_gpu",
+    "hint": "使用 采样器=2m_sde_gpu 时写入 KSampler.inputs.sampler_name。"
+  },
+  "dpm_2m_sde_gpu_sampler_steps": {
+    "description": "DPM++ 2M SDE GPU 预设采样步数",
+    "type": "int",
+    "default": 30
+  },
+  "dpm_2m_sde_gpu_sampler_cfg": {
+    "description": "DPM++ 2M SDE GPU 预设 CFG",
+    "type": "float",
+    "default": 6.0
+  },
+  "dpm_2m_sde_gpu_sampler_scheduler": {
+    "description": "DPM++ 2M SDE GPU 预设调度器",
+    "type": "string",
+    "default": "normal"
+  },
+  "randomize_seed": {
+    "description": "每次随机种子",
+    "type": "bool",
+    "default": true
+  },
+  "fixed_seed": {
+    "description": "固定种子",
+    "type": "int",
+    "default": 385214804456641,
+    "hint": "关闭随机种子时使用。"
+  },
+  "timeout_seconds": {
+    "description": "单次生成超时（秒）",
+    "type": "int",
+    "default": 300
+  },
+  "poll_interval_seconds": {
+    "description": "生成状态查询间隔（秒）",
+    "type": "float",
+    "default": 1.0
+  },
+  "max_images": {
+    "description": "单次最多返回图片数",
+    "type": "int",
+    "default": 4
+  },
+  "max_concurrency": {
+    "description": "最大并发生成数",
+    "type": "int",
+    "default": 1,
+    "hint": "单卡建议先设为 1。"
+  },
+  "send_progress": {
+    "description": "生成开始时发送提示",
+    "type": "bool",
+    "default": true
+  },
+  "output_dir": {
+    "description": "临时结果保存目录",
+    "type": "string",
+    "default": "/workspace/astrbot-runtime/data/plugin_data/astrbot_plugin_comfy_bridge/outputs"
+  }
+}
