@@ -1,0 +1,1247 @@
+{
+  "id": "af5bc88f-1184-4ba8-9d8f-89fa6b79fd02",
+  "revision": 0,
+  "last_node_id": 9,
+  "last_link_id": 20,
+  "nodes": [
+    {
+      "id": 1,
+      "type": "LoadImage",
+      "pos": [
+        20.0,
+        80.0
+      ],
+      "size": [
+        320.0,
+        360.0
+      ],
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "image",
+          "name": "image",
+          "type": "COMBO",
+          "widget": {
+            "name": "image"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "upload",
+          "name": "upload",
+          "type": "IMAGEUPLOAD",
+          "widget": {
+            "name": "upload"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "IMAGE",
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "slot_index": 0,
+          "links": [
+            1,
+            4,
+            7,
+            19,
+            20
+          ]
+        },
+        {
+          "localized_name": "MASK",
+          "name": "MASK",
+          "type": "MASK",
+          "slot_index": 1,
+          "links": null
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "LoadImage"
+      },
+      "widgets_values": [
+        "reverse_input.png",
+        "image"
+      ]
+    },
+    {
+      "id": 2,
+      "type": "Load Booru Tagger",
+      "pos": [
+        390.0,
+        40.0
+      ],
+      "size": [
+        340.0,
+        150.0
+      ],
+      "flags": {},
+      "order": 1,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "model_name",
+          "name": "model_name",
+          "type": "COMBO",
+          "widget": {
+            "name": "model_name"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "replace_underscore",
+          "name": "replace_underscore",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "replace_underscore"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "tagger_model",
+          "name": "tagger_model",
+          "type": "TAGGER_MODEL",
+          "slot_index": 0,
+          "links": [
+            2
+          ]
+        },
+        {
+          "localized_name": "tagger_info",
+          "name": "tagger_info",
+          "type": "TAGGER_INFO",
+          "slot_index": 1,
+          "links": [
+            3
+          ]
+        },
+        {
+          "localized_name": "threshold",
+          "name": "threshold",
+          "type": "FLOAT",
+          "slot_index": 2,
+          "links": null
+        },
+        {
+          "localized_name": "character_threshold",
+          "name": "character_threshold",
+          "type": "FLOAT",
+          "slot_index": 3,
+          "links": null
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "Load Booru Tagger"
+      },
+      "widgets_values": [
+        "wd-eva02-large-tagger-v3",
+        true
+      ]
+    },
+    {
+      "id": 3,
+      "type": "Booru Tagger",
+      "pos": [
+        780.0,
+        20.0
+      ],
+      "size": [
+        410.0,
+        310.0
+      ],
+      "flags": {},
+      "order": 4,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "tagger_model",
+          "name": "tagger_model",
+          "type": "TAGGER_MODEL",
+          "link": 2
+        },
+        {
+          "localized_name": "tagger_info",
+          "name": "tagger_info",
+          "type": "TAGGER_INFO",
+          "link": 3
+        },
+        {
+          "localized_name": "image",
+          "name": "image",
+          "type": "IMAGE",
+          "link": 1
+        },
+        {
+          "localized_name": "threshold",
+          "name": "threshold",
+          "type": "FLOAT",
+          "widget": {
+            "name": "threshold"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "character_threshold",
+          "name": "character_threshold",
+          "type": "FLOAT",
+          "widget": {
+            "name": "character_threshold"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "use_best_threshold",
+          "name": "use_best_threshold",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "use_best_threshold"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "trailing_comma",
+          "name": "trailing_comma",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "trailing_comma"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "sort_tags",
+          "name": "sort_tags",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "sort_tags"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "exclude_tags",
+          "name": "exclude_tags",
+          "type": "STRING",
+          "widget": {
+            "name": "exclude_tags"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "tags",
+          "name": "tags",
+          "type": "STRING",
+          "shape": 6,
+          "slot_index": 0,
+          "links": [
+            8
+          ]
+        },
+        {
+          "localized_name": "general_tags",
+          "name": "general_tags",
+          "type": "STRING",
+          "shape": 6,
+          "slot_index": 1,
+          "links": [
+            9
+          ]
+        },
+        {
+          "localized_name": "rating",
+          "name": "rating",
+          "type": "STRING",
+          "shape": 6,
+          "slot_index": 2,
+          "links": [
+            10
+          ]
+        },
+        {
+          "localized_name": "character_tags",
+          "name": "character_tags",
+          "type": "STRING",
+          "shape": 6,
+          "slot_index": 3,
+          "links": [
+            11
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "Booru Tagger"
+      },
+      "widgets_values": [
+        0.45,
+        0.85,
+        false,
+        false,
+        false,
+        ""
+      ]
+    },
+    {
+      "id": 4,
+      "type": "Load Booru Tagger",
+      "pos": [
+        390.0,
+        260.0
+      ],
+      "size": [
+        340.0,
+        150.0
+      ],
+      "flags": {},
+      "order": 2,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "model_name",
+          "name": "model_name",
+          "type": "COMBO",
+          "widget": {
+            "name": "model_name"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "replace_underscore",
+          "name": "replace_underscore",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "replace_underscore"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "tagger_model",
+          "name": "tagger_model",
+          "type": "TAGGER_MODEL",
+          "slot_index": 0,
+          "links": [
+            5
+          ]
+        },
+        {
+          "localized_name": "tagger_info",
+          "name": "tagger_info",
+          "type": "TAGGER_INFO",
+          "slot_index": 1,
+          "links": [
+            6
+          ]
+        },
+        {
+          "localized_name": "threshold",
+          "name": "threshold",
+          "type": "FLOAT",
+          "slot_index": 2,
+          "links": null
+        },
+        {
+          "localized_name": "character_threshold",
+          "name": "character_threshold",
+          "type": "FLOAT",
+          "slot_index": 3,
+          "links": null
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "Load Booru Tagger"
+      },
+      "widgets_values": [
+        "cl-tagger-v2-v2_00",
+        true
+      ]
+    },
+    {
+      "id": 5,
+      "type": "Booru Tagger",
+      "pos": [
+        780.0,
+        360.0
+      ],
+      "size": [
+        410.0,
+        310.0
+      ],
+      "flags": {},
+      "order": 5,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "tagger_model",
+          "name": "tagger_model",
+          "type": "TAGGER_MODEL",
+          "link": 5
+        },
+        {
+          "localized_name": "tagger_info",
+          "name": "tagger_info",
+          "type": "TAGGER_INFO",
+          "link": 6
+        },
+        {
+          "localized_name": "image",
+          "name": "image",
+          "type": "IMAGE",
+          "link": 4
+        },
+        {
+          "localized_name": "threshold",
+          "name": "threshold",
+          "type": "FLOAT",
+          "widget": {
+            "name": "threshold"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "character_threshold",
+          "name": "character_threshold",
+          "type": "FLOAT",
+          "widget": {
+            "name": "character_threshold"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "use_best_threshold",
+          "name": "use_best_threshold",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "use_best_threshold"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "trailing_comma",
+          "name": "trailing_comma",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "trailing_comma"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "sort_tags",
+          "name": "sort_tags",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "sort_tags"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "exclude_tags",
+          "name": "exclude_tags",
+          "type": "STRING",
+          "widget": {
+            "name": "exclude_tags"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "tags",
+          "name": "tags",
+          "type": "STRING",
+          "shape": 6,
+          "slot_index": 0,
+          "links": [
+            12
+          ]
+        },
+        {
+          "localized_name": "general_tags",
+          "name": "general_tags",
+          "type": "STRING",
+          "shape": 6,
+          "slot_index": 1,
+          "links": [
+            13
+          ]
+        },
+        {
+          "localized_name": "rating",
+          "name": "rating",
+          "type": "STRING",
+          "shape": 6,
+          "slot_index": 2,
+          "links": [
+            14
+          ]
+        },
+        {
+          "localized_name": "character_tags",
+          "name": "character_tags",
+          "type": "STRING",
+          "shape": 6,
+          "slot_index": 3,
+          "links": [
+            15
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "Booru Tagger"
+      },
+      "widgets_values": [
+        0.55,
+        0.55,
+        false,
+        false,
+        false,
+        ""
+      ]
+    },
+    {
+      "id": 6,
+      "type": "JJC_JoyCaption_Custom_GGUF",
+      "pos": [
+        390.0,
+        520.0
+      ],
+      "size": [
+        720.0,
+        560.0
+      ],
+      "flags": {},
+      "order": 3,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "image",
+          "name": "image",
+          "type": "IMAGE",
+          "link": 7
+        },
+        {
+          "localized_name": "gguf_model",
+          "name": "gguf_model",
+          "type": "COMBO",
+          "widget": {
+            "name": "gguf_model"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "mmproj_file",
+          "name": "mmproj_file",
+          "type": "COMBO",
+          "widget": {
+            "name": "mmproj_file"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "n_gpu_layers",
+          "name": "n_gpu_layers",
+          "type": "INT",
+          "widget": {
+            "name": "n_gpu_layers"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "n_ctx",
+          "name": "n_ctx",
+          "type": "INT",
+          "widget": {
+            "name": "n_ctx"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "system_prompt",
+          "name": "system_prompt",
+          "type": "STRING",
+          "widget": {
+            "name": "system_prompt"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "user_query",
+          "name": "user_query",
+          "type": "STRING",
+          "widget": {
+            "name": "user_query"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "max_new_tokens",
+          "name": "max_new_tokens",
+          "type": "INT",
+          "widget": {
+            "name": "max_new_tokens"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "temperature",
+          "name": "temperature",
+          "type": "FLOAT",
+          "widget": {
+            "name": "temperature"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "top_p",
+          "name": "top_p",
+          "type": "FLOAT",
+          "widget": {
+            "name": "top_p"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "top_k",
+          "name": "top_k",
+          "type": "INT",
+          "widget": {
+            "name": "top_k"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "seed",
+          "name": "seed",
+          "type": "INT",
+          "widget": {
+            "name": "seed"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "unload_after_generate",
+          "name": "unload_after_generate",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "unload_after_generate"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "STRING",
+          "name": "STRING",
+          "type": "STRING",
+          "slot_index": 0,
+          "links": [
+            16
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "JJC_JoyCaption_Custom_GGUF"
+      },
+      "widgets_values": [
+        "llama-joycaption-beta-one-hf-llava.Q6_K.gguf",
+        "llama-joycaption-beta-one-llava-mmproj-model-f16.gguf",
+        -1,
+        4096,
+        "You are the visual analysis branch of an Anima reverse-prompt compiler. Return one valid JSON object only. Do not use markdown. Use concise lowercase English Danbooru-style tags inside arrays. Do not invent artist names, copyright names, model names, quality tags, or hidden details. If uncertain, omit the item. Safety must follow the visible image, not assumptions.",
+        "Analyze the image and return exactly this JSON shape: {\"scene\":[],\"action\":[],\"character\":[],\"appearance\":[],\"clothing\":[],\"composition\":[],\"other\":[],\"safety\":{\"level\":\"normal|nsfw|sexual|uncertain\",\"reasons\":[]}}. Scene covers environment, time, weather and lighting. Action covers pose, interaction and movement. Character covers recognized identity only when visually reliable. Appearance covers visible physical features. Clothing covers garments and accessories. Composition covers shot type, angle, viewpoint and depth of field. The safety policy is: normal includes ordinary content, underwear and non-explicit body exposure up to approximately R15; nsfw includes complete nudity without sexual activity; sexual includes sexual acts or emphasized genitals. Output JSON only.",
+        768,
+        0.2,
+        0.9,
+        40,
+        12345,
+        false
+      ]
+    },
+    {
+      "id": 7,
+      "type": "AnimaReverseCompiler",
+      "pos": [
+        1260.0,
+        140.0
+      ],
+      "size": [
+    560.0,
+    760.0
+      ],
+      "flags": {},
+      "order": 6,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "wd_tags",
+          "name": "wd_tags",
+          "type": "STRING",
+          "link": 8
+        },
+        {
+          "localized_name": "wd_general",
+          "name": "wd_general",
+          "type": "STRING",
+          "link": 9
+        },
+        {
+          "localized_name": "wd_rating",
+          "name": "wd_rating",
+          "type": "STRING",
+          "link": 10
+        },
+        {
+          "localized_name": "wd_character",
+          "name": "wd_character",
+          "type": "STRING",
+          "link": 11
+        },
+        {
+          "localized_name": "ct_tags",
+          "name": "ct_tags",
+          "type": "STRING",
+          "link": 12
+        },
+        {
+          "localized_name": "ct_general",
+          "name": "ct_general",
+          "type": "STRING",
+          "link": 13
+        },
+        {
+          "localized_name": "ct_rating",
+          "name": "ct_rating",
+          "type": "STRING",
+          "link": 14
+        },
+        {
+          "localized_name": "ct_character",
+          "name": "ct_character",
+          "type": "STRING",
+          "link": 15
+        },
+        {
+          "localized_name": "joy_caption",
+          "name": "joy_caption",
+          "type": "STRING",
+          "link": 16
+        },
+        {
+          "localized_name": "preset",
+          "name": "preset",
+          "type": "COMBO",
+          "widget": {
+            "name": "preset"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "include_scene",
+          "name": "include_scene",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "include_scene"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "include_action",
+          "name": "include_action",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "include_action"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "include_character",
+          "name": "include_character",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "include_character"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "include_appearance",
+          "name": "include_appearance",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "include_appearance"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "include_clothing",
+          "name": "include_clothing",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "include_clothing"
+          },
+          "link": null
+        },
+    {
+      "localized_name": "include_composition",
+          "name": "include_composition",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "include_composition"
+          },
+      "link": null
+    },
+    {
+      "localized_name": "include_other",
+      "name": "include_other",
+      "type": "BOOLEAN",
+      "widget": {
+        "name": "include_other"
+      },
+      "link": null
+    },
+    {
+          "localized_name": "include_safety",
+          "name": "include_safety",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "include_safety"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "anima_prompt",
+          "name": "anima_prompt",
+          "type": "STRING",
+          "slot_index": 0,
+          "links": [
+            17
+          ]
+        },
+        {
+          "localized_name": "structured_json",
+          "name": "structured_json",
+          "type": "STRING",
+          "slot_index": 1,
+          "links": [
+            18
+          ]
+        },
+        {
+          "localized_name": "safety_level",
+          "name": "safety_level",
+          "type": "STRING",
+          "slot_index": 2,
+          "links": null
+        },
+        {
+          "localized_name": "summary",
+          "name": "summary",
+          "type": "STRING",
+          "slot_index": 3,
+          "links": null
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "AnimaReverseCompiler"
+      },
+      "widgets_values": [
+        "full",
+        true,
+        true,
+        true,
+        true,
+    true,
+    true,
+    true,
+    true
+      ]
+    },
+    {
+      "id": 8,
+      "type": "AnimaReverseResultSaver",
+      "pos": [
+        1900.0,
+        140.0
+      ],
+      "size": [
+        520.0,
+        500.0
+      ],
+      "flags": {},
+      "order": 7,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "image",
+          "name": "image",
+          "type": "IMAGE",
+          "link": 19
+        },
+        {
+          "localized_name": "structured_json",
+          "name": "structured_json",
+          "type": "STRING",
+          "link": 18
+        },
+        {
+          "localized_name": "anima_prompt",
+          "name": "anima_prompt",
+          "type": "STRING",
+          "link": 17
+        },
+        {
+          "localized_name": "storage_root",
+          "name": "storage_root",
+          "type": "STRING",
+          "widget": {
+            "name": "storage_root"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "qq_user_id",
+          "name": "qq_user_id",
+          "type": "STRING",
+          "widget": {
+            "name": "qq_user_id"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "session_type",
+          "name": "session_type",
+          "type": "COMBO",
+          "widget": {
+            "name": "session_type"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "session_id",
+          "name": "session_id",
+          "type": "STRING",
+          "widget": {
+            "name": "session_id"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "role_preset",
+          "name": "role_preset",
+          "type": "STRING",
+          "widget": {
+            "name": "role_preset"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "style_preset",
+          "name": "style_preset",
+          "type": "STRING",
+          "widget": {
+            "name": "style_preset"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "save_thumbnail",
+          "name": "save_thumbnail",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "save_thumbnail"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "record_path",
+          "name": "record_path",
+          "type": "STRING",
+          "slot_index": 0,
+          "links": null
+        },
+        {
+          "localized_name": "reverse_id",
+          "name": "reverse_id",
+          "type": "STRING",
+          "slot_index": 1,
+          "links": null
+        },
+        {
+          "localized_name": "structured_json",
+          "name": "structured_json",
+          "type": "STRING",
+          "slot_index": 2,
+          "links": null
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "AnimaReverseResultSaver"
+      },
+      "widgets_values": [
+        "astr_auto_anima/reverse_history",
+        "",
+        "unknown",
+        "",
+        "",
+        "",
+        false
+      ]
+    },
+    {
+      "id": 9,
+      "type": "PreviewImage",
+      "pos": [
+        20.0,
+        500.0
+      ],
+      "size": [
+        320.0,
+        340.0
+      ],
+      "flags": {},
+      "order": 8,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "images",
+          "name": "images",
+          "type": "IMAGE",
+          "link": 20
+        }
+      ],
+      "outputs": [],
+      "properties": {
+        "Node name for S&R": "PreviewImage"
+      },
+      "widgets_values": []
+    }
+  ],
+  "links": [
+    [
+      1,
+      1,
+      0,
+      3,
+      2,
+      "IMAGE"
+    ],
+    [
+      2,
+      2,
+      0,
+      3,
+      0,
+      "TAGGER_MODEL"
+    ],
+    [
+      3,
+      2,
+      1,
+      3,
+      1,
+      "TAGGER_INFO"
+    ],
+    [
+      4,
+      1,
+      0,
+      5,
+      2,
+      "IMAGE"
+    ],
+    [
+      5,
+      4,
+      0,
+      5,
+      0,
+      "TAGGER_MODEL"
+    ],
+    [
+      6,
+      4,
+      1,
+      5,
+      1,
+      "TAGGER_INFO"
+    ],
+    [
+      7,
+      1,
+      0,
+      6,
+      0,
+      "IMAGE"
+    ],
+    [
+      8,
+      3,
+      0,
+      7,
+      0,
+      "STRING"
+    ],
+    [
+      9,
+      3,
+      1,
+      7,
+      1,
+      "STRING"
+    ],
+    [
+      10,
+      3,
+      2,
+      7,
+      2,
+      "STRING"
+    ],
+    [
+      11,
+      3,
+      3,
+      7,
+      3,
+      "STRING"
+    ],
+    [
+      12,
+      5,
+      0,
+      7,
+      4,
+      "STRING"
+    ],
+    [
+      13,
+      5,
+      1,
+      7,
+      5,
+      "STRING"
+    ],
+    [
+      14,
+      5,
+      2,
+      7,
+      6,
+      "STRING"
+    ],
+    [
+      15,
+      5,
+      3,
+      7,
+      7,
+      "STRING"
+    ],
+    [
+      16,
+      6,
+      0,
+      7,
+      8,
+      "STRING"
+    ],
+    [
+      17,
+      7,
+      0,
+      8,
+      2,
+      "STRING"
+    ],
+    [
+      18,
+      7,
+      1,
+      8,
+      1,
+      "STRING"
+    ],
+    [
+      19,
+      1,
+      0,
+      8,
+      0,
+      "IMAGE"
+    ],
+    [
+      20,
+      1,
+      0,
+      9,
+      0,
+      "IMAGE"
+    ]
+  ],
+  "groups": [
+    {
+      "id": 1,
+      "title": "输入图片",
+      "bounding": [
+        0,
+        20,
+        360,
+        840
+      ],
+      "color": "#3f789e",
+      "font_size": 24
+    },
+    {
+      "id": 2,
+      "title": "WD / CT / JoyCaption",
+      "bounding": [
+        370,
+        0,
+        850,
+        1100
+      ],
+      "color": "#8a6d3b",
+      "font_size": 24
+    },
+    {
+      "id": 3,
+      "title": "Compiler 与存档",
+      "bounding": [
+        1230,
+        80,
+        1230,
+        820
+      ],
+      "color": "#536d4c",
+      "font_size": 24
+    }
+  ],
+  "config": {},
+  "extra": {
+    "ds": {
+      "scale": 0.7,
+      "offset": [
+        -20,
+        20
+      ]
+    },
+    "workflow_notes": {
+      "purpose": "WD + CL Tagger v2.00 + JoyCaption Beta One Q6_K reverse workflow.",
+      "required_custom_nodes": [
+        "nestflow/ComfyUI-Booru-Tagger",
+        "judian17/ComfyUI-joycaption-beta-one-GGUF",
+        "ComfyUI-AstrAutoAnima-Workflow-Tools"
+      ]
+    }
+  },
+  "version": 0.4
+}

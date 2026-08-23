@@ -1,0 +1,17 @@
+name: astrbot_plugin_comfy_bridge
+display_name: AAA ComfyUI 工作流桥接
+short_desc: Anima Quick、HQ、放大重修与图片反推的多工作流桥接。
+desc: |
+  为 AstrBot 提供 /aimg、/ahq、/arefine、随机好图、混沌时刻、/aicn 和 /aip。
+  保留提示词池、动态 LoRA、画布、采样器与反推历史，并新增 Workflow Registry、
+  Job/Asset 元数据和 HQ/放大重修 Beta。
+version: 0.3.1-beta.1
+author: RelN
+repo: "https://github.com/kemomimicon/AstrAutoAnima"
+astrbot_version: ">=4.17,<5"
+support_platforms:
+  - aiocqhttp
+tags:
+  - comfyui
+  - image-generation
+  - workflow

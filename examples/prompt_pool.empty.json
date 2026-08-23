@@ -1,0 +1,20 @@
+{
+  "schema_version": 2,
+  "catalog_revision": 1,
+  "release_version": "user-library",
+  "source_groups": {
+    "B": {"name": "basic", "default": true},
+    "G": {"name": "generate", "default": true},
+    "D": {"name": "discord", "default": true},
+    "C": {"name": "codex", "default": false},
+    "R": {"name": "reverse", "default": false}
+  },
+  "safety_groups": {
+    "N": {"name": "normal", "default": true},
+    "H": {"name": "nsfw", "default": true},
+    "S": {"name": "sexual", "default": false}
+  },
+  "quality_presets": {"general": ""},
+  "prompts": [],
+  "deleted_prompt_ids": []
+}

@@ -1,0 +1,91 @@
+{
+  "1": {
+    "class_type": "LoadImage",
+    "inputs": {"image": "refine_input.png"},
+    "_meta": {"title": "精修输入图片"}
+  },
+  "2": {
+    "class_type": "ImageScaleBy",
+    "inputs": {"upscale_method": "lanczos", "scale_by": 1.25, "image": ["1", 0]},
+    "_meta": {"title": "图像放大"}
+  },
+  "3": {
+    "class_type": "VAEEncode",
+    "inputs": {"pixels": ["2", 0], "vae": ["15", 0]},
+    "_meta": {"title": "VAE 编码"}
+  },
+  "8": {
+    "class_type": "VAEDecode",
+    "inputs": {"samples": ["19", 0], "vae": ["15", 0]},
+    "_meta": {"title": "VAE 解码"}
+  },
+  "9": {
+    "class_type": "SaveImage",
+    "inputs": {"filename_prefix": "astrbot/refine", "images": ["8", 0]},
+    "_meta": {"title": "保存精修图像"}
+  },
+  "11": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {"text": "1girl, solo", "clip": ["49", 1]},
+    "_meta": {"title": "恢复的正面提示词"}
+  },
+  "12": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "text": "worst quality, low quality, score_1, score_2, score_3, blurry, jpeg artifacts, malformed hands, extra fingers, missing fingers, watermark, signature, logo, unreadable text",
+      "clip": ["49", 1]
+    },
+    "_meta": {"title": "恢复的负面提示词"}
+  },
+  "15": {
+    "class_type": "VAELoader",
+    "inputs": {"vae_name": "YOUR_ANIMA_VAE.safetensors"},
+    "_meta": {"title": "加载 VAE"}
+  },
+  "19": {
+    "class_type": "KSampler",
+    "inputs": {
+      "seed": 385214804456641,
+      "steps": 18,
+      "cfg": 4.5,
+      "sampler_name": "er_sde",
+      "scheduler": "normal",
+      "denoise": 0.25,
+      "model": ["49", 0],
+      "positive": ["11", 0],
+      "negative": ["12", 0],
+      "latent_image": ["3", 0]
+    },
+    "_meta": {"title": "同 Anima 低重绘精修"}
+  },
+  "44": {
+    "class_type": "UNETLoader",
+    "inputs": {"unet_name": "YOUR_ANIMA_UNET.safetensors", "weight_dtype": "default"},
+    "_meta": {"title": "加载 Anima UNet"}
+  },
+  "45": {
+    "class_type": "CLIPLoader",
+    "inputs": {"clip_name": "YOUR_ANIMA_CLIP.safetensors", "type": "stable_diffusion", "device": "default"},
+    "_meta": {"title": "加载 CLIP"}
+  },
+  "46": {
+    "class_type": "LoraLoader",
+    "inputs": {"lora_name": "YOUR_STYLE_LORA_1.safetensors", "strength_model": 0.0, "strength_clip": 0.0, "model": ["44", 0], "clip": ["45", 0]},
+    "_meta": {"title": "画风 LoRA 1"}
+  },
+  "47": {
+    "class_type": "LoraLoader",
+    "inputs": {"lora_name": "YOUR_STYLE_LORA_2.safetensors", "strength_model": 0.0, "strength_clip": 0.0, "model": ["46", 0], "clip": ["46", 1]},
+    "_meta": {"title": "画风 LoRA 2"}
+  },
+  "48": {
+    "class_type": "LoraLoader",
+    "inputs": {"lora_name": "YOUR_STYLE_LORA_3.safetensors", "strength_model": 0.0, "strength_clip": 0.0, "model": ["47", 0], "clip": ["47", 1]},
+    "_meta": {"title": "画风 LoRA 3"}
+  },
+  "49": {
+    "class_type": "LoraLoader",
+    "inputs": {"lora_name": "YOUR_STYLE_LORA_4.safetensors", "strength_model": 0.0, "strength_clip": 0.0, "model": ["48", 0], "clip": ["48", 1]},
+    "_meta": {"title": "画风 LoRA 4"}
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "release": "0.3.1-beta.1",
+  "status": "beta",
+  "components": {
+    "astrbot_plugin_comfy_bridge": "0.3.1-beta.1",
+    "astr_auto_anima_hub_service": "0.3.8.dev2",
+    "astr_auto_anima_hub_client": "0.3.8-dev.3+14",
+    "workflow_pack": "0.2.0-beta.1"
+  },
+  "compatibility": {
+    "astrbot": ">=4.17,<5",
+    "anima_master_tested": "0.7.2",
+    "anima_master_untested": ["0.8.0"],
+    "python": ">=3.10"
+  },
+  "private_data_included": false,
+  "bundled_prompt_count": 0,
+  "models_included": false
+}

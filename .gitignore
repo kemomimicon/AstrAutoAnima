@@ -1,0 +1,70 @@
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*token*.csv
+lite_users.json
+delivery_targets.json
+
+# Private runtime data
+presets.json
+reverse_history/
+job_store/
+hub_state/
+outputs/
+inputs/
+logs/
+*.log
+*.backup*
+*.bak
+
+# Prompt libraries are user data; only explicit empty/example files are public.
+anima_random_prompt_pool.json
+prompt_pool*.json
+!plugin/astrbot_plugin_comfy_bridge/data/anima_random_prompt_pool.json
+!examples/prompt_pool.empty.json
+
+# Models and generated media
+*.safetensors
+*.ckpt
+*.pt
+*.pth
+*.onnx
+*.onnx.data
+*.gguf
+*.png
+*.jpg
+*.jpeg
+*.webp
+*.gif
+*.mp4
+!clients/flutter/android/app/src/main/res/**/*.png
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+
+# Flutter / Android / Windows builds
+.dart_tool/
+.flutter-plugins*
+build/
+android/.gradle/
+android/local.properties
+windows/flutter/ephemeral/
+*.iml
+.idea/
+
+# Editors and OS
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Release output
+dist/
+release_artifacts/

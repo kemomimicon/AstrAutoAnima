@@ -1,0 +1,20 @@
+{
+  "targets": [
+    {
+      "id": "main-group",
+      "label": "主群",
+      "kind": "group",
+      "umo": "your-bot-id:GroupMessage:123456789",
+      "allow_safety": ["N", "H"],
+      "enabled": true
+    },
+    {
+      "id": "owner-private",
+      "label": "管理员私聊",
+      "kind": "private",
+      "umo": "your-bot-id:FriendMessage:987654321",
+      "allow_safety": ["N", "H", "S"],
+      "enabled": true
+    }
+  ]
+}
