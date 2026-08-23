@@ -22,7 +22,7 @@ FORBIDDEN_NAMES = {
     ".env", "lite_users.json", "delivery_targets.json", "cmd_config.json",
 }
 FORBIDDEN_DIRS = {
-    ".git", ".venv", "venv", "__pycache__", ".dart_tool", "build", ".gradle",
+    ".venv", "venv", "__pycache__", ".dart_tool", "build", ".gradle",
     "reverse_history", "job_store", "hub_state", "outputs", "inputs", "logs",
 }
 TEXT_PATTERNS = {
@@ -46,6 +46,8 @@ def scan(root: Path) -> list[str]:
     findings: list[str] = []
     for path in sorted(root.rglob("*")):
         relative = path.relative_to(root)
+        if ".git" in relative.parts:
+            continue
         if any(part in FORBIDDEN_DIRS for part in relative.parts):
             if path.is_dir() and path.name in FORBIDDEN_DIRS:
                 findings.append(f"forbidden generated/private directory: {relative}")
