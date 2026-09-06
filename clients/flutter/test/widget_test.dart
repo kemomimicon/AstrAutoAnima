@@ -7,13 +7,58 @@
 
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:astr_auto_anima_hub_client/app.dart';
+import 'package:astr_auto_anima_hub_client/core/app_edition.dart';
 import 'package:astr_auto_anima_hub_client/core/models.dart';
 import 'package:astr_auto_anima_hub_client/core/command_builder.dart';
+import 'package:astr_auto_anima_hub_client/core/compshare_api.dart';
+import 'package:astr_auto_anima_hub_client/core/notification_service.dart';
 import 'package:astr_auto_anima_hub_client/core/server_online_tracker.dart';
+import 'package:astr_auto_anima_hub_client/core/session_store.dart';
 import 'package:astr_auto_anima_hub_client/features/lite/lite_prompt_details_dialog.dart';
 import 'package:flutter/material.dart';
 
 void main() {
+  test('CompShare signing sorts parameters before SHA1', () {
+    expect(
+      CompShareApi.signature({'B': '2', 'A': '1'}, 'secret'),
+      '9f9dc06a555e0a6a59bb6050e16c32ae3b119f72',
+    );
+  });
+
+  test('parses CompShare instance state and GPU information', () {
+    final instance = CompShareInstance.fromJson({
+      'UHostId': 'uhost-example',
+      'Name': 'Anima Workstation',
+      'State': 'Stopped',
+      'Region': 'cn-wlcb',
+      'Zone': 'cn-wlcb-01',
+      'GpuType': 'RTX 5090',
+      'GPU': 1,
+      'InstancePrice': 3.5,
+      'SupportWithoutGpuStart': true,
+    });
+
+    expect(instance.isStopped, isTrue);
+    expect(instance.gpuType, 'RTX 5090');
+    expect(instance.supportWithoutGpuStart, isTrue);
+  });
+
+  testWidgets('service edition opens in fixed Lite connection mode',
+      (tester) async {
+    await tester.pumpWidget(
+      AstrAutoAnimaApp(
+        store: SessionStore(),
+        notificationService: NotificationService(),
+        initialSession: const HubSession(baseUrl: '', token: ''),
+        edition: AppEdition.service,
+      ),
+    );
+
+    expect(find.text('使用用户令牌连接轻量跑图端'), findsOneWidget);
+    expect(find.text('管理端'), findsNothing);
+  });
+
   test('parses a prompt record returned by Hub Service', () {
     final record = PromptRecord.fromJson({
       'id': 'discord-0001',
@@ -30,6 +75,100 @@ void main() {
     expect(record.sourceCode, 'D');
     expect(record.weight, 2);
     expect(record.categories, ['rain', 'night']);
+  });
+
+  test('parses live workstation metrics including GPU and VRAM', () {
+    final metrics = WorkstationMetrics.fromJson({
+      'collected_at': '2026-08-31T12:00:00Z',
+      'cpu_percent': 37.5,
+      'cpu_logical_count': 32,
+      'load_average_1m': 2.25,
+      'load_average_5m': 1.75,
+      'load_average_15m': 1.5,
+      'memory': {
+        'total_bytes': 68719476736,
+        'used_bytes': 21474836480,
+        'available_bytes': 47244640256,
+        'utilization_percent': 31.25,
+      },
+      'gpus': [
+        {
+          'index': 0,
+          'name': 'NVIDIA GeForce RTX 5090',
+          'utilization_percent': 82,
+          'memory_total_mib': 32607,
+          'memory_used_mib': 16384,
+          'memory_free_mib': 16223,
+          'memory_utilization_percent': 50.25,
+          'temperature_c': 61,
+        },
+      ],
+    });
+
+    expect(metrics.cpuPercent, 37.5);
+    expect(metrics.memory.utilizationPercent, 31.25);
+    expect(metrics.gpus.single.name, 'NVIDIA GeForce RTX 5090');
+    expect(metrics.gpus.single.memoryUsedMib, 16384);
+  });
+
+  test('parses Chinese and English character dictionary results', () {
+    final result = CharacterDictionaryResult.fromJson({
+      'available': true,
+      'query': '初音未来',
+      'total': 1,
+      'items': [
+        {
+          'tag': 'hatsune_miku',
+          'chinese_names': ['初音未来'],
+          'aliases': ['初音未来', 'hatsune miku'],
+          'copyright': ['vocaloid'],
+          'gender': ['1girl'],
+          'appearance': ['aqua hair', 'twintails'],
+          'post_count': 100,
+          'weak_prompt': 'hatsune_miku, vocaloid',
+          'strong_prompt':
+              'hatsune_miku, vocaloid, 1girl, aqua hair, twintails',
+        },
+      ],
+    });
+
+    expect(result.available, isTrue);
+    expect(result.items.single.tag, 'hatsune_miku');
+    expect(result.items.single.chineseNames, ['初音未来']);
+    expect(result.items.single.strongPrompt, contains('twintails'));
+  });
+
+  test('parses Lite user list and one-time issued token', () {
+    final users = LiteUserListResult.fromJson({
+      'revision': 'rev-1',
+      'items': [
+        {
+          'id': 'qq-123456789',
+          'qq': '123456789',
+          'label': 'Member',
+          'allow_group': false,
+          'enabled': true,
+        },
+      ],
+    });
+    final issued = LiteUserIssueResult.fromJson({
+      'action': 'created',
+      'revision': 'rev-2',
+      'token': 'aah_u_example_one_time_token_1234567890',
+      'user': {
+        'id': 'qq-123456789',
+        'qq': '123456789',
+        'label': 'Member',
+        'allow_group': false,
+        'enabled': true,
+      },
+    });
+
+    expect(users.items.single.qq, '123456789');
+    expect(users.items.single.allowGroup, isFalse);
+    expect(users.revision, 'rev-1');
+    expect(issued.action, 'created');
+    expect(issued.token, startsWith('aah_u_'));
   });
 
   testWidgets(
@@ -83,24 +222,25 @@ void main() {
     expect(
       buildImageCommand(
         kind: ImageCommandKind.direct,
-        character: 'demo_character',
-        style: 'demo_style',
+        character: 'example_character',
+        style: 'example_style',
         ratio: '2:3',
         sampler: '2m',
+        scheduler: 'karras',
         steps: 36,
         cfg: 5.5,
         prompt: 'rainy street',
       ),
-      '/aimg 角色=demo_character 画风=demo_style 比例=2:3 采样器=2m 步数=36 CFG=5.5 rainy street',
+      '/aimg 角色=example_character 角色模式=弱 画风=example_style 比例=2:3 采样器=2m 调度器=karras 步数=36 CFG=5.5 rainy street',
     );
     expect(
       buildImageCommand(
         kind: ImageCommandKind.random,
         fiveDraw: true,
         poolFilter: 'C/H',
-        style: 'demo_style',
+        style: 'soft_style',
       ),
-      '来张好图五连抽 C/H 画风=demo_style',
+      '来张好图五连抽 C/H 画风=soft_style',
     );
   });
 
@@ -114,9 +254,10 @@ void main() {
         style: 'ignored',
         ratio: '1:1',
         sampler: '2m_sde_gpu',
+        scheduler: 'beta',
         prompt: 'rainy night',
       ),
-      '来张好图混沌五连抽 D/N 采样器=2m_sde_gpu rainy night',
+      '来张好图混沌五连抽 D/N 采样器=2m_sde_gpu 调度器=beta rainy night',
     );
   });
 
@@ -124,21 +265,21 @@ void main() {
     expect(
       buildImageCommand(
         kind: ImageCommandKind.chinese,
-        character: 'demo_character',
-        style: 'demo_style',
+        character: 'example_character',
+        style: 'example_style',
         prompt: '雨夜里撑伞',
       ),
-      '/aicn 角色=demo_character 画风=demo_style 雨夜里撑伞',
+      '/aicn 角色=example_character 角色模式=弱 画风=example_style 雨夜里撑伞',
     );
     expect(
       buildImageCommand(
         kind: ImageCommandKind.reverse,
         reversePreset: 'scene',
-        character: 'demo_character_2',
-        style: 'demo_style',
+        character: 'second_character',
+        style: 'soft_style',
         prompt: 'transparent umbrella',
       ),
-      '/aip 模式=scene 角色=demo_character_2 画风=demo_style transparent umbrella',
+      '/aip 模式=scene 角色=second_character 角色模式=弱 画风=soft_style transparent umbrella',
     );
     expect(
       buildImageCommand(
@@ -155,8 +296,8 @@ void main() {
       buildImageCommand(
         kind: ImageCommandKind.hq,
         profile: 'beauty',
-        character: 'demo_character',
-        style: 'demo_style',
+        character: 'example_character',
+        style: 'example_style',
         ratio: '2:3',
         sampler: '2m_sde_gpu',
         steps: 38,
@@ -165,7 +306,7 @@ void main() {
         denoise: 0.3,
         prompt: 'rainy street',
       ),
-      '/ahq beauty 角色=demo_character 画风=demo_style 比例=2:3 '
+      '/ahq beauty 角色=example_character 角色模式=弱 画风=example_style 比例=2:3 '
       '采样器=2m_sde_gpu 步数=38 CFG=4.5 放大=1.5 重绘=0.3 rainy street',
     );
     expect(
@@ -177,6 +318,16 @@ void main() {
         denoise: 0.35,
       ),
       '/arefine medium 放大=1.5 重绘=0.35 任务=job_20260821_test',
+    );
+    expect(
+      buildImageCommand(
+        kind: ImageCommandKind.refine,
+        profile: 'seedvr2',
+        parentJobId: 'job_20260821_test',
+        scale: 1.75,
+        denoise: 0.4,
+      ),
+      '/arefine seedvr2 任务=job_20260821_test',
     );
   });
 

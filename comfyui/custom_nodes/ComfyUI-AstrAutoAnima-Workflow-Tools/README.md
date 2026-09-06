@@ -4,6 +4,7 @@
 
 包含：
 
+- `AnimaPromptBatchEncode`：把多个不同的 Anima 提示词编码为同一批 conditioning，会对不同长度的 token、权重和 attention mask 补齐；同时为 ComfyUI 0.21.1 安装仅针对批次 `t5xxl_ids` 的 Anima 兼容分支。
 - `AnimaCaptionBatchGuard`：在保存 caption 前检查数量、空值、控制文本和重复率。
 - `AnimaImageBatchChunker`：把最多 256 张的加载结果拆成 64 张一批（显存紧张时改 32），再交给 WD/CL 推理。
 - `AnimaTrainingTagFusion`：以 WD 为稳定基线，限制 CL-only 长尾数量，过滤元数据/质量词并记录冲突。
@@ -12,7 +13,7 @@
 - `AnimaReverseCompiler`：整理 WD、CL Tagger 和 JoyCaption 的输出，生成分类结果与 Anima prompt。
 - `AnimaReverseResultSaver`：保存反推 JSON、JSONL 索引和可选缩略图。
 
-服务器常见安装目录：
+服务器安装目录：
 
 ```text
 /workspace/ComfyUI/custom_nodes/ComfyUI-AstrAutoAnima-Workflow-Tools
@@ -23,6 +24,7 @@
 ```text
 AstrAutoAnima/Training
 AstrAutoAnima/Reverse
+AstrAutoAnima/Generation
 ```
 
 方向策略：
@@ -46,9 +48,7 @@ AstrAutoAnima/Reverse
 - CL Tagger v2.00 的 Hugging Face 授权和模型文件
 - JoyCaption Beta One Q6_K GGUF 与匹配的 F16 mmproj
 
-`AnimaReverseResultSaver` 默认只允许写入 `/workspace`（服务器）或 ComfyUI 当前目录
-（本地部署）。如 AstrBot 与 ComfyUI 位于不同目录，请在启动 ComfyUI 前设置
-`AAA_REVERSE_ALLOWED_ROOTS`。Linux/macOS 用 `:`、Windows 用 `;` 分隔多个允许根目录。
+`AnimaReverseResultSaver` 只允许向 `/workspace` 下保存，避免错误配置写入系统其他目录。
 
 `AnimaReverseCompiler` 的 `custom` 模式支持复选 `scene/action/character/appearance/`
 `clothing/composition/other`；`include_safety=true` 会在自定义模式中过滤敏感标签，

@@ -1,0 +1,41 @@
+{
+  "schema_version": 3,
+  "catalog_revision": 1,
+  "release_version": "example-only",
+  "description": "Harmless examples demonstrating arbitrary user groups.",
+  "custom_group_definitions": [
+    {"id": "rain", "name": "雨景"},
+    {"id": "night", "name": "夜景"},
+    {"id": "portrait", "name": "人像构图"}
+  ],
+  "prompts": [
+    {
+      "id": "example-rain-night-001",
+      "name": "雨夜街道示例",
+      "enabled": true,
+      "weight": 1,
+      "prompt": "1girl, solo, rainy street, night, holding umbrella, reflected city lights",
+      "prompt_position": "suffix",
+      "categories": ["scene"],
+      "custom_groups": ["rain", "night"],
+      "source_group": "basic",
+      "source_code": "B",
+      "safety_level": "normal",
+      "safety_code": "N"
+    },
+    {
+      "id": "example-portrait-001",
+      "name": "窗边人像示例",
+      "enabled": true,
+      "weight": 1,
+      "prompt": "1girl, solo, portrait, by the window, soft morning light, calm expression",
+      "prompt_position": "suffix",
+      "categories": ["portrait"],
+      "custom_groups": ["portrait"],
+      "source_group": "basic",
+      "source_code": "B",
+      "safety_level": "normal",
+      "safety_code": "N"
+    }
+  ]
+}

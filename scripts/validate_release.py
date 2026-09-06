@@ -13,19 +13,28 @@ REQUIRED = (
     "README.md",
     "LICENSE",
     "docs/INSTALL.md",
+    "docs/EASY_INSTALL.md",
     "docs/USAGE.md",
     "docs/TROUBLESHOOTING.md",
     "plugin/astrbot_plugin_comfy_bridge/main.py",
     "plugin/astrbot_plugin_comfy_bridge/data/anima_random_prompt_pool.json",
+    "plugin/astrbot_plugin_comfy_bridge/data/kp_prompt_pool.json",
+    "plugin/astrbot_plugin_comfy_bridge/data/kp_dynamic_modules.json",
     "plugin/astrbot_plugin_comfy_bridge/data/workflow_registry.json",
     "comfyui/custom_nodes/ComfyUI-AstrAutoAnima-Workflow-Tools/nodes.py",
     "comfyui/workflows/Anima_HQ_Txt2Img_Beta_api.json",
     "comfyui/workflows/Anima_Refine_Existing_Beta_api.json",
+    "comfyui/workflows/Anima_SeedVR2_Refine_Beta_api.json",
     "comfyui/workflows/Anima_WD_CT_JoyCaption_Reverse_Beta_api.json",
     "hub/service/pyproject.toml",
     "clients/flutter/pubspec.yaml",
     "tools/prompt_pool_manager.py",
     "tools/hub_lite_user_manager.py",
+    "tools/easy_installer.py",
+    "tools/optional_components.json",
+    "examples/prompt_pool.custom-groups.example.json",
+    "一键部署_AstrAutoAnima.bat",
+    "一键部署_AstrAutoAnima.sh",
 )
 
 
@@ -64,6 +73,19 @@ def main() -> int:
             for placeholder in ("YOUR_ANIMA_UNET", "YOUR_ANIMA_CLIP", "YOUR_ANIMA_VAE"):
                 if placeholder not in text:
                     errors.append(f"sanitized placeholder {placeholder} missing from {relative}")
+
+    seedvr = root / "comfyui/workflows/Anima_SeedVR2_Refine_Beta_api.json"
+    if seedvr.is_file():
+        text = seedvr.read_text(encoding="utf-8-sig")
+        for placeholder in ("YOUR_SEEDVR2_MODEL.gguf", "YOUR_SEEDVR2_VAE.safetensors"):
+            if placeholder not in text:
+                errors.append(f"sanitized placeholder {placeholder} missing from SeedVR2 workflow")
+
+    manifest = root / "release-manifest.json"
+    if manifest.is_file():
+        payload = json.loads(manifest.read_text(encoding="utf-8-sig"))
+        if payload.get("release") != "0.4.0" or payload.get("status") != "stable":
+            errors.append("release manifest does not describe stable 0.4.0")
 
     if errors:
         print("Release validation FAILED:")

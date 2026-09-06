@@ -1,0 +1,14 @@
+{
+  "schema_version": "1.0",
+  "source": "local example; replace with the generated server dictionary",
+  "characters": [
+    {
+      "tag": "hatsune_miku",
+      "aliases": ["初音未来", "初音未来（VOCALOID）", "Hatsune Miku"],
+      "copyright": ["vocaloid"],
+      "gender": ["1girl"],
+      "appearance": ["aqua_hair", "aqua_eyes", "long_hair", "twintails"],
+      "post_count": 1
+    }
+  ]
+}

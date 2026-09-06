@@ -29,6 +29,12 @@
     "default": "/workspace/ComfyUI/user/default/workflows/Anima_Refine_Existing_Beta_api.json",
     "hint": "Refine Light/Medium 共用一份拓扑；Beta 默认不开启 Detailer 或 Tile。"
   },
+  "seedvr2_workflow_path": {
+    "description": "SeedVR2 放大 API 工作流 JSON 路径",
+    "type": "string",
+    "default": "/workspace/ComfyUI/user/default/workflows/Anima_SeedVR2_Refine_Beta_api.json",
+    "hint": "用于 /arefine seedvr2；需要 SeedVR2 VideoUpscaler 与 SeedVR2 Tiling Upscaler 节点和对应模型。"
+  },
   "job_store_path": {
     "description": "统一 Job / Asset 记录目录",
     "type": "string",
@@ -71,11 +77,78 @@
     "default": "/workspace/astrbot-runtime/data/plugin_data/astrbot_plugin_comfy_bridge/presets.json",
     "hint": "管理员指令创建的预设会持久化到这里。"
   },
+  "character_dictionary_enabled": {
+    "description": "启用中文角色名词典",
+    "type": "bool",
+    "default": true,
+    "hint": "角色名未命中 LoRA/文本角色预设时，尝试从离线词典转换为 Danbooru 角色 tag。现有角色预设始终优先。"
+  },
+  "character_dictionary_path": {
+    "description": "中文角色名词典 JSON 路径",
+    "type": "string",
+    "default": "/workspace/astrbot-runtime/data/plugin_data/astrbot_plugin_comfy_bridge/character_dictionary.json",
+    "hint": "由 tools/build_character_dictionary.py 生成。文件不存在时自动退回原有角色处理，不影响生图。"
+  },
+  "character_dictionary_edits_path": {
+    "description": "角色词典管理覆盖层路径",
+    "type": "string",
+    "default": "/workspace/astrbot-runtime/data/plugin_data/astrbot_plugin_comfy_bridge/hub_state/character_dictionary_edits.json",
+    "hint": "由 Hub 管理端维护。禁用、别名、作品和外貌修订保存在此，不会在重建基础词典时丢失。"
+  },
+  "character_dictionary_default_mode": {
+    "description": "中文角色标签默认强度",
+    "type": "string",
+    "default": "weak",
+    "options": ["weak", "strong", "off"],
+    "hint": "weak 只添加角色与作品 tag；strong 继续添加性别和固定外貌；off 保留原样。单次可用 角色模式=弱|强|关闭 覆盖。"
+  },
   "prompt_pool_path": {
     "description": "随机好图提示词池 JSON 路径",
     "type": "string",
     "default": "/workspace/astrbot-runtime/data/plugin_data/astrbot_plugin_comfy_bridge/anima_random_prompt_pool.json",
     "hint": "首次使用会复制插件内置提示词库；之后可通过管理指令查询、导入、导出和维护，升级时保留用户修改与删除墓碑。"
+  },
+  "kp_dynamic_enabled": {
+    "description": "K 组启用动态模块拼装",
+    "type": "bool",
+    "default": true,
+    "hint": "开启后从 KP 01-14 模块库实时组合场景、构图、光影、动作、表情、风格等；关闭后继续抽取原有 77 个固定范例。"
+  },
+  "kp_dynamic_modules_path": {
+    "description": "KP 动态模块库 JSON 路径",
+    "type": "string",
+    "default": "data/kp_dynamic_modules.json",
+    "hint": "相对路径按插件目录解析。模块库缺失或损坏时 K 动态抽取会返回明确错误，不影响其他来源组。"
+  },
+  "kp_dynamic_optional_modules_min": {
+    "description": "KP 每张最少附加模块数",
+    "type": "int",
+    "default": 4,
+    "hint": "场景锚点、服装和基础动作不计入此数。建议 3-6。"
+  },
+  "kp_dynamic_optional_modules_max": {
+    "description": "KP 每张最多附加模块数",
+    "type": "int",
+    "default": 7,
+    "hint": "从构图、光影、表情、风格、妆容、细节、道具等不同槽位抽取；必须不小于最少值。"
+  },
+  "kp_dynamic_max_tags": {
+    "description": "KP 动态提示词最大标签数",
+    "type": "int",
+    "default": 72,
+    "hint": "用于限制动态拼装长度；不包含用户额外输入、角色和画风触发词。"
+  },
+  "kp_dynamic_history_limit": {
+    "description": "KP 动态记录保留上限",
+    "type": "int",
+    "default": 2000,
+    "hint": "动态结果会写入 KP 持久化库，供 App 记录页按 ID 点赞并复制到 P 组。至少保留 50 条。"
+  },
+  "kp_dynamic_fallback_examples": {
+    "description": "KP 动态失败时回退固定范例",
+    "type": "bool",
+    "default": true,
+    "hint": "模块库不可读或无法组成有效结果时，自动使用旧的 77 个 N/S 配对范例；建议保持开启。"
   },
   "sexual_protected_characters": {
     "description": "S 组禁用角色名单",
@@ -116,6 +189,111 @@
     "description": "中文转换/旧反推最大输出 tokens",
     "type": "int",
     "default": 700
+  },
+  "agent_tools_enabled": {
+    "description": "启用 AstrAutoAnima 自主绘图工具",
+    "type": "bool",
+    "default": false,
+    "hint": "独立总开关。关闭时聊天模型不能自主跑图，不影响 /aimg、随机好图、反推、HQ 和精修。"
+  },
+  "agent_generate_tool_enabled": {
+    "description": "启用自主生图 Tool",
+    "type": "bool",
+    "default": true,
+    "hint": "受自主绘图工具总开关控制；关闭后仅禁用 anima_generate_image。"
+  },
+  "agent_preset_tool_enabled": {
+    "description": "启用自主预设查询 Tool",
+    "type": "bool",
+    "default": true,
+    "hint": "允许聊天模型查询角色和画风的准确预设名称。"
+  },
+  "agent_tool_group_enabled": {
+    "description": "允许群聊自主绘图",
+    "type": "bool",
+    "default": false,
+    "hint": "Beta 默认仅开放私聊。确认群聊权限和内容策略后再开启。"
+  },
+  "agent_tool_allow_parameter_override": {
+    "description": "允许模型覆盖自主绘图默认预设",
+    "type": "bool",
+    "default": true,
+    "hint": "开启时模型可按用户要求临时指定角色、画风、比例、质量和采样参数；关闭时始终强制使用下方默认值。"
+  },
+  "agent_tool_default_character": {
+    "description": "自主绘图默认角色预设",
+    "type": "string",
+    "default": "",
+    "hint": "填写 presets.json 中的准确角色名称；留空表示默认无角色。只影响 LLM Tool。"
+  },
+  "agent_tool_default_style": {
+    "description": "自主绘图默认画风预设",
+    "type": "string",
+    "default": "",
+    "hint": "填写 presets.json 中的准确画风名称；留空表示默认无画风，不继承普通 /aimg 默认画风。"
+  },
+  "agent_tool_default_ratio": {
+    "description": "自主绘图默认比例",
+    "type": "string",
+    "default": "2:3",
+    "options": ["1:1", "2:3", "3:2", "3:4", "4:3", "9:16", "16:9"]
+  },
+  "agent_tool_default_quality": {
+    "description": "自主绘图默认工作流质量",
+    "type": "string",
+    "default": "quick",
+    "options": ["quick", "hq_stable", "hq_beauty"],
+    "hint": "quick 使用普通生图；hq_stable 和 hq_beauty 使用对应 HQ Profile。"
+  },
+  "agent_tool_default_sampler": {
+    "description": "自主绘图默认采样器预设",
+    "type": "string",
+    "default": "original",
+    "options": ["original", "2m", "2m_sde", "2m_sde_gpu"]
+  },
+  "agent_tool_default_scheduler": {
+    "description": "自主绘图默认调度器",
+    "type": "string",
+    "default": "workflow",
+    "options": [
+      "workflow", "normal", "karras", "exponential", "sgm_uniform", "simple",
+      "ddim_uniform", "beta", "linear_quadratic", "kl_optimal"
+    ],
+    "hint": "workflow 表示保留所选 Quick/HQ Profile 的调度器原值。"
+  },
+  "agent_tool_default_steps": {
+    "description": "自主绘图默认步数",
+    "type": "int",
+    "default": 0,
+    "hint": "0 表示沿用所选采样器预设；有效自定义范围为 1 到 150。"
+  },
+  "agent_tool_default_cfg": {
+    "description": "自主绘图默认 CFG",
+    "type": "float",
+    "default": 0,
+    "hint": "0 表示沿用所选采样器预设；有效自定义范围为 0.1 到 30。"
+  },
+  "agent_tool_translate_chinese": {
+    "description": "自主绘图收到中文时调用 /aicn 转换",
+    "type": "bool",
+    "default": false,
+    "hint": "关闭时要求 Function Calling 模型直接提供英文 tags；开启后实际画图时可能额外调用一次文本模型。"
+  },
+  "agent_tool_max_prompt_chars": {
+    "description": "自主绘图最大提示词长度",
+    "type": "int",
+    "default": 1800
+  },
+  "agent_tool_user_cooldown_seconds": {
+    "description": "自主绘图单用户冷却秒数",
+    "type": "int",
+    "default": 30,
+    "hint": "管理员豁免；同一用户在上一张成功后需要等待该时长，并且不能同时运行两个自主绘图任务。"
+  },
+  "agent_tool_send_progress": {
+    "description": "自主绘图发送开始提示",
+    "type": "bool",
+    "default": true
   },
   "show_converted_tags": {
     "description": "/aicn 生图前回显转换 tags",
@@ -185,10 +363,34 @@
     "hint": "关闭可节省空间；结构化结果和图片哈希仍会保存。"
   },
   "five_draw_cooldown_seconds": {
-    "description": "非管理员五连抽冷却（秒）",
+    "description": "非管理员混沌五连抽冷却（秒）",
     "type": "int",
     "default": 150,
-    "hint": "按发送者账号独立计算；AstrBot 管理员不受冷却限制。设为 0 可关闭。"
+    "hint": "仅限制混沌五连抽。普通五连抽改用微批处理，不再使用时间冷却；AstrBot 管理员豁免。"
+  },
+  "five_draw_batch_enabled": {
+    "description": "普通五连抽启用微批处理",
+    "type": "bool",
+    "default": true,
+    "hint": "把提示词合并到同一 Quick 工作流批次中处理。混沌五连抽因角色、画风和比例各不相同，仍逐张执行。"
+  },
+  "five_draw_micro_batch_size": {
+    "description": "普通五连抽微批大小",
+    "type": "int",
+    "default": 2,
+    "hint": "范围 1 到 5。默认 2，即按 2+2+1 执行，适合 32GB 显存；设为 1 等同逐张生成。"
+  },
+  "five_draw_batch_fallback_sequential": {
+    "description": "微批失败时自动逐张回退",
+    "type": "bool",
+    "default": true,
+    "hint": "只重试失败的微批，不会重跑之前已经成功的批次。建议保持开启。"
+  },
+  "five_draw_single_active": {
+    "description": "同一用户只允许一个普通五连抽",
+    "type": "bool",
+    "default": true,
+    "hint": "取代原来的普通五连抽 150 秒冷却；任务结束后立即可以再次抽取。AstrBot 管理员豁免。"
   },
   "latent_node_id": {
     "description": "画布尺寸节点 ID",
@@ -365,5 +567,23 @@
     "description": "临时结果保存目录",
     "type": "string",
     "default": "/workspace/astrbot-runtime/data/plugin_data/astrbot_plugin_comfy_bridge/outputs"
+  },
+  "output_cleanup_enabled": {
+    "description": "自动清理插件结果图片",
+    "type": "bool",
+    "default": true,
+    "hint": "只清理插件 output_dir 中过期的常见图片，不处理 ComfyUI/output。"
+  },
+  "output_retention_hours": {
+    "description": "插件结果图片保留小时数",
+    "type": "float",
+    "default": 48.0,
+    "hint": "依据文件最后修改时间判断，最小值为 1 小时。"
+  },
+  "output_cleanup_interval_minutes": {
+    "description": "插件图片自动清理间隔（分钟）",
+    "type": "int",
+    "default": 60,
+    "hint": "插件启动时会先扫描一次，此后按该间隔扫描；最小实际间隔为 5 分钟。"
   }
 }

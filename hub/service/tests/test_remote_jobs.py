@@ -16,6 +16,7 @@ from astr_auto_anima_hub.remote_jobs import (
     build_remote_command,
     list_delivery_targets,
     load_delivery_targets,
+    _prompt_ids_from_plain,
     RemoteJobManager,
     visible_delivery_targets,
 )
@@ -34,14 +35,14 @@ class RemoteJobTests(unittest.TestCase):
                             "id": "main-group",
                             "label": "Main group",
                             "kind": "group",
-                            "umo": "demo-bot:GroupMessage:123456",
+                            "umo": "examplebot:GroupMessage:123456",
                             "allow_safety": ["N", "H"],
                         },
                         {
                             "id": "owner-private",
                             "label": "Owner",
                             "kind": "private",
-                            "umo": "demo-bot:FriendMessage:654321",
+                            "umo": "examplebot:FriendMessage:654321",
                             "allow_safety": ["N", "H", "S"],
                         },
                     ]
@@ -87,11 +88,11 @@ class RemoteJobTests(unittest.TestCase):
             RemoteJobCreateRequest(
                 target_id="main-group",
                 kind="random",
-                character="demo_character",
+                character="example_character",
             ),
             target,
         )
-        self.assertEqual(command, "来张好图抄一抄 N 角色=demo_character")
+        self.assertEqual(command, "来张好图抄一抄 N 角色=example_character 角色模式=弱")
         self.assertEqual(safety, "N")
 
     def test_sampler_preset_is_forwarded_before_prompt(self) -> None:
@@ -101,6 +102,7 @@ class RemoteJobTests(unittest.TestCase):
                 target_id="owner-private",
                 kind="direct",
                 sampler="2m_sde",
+                scheduler="karras",
                 steps=36,
                 cfg=5.5,
                 prompt="1girl, solo",
@@ -109,7 +111,7 @@ class RemoteJobTests(unittest.TestCase):
         )
         self.assertEqual(
             command,
-            "/aimg 采样器=2m_sde 步数=36 CFG=5.5 1girl, solo",
+            "/aimg 采样器=2m_sde 调度器=karras 步数=36 CFG=5.5 1girl, solo",
         )
         self.assertEqual(safety, "N")
 
@@ -132,8 +134,8 @@ class RemoteJobTests(unittest.TestCase):
             RemoteJobCreateRequest(
                 target_id="main-group",
                 kind="chinese",
-                character="demo_character",
-                style="demo_style",
+                character="example_character",
+                style="example_style",
                 ratio="2:3",
                 prompt="雨夜里撑伞",
             ),
@@ -141,22 +143,22 @@ class RemoteJobTests(unittest.TestCase):
         )
         self.assertEqual(
             chinese,
-            "/aicn 角色=demo_character 画风=demo_style 比例=2:3 雨夜里撑伞",
+            "/aicn 角色=example_character 角色模式=弱 画风=example_style 比例=2:3 雨夜里撑伞",
         )
         reverse, _ = build_remote_command(
             RemoteJobCreateRequest(
                 target_id="owner-private",
                 kind="reverse",
                 reverse_preset="scene",
-                character="demo_character_2",
-                style="demo_style",
+                character="second_character",
+                style="soft_style",
                 prompt="transparent umbrella",
             ),
             private,
         )
         self.assertEqual(
             reverse,
-            "/aip 模式=scene 角色=demo_character_2 画风=demo_style transparent umbrella",
+            "/aip 模式=scene 角色=second_character 角色模式=弱 画风=soft_style transparent umbrella",
         )
 
         reverse_multi, _ = build_remote_command(
@@ -234,8 +236,8 @@ class RemoteJobTests(unittest.TestCase):
                 target_id="owner-private",
                 kind="hq",
                 profile="beauty",
-                character="demo_character",
-                style="demo_style",
+                character="example_character",
+                style="example_style",
                 ratio="2:3",
                 sampler="2m_sde_gpu",
                 steps=38,
@@ -248,7 +250,7 @@ class RemoteJobTests(unittest.TestCase):
         )
         self.assertEqual(
             hq,
-            "/ahq beauty 角色=demo_character 画风=demo_style 比例=2:3 "
+            "/ahq beauty 角色=example_character 角色模式=弱 画风=example_style 比例=2:3 "
             "采样器=2m_sde_gpu 步数=38 CFG=4.5 放大=1.5 重绘=0.3 rainy street",
         )
 
@@ -268,6 +270,39 @@ class RemoteJobTests(unittest.TestCase):
             "/arefine medium 放大=1.5 重绘=0.35 任务=job_20260821_test",
         )
 
+        seedvr2, _ = build_remote_command(
+            RemoteJobCreateRequest(
+                target_id="owner-private",
+                kind="refine",
+                profile="seedvr2",
+                parent_job_id="job_20260821_test",
+                scale=1.75,
+                denoise=0.4,
+            ),
+            target,
+        )
+        self.assertEqual(
+            seedvr2,
+            "/arefine seedvr2 任务=job_20260821_test",
+        )
+
+    def test_five_prompt_ids_are_all_captured(self) -> None:
+        self.assertEqual(
+            _prompt_ids_from_plain(
+                [
+                    "完成｜条目=generate-u1-258, discord-0790, "
+                    "codex-0014, good-0021, reverse-0003"
+                ]
+            ),
+            [
+                "generate-u1-258",
+                "discord-0790",
+                "codex-0014",
+                "good-0021",
+                "reverse-0003",
+            ],
+        )
+
     def test_refine_without_source_requires_parent_job(self) -> None:
         target = load_delivery_targets(self.path)[1]
         payload = RemoteJobCreateRequest(
@@ -279,6 +314,31 @@ class RemoteJobTests(unittest.TestCase):
             from astr_auto_anima_hub.remote_jobs import _decode_source_image
 
             _decode_source_image(payload)
+
+    def test_uploaded_refine_requires_prompt_or_parent_job(self) -> None:
+        from astr_auto_anima_hub.remote_jobs import _decode_source_image
+
+        source = b"\x89PNG\r\n\x1a\nrefine-source"
+        payload = RemoteJobCreateRequest(
+            target_id="owner-private",
+            kind="refine",
+            source_image_name="source.png",
+            source_image_data=(
+                "data:image/png;base64," + base64.b64encode(source).decode("ascii")
+            ),
+        )
+        with self.assertRaisesRegex(RemoteJobError, "必须填写补充提示词"):
+            _decode_source_image(payload)
+
+        accepted = payload.model_copy(update={"prompt": "repair hands"})
+        decoded = _decode_source_image(accepted)
+        self.assertIsNotNone(decoded)
+        self.assertEqual(decoded[0], source)
+
+        seedvr2 = payload.model_copy(update={"profile": "seedvr2"})
+        decoded = _decode_source_image(seedvr2)
+        self.assertIsNotNone(decoded)
+        self.assertEqual(decoded[0], source)
 
 class RemoteJobManagerTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
@@ -295,7 +355,7 @@ class RemoteJobManagerTests(unittest.IsolatedAsyncioTestCase):
                             "id": "private",
                             "label": "Private",
                             "kind": "private",
-                            "umo": "demo-bot:FriendMessage:123456",
+                            "umo": "examplebot:FriendMessage:123456",
                         }
                     ]
                 }
@@ -314,6 +374,11 @@ class RemoteJobManagerTests(unittest.IsolatedAsyncioTestCase):
                 if "仅反推" in str(command_part):
                     body = (
                         'data: {"type":"plain","data":"场景：rainy street\\n动作：sitting\\n安全级别：normal\\n合并提示词：rainy street, sitting\\n反推记录：rev_test"}\n\n'
+                        + 'data: {"type":"end","data":""}\n\n'
+                    )
+                elif "冷却测试" in str(command_part):
+                    body = (
+                        'data: {"type":"plain","data":"五连抽冷却中，请在 149 秒后再试。"}\n\n'
                         + 'data: {"type":"end","data":""}\n\n'
                     )
                 else:
@@ -394,7 +459,7 @@ class RemoteJobManagerTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(current)
         self.assertEqual(current.status, "succeeded")
         self.assertEqual(
-            self.sent_payload["umo"], "demo-bot:FriendMessage:123456"
+            self.sent_payload["umo"], "examplebot:FriendMessage:123456"
         )
         self.assertEqual(
             self.sent_payload["message"][-1],
@@ -404,6 +469,24 @@ class RemoteJobManagerTests(unittest.IsolatedAsyncioTestCase):
         stored = self.manager.get_image(job.id, current.images[0].id)
         self.assertIsNotNone(stored)
         self.assertEqual(stored[1].read_bytes(), b"\x89PNG\r\n\x1a\nfake-png")
+
+    async def test_plain_only_plugin_failure_is_preserved(self) -> None:
+        job = self.manager.create(
+            RemoteJobCreateRequest(
+                target_id="private",
+                kind="direct",
+                prompt="冷却测试",
+            )
+        )
+        for _ in range(50):
+            current = self.manager.get(job.id)
+            if current and current.status in {"succeeded", "failed"}:
+                break
+            await asyncio.sleep(0.01)
+        current = self.manager.get(job.id)
+        self.assertIsNotNone(current)
+        self.assertEqual(current.status, "failed")
+        self.assertEqual(current.message, "五连抽冷却中，请在 149 秒后再试。")
 
     async def test_history_persists_and_isolated_by_user(self) -> None:
         owner = AuthPrincipal(
@@ -472,8 +555,8 @@ class RemoteJobManagerTests(unittest.IsolatedAsyncioTestCase):
                 target_id="private",
                 kind="reverse",
                 reverse_preset="raw",
-                character="demo_character",
-                style="demo_style",
+                character="example_character",
+                style="example_style",
                 source_image_name="source.png",
                 source_image_data=(
                     "data:image/png;base64," + base64.b64encode(source).decode("ascii")
@@ -493,7 +576,7 @@ class RemoteJobManagerTests(unittest.IsolatedAsyncioTestCase):
             [
                 {
                     "type": "plain",
-                    "text": "/aip 模式=raw 角色=demo_character 画风=demo_style",
+                    "text": "/aip 模式=raw 角色=example_character 角色模式=弱 画风=example_style",
                 },
                 {"type": "image", "attachment_id": "attachment-1"},
             ],

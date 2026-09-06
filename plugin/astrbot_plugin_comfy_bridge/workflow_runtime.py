@@ -236,6 +236,44 @@ def prepare_workflow(
     return workflow, seed
 
 
+def prepare_prompt_batch_workflow(
+    workflow: dict[str, Any],
+    *,
+    positive_node_id: str,
+    latent_node_id: str,
+    prompts: list[str],
+    max_batch: int = 8,
+) -> dict[str, Any]:
+    clean_prompts = [str(prompt or "").strip() for prompt in prompts]
+    if not clean_prompts or any(not prompt for prompt in clean_prompts):
+        raise WorkflowError("批量提示词必须包含至少一条非空提示词。")
+    if len(clean_prompts) > max(1, int(max_batch)):
+        raise WorkflowError(
+            f"批量提示词数量 {len(clean_prompts)} 超过上限 {max_batch}。"
+        )
+
+    positive = workflow.get(str(positive_node_id))
+    if not isinstance(positive, dict):
+        raise WorkflowError(f"找不到批量正面提示词节点：{positive_node_id}")
+    positive_inputs = positive.get("inputs")
+    if not isinstance(positive_inputs, dict) or not isinstance(
+        positive_inputs.get("clip"), list
+    ):
+        raise WorkflowError(f"节点 {positive_node_id} 缺少 inputs.clip 连接。")
+
+    latent_inputs = _require_input(workflow, latent_node_id, "batch_size")
+    latent_inputs["batch_size"] = len(clean_prompts)
+    workflow[str(positive_node_id)] = {
+        "class_type": "AnimaPromptBatchEncode",
+        "inputs": {
+            "clip": list(positive_inputs["clip"]),
+            "prompts_json": json.dumps(clean_prompts, ensure_ascii=False),
+        },
+        "_meta": {"title": "AstrAutoAnima 微批提示词编码"},
+    }
+    return workflow
+
+
 def configure_sampler(
     workflow: dict[str, Any],
     node_id: str,
@@ -374,12 +412,95 @@ def configure_refine_workflow(
     }
 
 
+def configure_seedvr2_workflow(
+    workflow: dict[str, Any],
+    *,
+    image_name: str,
+    image_node_id: str,
+    upscaler_node_id: str,
+    profile: dict[str, Any],
+    seed: int,
+) -> dict[str, Any]:
+    """Inject a source image and a bounded SeedVR2 tiling profile."""
+
+    normalized_image = str(image_name or "").strip()
+    if not normalized_image:
+        raise WorkflowError("INVALID_INPUT：SeedVR2 输入图片不能为空。")
+    image_inputs = _require_input(workflow, image_node_id, "image")
+    image_inputs["image"] = normalized_image
+    inputs = _require_input(workflow, upscaler_node_id, "new_resolution")
+    required = {
+        "seed",
+        "tile_width",
+        "tile_height",
+        "mask_blur",
+        "tile_padding",
+        "tile_upscale_resolution",
+        "tiling_strategy",
+        "anti_aliasing_strength",
+        "blending_method",
+        "color_correction",
+        "resolution_target",
+        "tile_batch_size",
+    }
+    missing = sorted(required - set(inputs))
+    if missing:
+        raise WorkflowError(
+            f"SeedVR2 节点 {upscaler_node_id} 缺少 inputs：{', '.join(missing)}"
+        )
+    enhance = profile.get("enhance", {})
+    if not isinstance(enhance, dict):
+        raise WorkflowError("SeedVR2 profile.enhance 必须是对象。")
+    target = int(enhance.get("target_resolution", inputs["new_resolution"]))
+    if not 512 <= target <= 8192 or target % 16:
+        raise WorkflowError("SeedVR2 目标边必须是 512-8192 之间且能被 16 整除。")
+    integer_ranges = {
+        "tile_width": (256, 2048),
+        "tile_height": (256, 2048),
+        "mask_blur": (0, 64),
+        "tile_padding": (0, 256),
+        "tile_upscale_resolution": (512, 4096),
+        "tile_batch_size": (1, 21),
+    }
+    inputs["seed"] = int(seed) % (2**32)
+    inputs["new_resolution"] = target
+    for name, (minimum, maximum) in integer_ranges.items():
+        value = int(enhance.get(name, inputs[name]))
+        if not minimum <= value <= maximum:
+            raise WorkflowError(f"SeedVR2 {name} 必须在 {minimum}-{maximum} 之间。")
+        inputs[name] = value
+    anti_aliasing = float(
+        enhance.get("anti_aliasing_strength", inputs["anti_aliasing_strength"])
+    )
+    if not 0.0 <= anti_aliasing <= 1.0:
+        raise WorkflowError("SeedVR2 anti_aliasing_strength 必须在 0-1 之间。")
+    inputs["anti_aliasing_strength"] = anti_aliasing
+    for name in (
+        "tiling_strategy",
+        "blending_method",
+        "color_correction",
+        "resolution_target",
+    ):
+        if name in enhance:
+            inputs[name] = str(enhance[name])
+    return {
+        "target_resolution": target,
+        "seed": inputs["seed"],
+        "tile_width": inputs["tile_width"],
+        "tile_height": inputs["tile_height"],
+        "tile_padding": inputs["tile_padding"],
+        "tile_upscale_resolution": inputs["tile_upscale_resolution"],
+        "blending_method": inputs["blending_method"],
+    }
+
+
 REVERSE_PRESETS = {"full", "scene", "action", "character", "safe", "raw", "custom"}
 REVERSE_CATEGORIES = {
     "scene",
     "action",
     "character",
     "appearance",
+    "special_features",
     "clothing",
     "composition",
     "other",
@@ -558,3 +679,24 @@ def history_error(history_record: dict[str, Any]) -> str:
             return f"节点 {node_id} ({node_type})：{exception}"
         return str(payload)
     return "ComfyUI 任务执行失败。"
+
+
+def history_failed(history_record: dict[str, Any]) -> bool:
+    """Return true as soon as ComfyUI records an execution failure.
+
+    Failed history records commonly keep ``completed`` false, so callers must
+    not wait for that flag before inspecting ``status_str`` and messages.
+    """
+
+    status = history_record.get("status", {})
+    if not isinstance(status, dict):
+        return False
+    if str(status.get("status_str", "")).strip().lower() == "error":
+        return True
+    messages = status.get("messages", [])
+    return any(
+        isinstance(message, (list, tuple))
+        and len(message) >= 1
+        and message[0] == "execution_error"
+        for message in messages
+    )

@@ -1,12 +1,20 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../../core/hub_api.dart';
 import '../../core/session_store.dart';
 
 class ConnectionPage extends StatefulWidget {
-  const ConnectionPage({required this.onConnected, super.key});
+  const ConnectionPage({
+    required this.onConnected,
+    this.fixedMode,
+    this.offlineTool,
+    super.key,
+  });
 
   final Future<void> Function(HubSession session) onConnected;
+  final HubAccessMode? fixedMode;
+  final Widget? offlineTool;
 
   @override
   State<ConnectionPage> createState() => _ConnectionPageState();
@@ -14,12 +22,20 @@ class ConnectionPage extends StatefulWidget {
 
 class _ConnectionPageState extends State<ConnectionPage> {
   final _formKey = GlobalKey<FormState>();
-  final _urlController = TextEditingController(text: 'http://127.0.0.1:6278');
+  final _urlController = TextEditingController(
+    text: kIsWeb ? Uri.base.origin : 'http://127.0.0.1:6278',
+  );
   final _tokenController = TextEditingController();
   bool _working = false;
   bool _obscureToken = true;
-  HubAccessMode _mode = HubAccessMode.lite;
+  late HubAccessMode _mode;
   String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _mode = widget.fixedMode ?? HubAccessMode.lite;
+  }
 
   @override
   void dispose() {
@@ -91,24 +107,26 @@ class _ConnectionPageState extends State<ConnectionPage> {
                         style: Theme.of(context).textTheme.bodyMedium,
                       ),
                       const SizedBox(height: 28),
-                      SegmentedButton<HubAccessMode>(
-                        segments: const [
-                          ButtonSegment(
-                            value: HubAccessMode.lite,
-                            icon: Icon(Icons.person_outline),
-                            label: Text('用户端'),
-                          ),
-                          ButtonSegment(
-                            value: HubAccessMode.admin,
-                            icon: Icon(Icons.admin_panel_settings_outlined),
-                            label: Text('管理端'),
-                          ),
-                        ],
-                        selected: {_mode},
-                        onSelectionChanged: (value) =>
-                            setState(() => _mode = value.first),
-                      ),
-                      const SizedBox(height: 18),
+                      if (widget.fixedMode == null) ...[
+                        SegmentedButton<HubAccessMode>(
+                          segments: const [
+                            ButtonSegment(
+                              value: HubAccessMode.lite,
+                              icon: Icon(Icons.person_outline),
+                              label: Text('用户端'),
+                            ),
+                            ButtonSegment(
+                              value: HubAccessMode.admin,
+                              icon: Icon(Icons.admin_panel_settings_outlined),
+                              label: Text('管理端'),
+                            ),
+                          ],
+                          selected: {_mode},
+                          onSelectionChanged: (value) =>
+                              setState(() => _mode = value.first),
+                        ),
+                        const SizedBox(height: 18),
+                      ],
                       TextFormField(
                         controller: _urlController,
                         decoration: const InputDecoration(
@@ -171,14 +189,37 @@ class _ConnectionPageState extends State<ConnectionPage> {
                             : const Icon(Icons.link),
                         label: Text(_working ? '正在检测…' : '连接'),
                       ),
+                      if (widget.offlineTool != null) ...[
+                        const SizedBox(height: 10),
+                        OutlinedButton.icon(
+                          onPressed: () => Navigator.of(context).push(
+                            MaterialPageRoute<void>(
+                              builder: (_) => Scaffold(
+                                appBar: AppBar(title: const Text('云实例管理')),
+                                body: widget.offlineTool!,
+                              ),
+                            ),
+                          ),
+                          icon: const Icon(Icons.cloud_outlined),
+                          label: const Text('Hub 离线？管理云实例'),
+                        ),
+                      ],
                       const SizedBox(height: 12),
                       Text(
                         _mode == HubAccessMode.admin
                             ? '管理员令牌拥有增删改权限，请勿分享。'
-                            : '用户令牌只有只读权限；生成的指令会复制到剪贴板，由你在 QQ 中确认发送。',
+                            : '用户令牌只允许访问自己的跑图、记录、预设和提示词。',
                         textAlign: TextAlign.center,
                         style: Theme.of(context).textTheme.bodySmall,
                       ),
+                      if (kIsWeb) ...[
+                        const SizedBox(height: 10),
+                        Text(
+                          'iPhone 安装：使用 Safari 打开本页，点“分享”→“添加到主屏幕”。',
+                          textAlign: TextAlign.center,
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                      ],
                     ],
                   ),
                 ),

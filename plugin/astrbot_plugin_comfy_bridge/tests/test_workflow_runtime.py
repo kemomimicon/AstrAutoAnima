@@ -1,3 +1,4 @@
+import json
 import unittest
 
 from preset_runtime import (
@@ -13,6 +14,8 @@ from workflow_runtime import (
     extract_command_prompt,
     extract_output_images,
     extract_reverse_result,
+    history_failed,
+    prepare_prompt_batch_workflow,
     prepare_workflow,
     prepare_reverse_workflow,
 )
@@ -74,6 +77,48 @@ def style_workflow():
 
 
 class WorkflowRuntimeTests(unittest.TestCase):
+    def test_history_failure_does_not_require_completed_flag(self):
+        record = {
+            "status": {
+                "completed": False,
+                "status_str": "error",
+                "messages": [["execution_error", {"exception_message": "boom"}]],
+            }
+        }
+        self.assertTrue(history_failed(record))
+
+    def test_running_history_is_not_failed(self):
+        self.assertFalse(
+            history_failed(
+                {"status": {"completed": False, "status_str": "running", "messages": []}}
+            )
+        )
+
+    def test_prepare_prompt_batch_workflow_reuses_clip_and_sets_latent_batch(self):
+        template = {
+            "11": {
+                "class_type": "CLIPTextEncode",
+                "inputs": {"text": "old", "clip": ["49", 1]},
+            },
+            "28": {
+                "class_type": "EmptyLatentImage",
+                "inputs": {"width": 1024, "height": 1536, "batch_size": 1},
+            },
+        }
+        result = prepare_prompt_batch_workflow(
+            template,
+            positive_node_id="11",
+            latent_node_id="28",
+            prompts=["first prompt", "second prompt"],
+        )
+        self.assertEqual(result["28"]["inputs"]["batch_size"], 2)
+        self.assertEqual(result["11"]["class_type"], "AnimaPromptBatchEncode")
+        self.assertEqual(result["11"]["inputs"]["clip"], ["49", 1])
+        self.assertEqual(
+            json.loads(result["11"]["inputs"]["prompts_json"]),
+            ["first prompt", "second prompt"],
+        )
+
     def test_prepare_reverse_workflow_injects_image_preset_and_source(self):
         template = {
             "1": {"class_type": "LoadImage", "inputs": {"image": "old.png"}},

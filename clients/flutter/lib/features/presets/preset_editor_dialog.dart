@@ -147,7 +147,7 @@ class _PresetEditorDialogState extends State<_PresetEditorDialog> {
                     controller: _match,
                     decoration: const InputDecoration(
                       labelText: '自动匹配触发词',
-                      hintText: '@demo_style | demo_style',
+                      hintText: '@soft_style | soft_style',
                     ),
                   ),
                 ],

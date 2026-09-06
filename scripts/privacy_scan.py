@@ -24,13 +24,13 @@ FORBIDDEN_NAMES = {
 FORBIDDEN_DIRS = {
     ".venv", "venv", "__pycache__", ".dart_tool", "build", ".gradle",
     "reverse_history", "job_store", "hub_state", "outputs", "inputs", "logs",
+    ".pytest_cache", ".idea", ".ipynb_checkpoints", "kp_upstream",
 }
 TEXT_PATTERNS = {
     "Windows user path": re.compile(r"[A-Za-z]:\\Users\\(?!YOUR_USER|username)", re.I),
     "private server account path": re.compile(r"/root/(?:\.config/QQ|\.local/share/QQ|Napcat)", re.I),
-    "known private QQ": re.compile(r"(?<!\d)1487928670(?!\d)"),
-    "known private Bot ID": re.compile(r"\bkemomimi\b", re.I),
-    "private LoRA name": re.compile(r"\b(?:shiratama|guizhencao|staryfs|chyomimasu|6ctmika|edlf_itsuwari)\b", re.I),
+    "container instance id": re.compile(r"\bcpod-[a-z0-9-]+\b", re.I),
+    "literal Hub bearer token": re.compile(r"\baah_(?:admin|lite)_[A-Za-z0-9_-]{24,}\b"),
     "GitHub token": re.compile(r"\b(?:ghp|github_pat)_[A-Za-z0-9_]{20,}\b"),
     "generic API secret": re.compile(r"(?i)(?:api[_-]?key|secret|password)\s*[:=]\s*['\"]?(?!$|replace|your-|test-|example)[A-Za-z0-9_./+-]{24,}"),
 }
@@ -52,10 +52,16 @@ def scan(root: Path) -> list[str]:
             if path.is_dir() and path.name in FORBIDDEN_DIRS:
                 findings.append(f"forbidden generated/private directory: {relative}")
             continue
+        if any(part.endswith(".egg-info") for part in relative.parts):
+            if path.is_dir() and path.name.endswith(".egg-info"):
+                findings.append(f"forbidden generated package directory: {relative}")
+            continue
         if not path.is_file():
             continue
         if path.name in FORBIDDEN_NAMES and path.name != ".env.example":
             findings.append(f"forbidden private filename: {relative}")
+        if path.name.startswith("oc_") and path.suffix.lower() in {".png", ".jpg", ".webp"}:
+            findings.append(f"private client artwork must not be bundled: {relative}")
         if path.suffix.lower() in FORBIDDEN_SUFFIXES:
             findings.append(f"forbidden model/secret file: {relative}")
         if path.stat().st_size > 20 * 1024 * 1024:
@@ -72,16 +78,27 @@ def scan(root: Path) -> list[str]:
             if pattern.search(text):
                 findings.append(f"{label}: {relative}")
 
-    public_pool = root / "plugin/astrbot_plugin_comfy_bridge/data/anima_random_prompt_pool.json"
-    if public_pool.is_file():
+    for pool_name in ("anima_random_prompt_pool.json", "kp_prompt_pool.json"):
+        public_pool = root / "plugin/astrbot_plugin_comfy_bridge/data" / pool_name
+        if not public_pool.is_file():
+            findings.append(f"public bundled prompt pool is missing: {pool_name}")
+            continue
         try:
             data = json.loads(public_pool.read_text(encoding="utf-8-sig"))
             if data.get("prompts") != []:
-                findings.append("public bundled prompt pool must contain exactly zero prompts")
+                findings.append(f"public bundled prompt pool must contain exactly zero prompts: {pool_name}")
         except (OSError, json.JSONDecodeError) as exc:
-            findings.append(f"public prompt pool is invalid JSON: {exc}")
+            findings.append(f"public prompt pool is invalid JSON ({pool_name}): {exc}")
+    module_path = root / "plugin/astrbot_plugin_comfy_bridge/data/kp_dynamic_modules.json"
+    if module_path.is_file():
+        try:
+            modules = json.loads(module_path.read_text(encoding="utf-8-sig")).get("modules", {})
+            if any(value for value in modules.values()):
+                findings.append("public K dynamic module catalog must be empty")
+        except (OSError, AttributeError, json.JSONDecodeError) as exc:
+            findings.append(f"public K dynamic module catalog is invalid: {exc}")
     else:
-        findings.append("public bundled prompt pool is missing")
+        findings.append("public K dynamic module catalog is missing")
     return sorted(set(findings))
 
 

@@ -25,6 +25,7 @@ anima_random_prompt_pool.json
 prompt_pool*.json
 !plugin/astrbot_plugin_comfy_bridge/data/anima_random_prompt_pool.json
 !examples/prompt_pool.empty.json
+!examples/prompt_pool.custom-groups.example.json
 
 # Models and generated media
 *.safetensors

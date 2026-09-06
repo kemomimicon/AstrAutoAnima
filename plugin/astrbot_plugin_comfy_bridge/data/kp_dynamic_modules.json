@@ -1,0 +1,21 @@
+{
+  "schema_version": "1.0",
+  "catalog_revision": 1,
+  "description": "Public empty dynamic-module catalog. Import your own reviewed modules before using K mode.",
+  "modules": {
+    "scene": [],
+    "camera": [],
+    "exposure": [],
+    "wardrobe": [],
+    "lighting": [],
+    "pose": [],
+    "expression": [],
+    "style": [],
+    "makeup": [],
+    "hair": [],
+    "detail": [],
+    "marking": [],
+    "prop": [],
+    "persona": []
+  }
+}

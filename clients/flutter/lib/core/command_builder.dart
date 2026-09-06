@@ -9,9 +9,11 @@ String buildImageCommand({
   bool fiveDraw = false,
   String poolFilter = '',
   String character = '',
+  String characterTagMode = 'weak',
   String style = '',
   String ratio = '',
   String sampler = '',
+  String scheduler = '',
   int? steps,
   double? cfg,
   String prompt = '',
@@ -37,7 +39,7 @@ String buildImageCommand({
     parts.add(profile.isEmpty ? 'stable' : profile);
   }
   if (kind == ImageCommandKind.refine) {
-    parts.add(profile.isEmpty ? 'light' : profile);
+    parts.add(profile.isEmpty ? 'seedvr2' : profile);
   }
   if (kind == ImageCommandKind.reverse) {
     if (reverseOnly) parts.add('仅反推');
@@ -46,6 +48,7 @@ String buildImageCommand({
       'action': '动作',
       'character': '角色',
       'appearance': '外观',
+      'special_features': '特殊特征',
       'clothing': '服装',
       'composition': '构图',
       'other': '其他',
@@ -67,15 +70,28 @@ String buildImageCommand({
     parts.add(poolFilter.trim());
   }
   if (kind != ImageCommandKind.chaos) {
-    if (character.trim().isNotEmpty) parts.add('角色=${character.trim()}');
+    if (character.trim().isNotEmpty) {
+      parts.add('角色=${character.trim()}');
+      final label = switch (characterTagMode) {
+        'strong' => '强',
+        'off' => '关闭',
+        _ => '弱',
+      };
+      parts.add('角色模式=$label');
+    }
     if (style.trim().isNotEmpty) parts.add('画风=${style.trim()}');
     if (ratio.trim().isNotEmpty) parts.add('比例=${ratio.trim()}');
   }
   if (sampler.trim().isNotEmpty) parts.add('采样器=${sampler.trim()}');
+  if (scheduler.trim().isNotEmpty) parts.add('调度器=${scheduler.trim()}');
   if (steps != null) parts.add('步数=$steps');
   if (cfg != null) parts.add('CFG=${_numberText(cfg)}');
-  if (scale != null) parts.add('放大=${_numberText(scale)}');
-  if (denoise != null) parts.add('重绘=${_numberText(denoise)}');
+  if (scale != null && profile != 'seedvr2') {
+    parts.add('放大=${_numberText(scale)}');
+  }
+  if (denoise != null && profile != 'seedvr2') {
+    parts.add('重绘=${_numberText(denoise)}');
+  }
   if (kind == ImageCommandKind.refine && parentJobId.trim().isNotEmpty) {
     parts.add('任务=${parentJobId.trim()}');
   }

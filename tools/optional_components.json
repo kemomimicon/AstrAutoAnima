@@ -1,0 +1,68 @@
+{
+  "schema_version": 1,
+  "components": [
+    {
+      "id": "booru_tagger_node",
+      "name": "ComfyUI-Booru-Tagger 节点",
+      "kind": "git",
+      "url": "https://github.com/nestflow/ComfyUI-Booru-Tagger.git",
+      "commit": "d5b24d886f7cb4fa55899871e561375e721c1b6e",
+      "target": "custom_nodes/ComfyUI-Booru-Tagger"
+    },
+    {
+      "id": "joycaption_node",
+      "name": "JoyCaption GGUF 节点",
+      "kind": "git",
+      "url": "https://github.com/judian17/ComfyUI-joycaption-beta-one-GGUF.git",
+      "commit": "f96f00093c99572262c494a50934b3e251b05bf8",
+      "target": "custom_nodes/ComfyUI-joycaption-beta-one-GGUF"
+    },
+    {
+      "id": "seedvr2_node",
+      "name": "SeedVR2 放大节点",
+      "kind": "git",
+      "url": "https://github.com/numz/ComfyUI-SeedVR2_VideoUpscaler.git",
+      "target": "custom_nodes/ComfyUI-SeedVR2_VideoUpscaler"
+    },
+    {
+      "id": "seedvr2_tiling_node",
+      "name": "SeedVR2 Tiling 节点",
+      "kind": "git",
+      "url": "https://github.com/moonwhaler/comfyui-seedvr2-tilingupscaler.git",
+      "target": "custom_nodes/comfyui-seedvr2-tilingupscaler"
+    },
+    {
+      "id": "wd_eva02_model",
+      "name": "WD-EVA02 模型（约 1.2 GB）",
+      "kind": "download_set",
+      "files": [
+        {
+          "url": "https://huggingface.co/SmilingWolf/wd-eva02-large-tagger-v3/resolve/main/model.onnx?download=true",
+          "target": "models/booru_tagger/wd-eva02-large-tagger-v3/model.onnx",
+          "sha256": "9e768793060c7939b277ccb382783e8670e8a042d29d77aa736be0c8cc898bfc"
+        },
+        {
+          "url": "https://huggingface.co/SmilingWolf/wd-eva02-large-tagger-v3/resolve/main/selected_tags.csv?download=true",
+          "target": "models/booru_tagger/wd-eva02-large-tagger-v3/selected_tags.csv"
+        }
+      ]
+    },
+    {
+      "id": "joycaption_models",
+      "name": "JoyCaption Q6_K + mmproj（约 7 GB）",
+      "kind": "download_set",
+      "files": [
+        {
+          "url": "https://huggingface.co/mradermacher/llama-joycaption-beta-one-hf-llava-GGUF/resolve/main/llama-joycaption-beta-one-hf-llava.Q6_K.gguf?download=true",
+          "target": "models/llava_gguf/llama-joycaption-beta-one-hf-llava.Q6_K.gguf",
+          "sha256": "53c793a8d3f60f9640a5b351b6db0f461d22119eeb8d816a7623025d42de760c"
+        },
+        {
+          "url": "https://huggingface.co/concedo/llama-joycaption-beta-one-hf-llava-mmproj-gguf/resolve/main/llama-joycaption-beta-one-llava-mmproj-model-f16.gguf?download=true",
+          "target": "models/llava_gguf/llama-joycaption-beta-one-llava-mmproj-model-f16.gguf",
+          "sha256": "94002cb5c354c7c9e538e64f37d593db9eceeca2e94573bae6cd3b2bd8bb1952"
+        }
+      ]
+    }
+  ]
+}

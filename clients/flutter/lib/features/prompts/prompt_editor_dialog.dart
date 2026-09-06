@@ -98,7 +98,7 @@ class _PromptEditorDialogState extends State<_PromptEditorDialog> {
                       child: DropdownButtonFormField<String>(
                         initialValue: _source,
                         decoration: const InputDecoration(labelText: '来源组'),
-                        items: const ['B', 'G', 'D', 'C', 'R']
+                        items: const ['B', 'G', 'D', 'C', 'R', 'P']
                             .map((value) => DropdownMenuItem(
                                 value: value, child: Text(value)))
                             .toList(),

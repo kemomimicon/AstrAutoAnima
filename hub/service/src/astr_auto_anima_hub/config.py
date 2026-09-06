@@ -45,9 +45,16 @@ class Settings:
     )
     comfyui_root: Path = Path("/workspace/ComfyUI")
     prompt_pool_override: Path | None = None
+    kp_prompt_pool_override: Path | None = None
     preset_override: Path | None = None
+    lora_catalog_override: Path | None = None
+    personal_styles_override: Path | None = None
     delivery_targets_override: Path | None = None
     lite_users_override: Path | None = None
+    character_dictionary_override: Path | None = None
+    character_dictionary_edits_override: Path | None = None
+    character_favorites_override: Path | None = None
+    web_root: Path | None = None
     remote_job_timeout_seconds: float = 1800.0
 
     @classmethod
@@ -89,9 +96,24 @@ class Settings:
                 if os.getenv("AAH_PROMPT_POOL_PATH", "").strip()
                 else None
             ),
+            kp_prompt_pool_override=(
+                Path(os.environ["AAH_KP_PROMPT_POOL_PATH"]).expanduser()
+                if os.getenv("AAH_KP_PROMPT_POOL_PATH", "").strip()
+                else None
+            ),
             preset_override=(
                 Path(os.environ["AAH_PRESET_PATH"]).expanduser()
                 if os.getenv("AAH_PRESET_PATH", "").strip()
+                else None
+            ),
+            lora_catalog_override=(
+                Path(os.environ["AAH_LORA_CATALOG_PATH"]).expanduser()
+                if os.getenv("AAH_LORA_CATALOG_PATH", "").strip()
+                else None
+            ),
+            personal_styles_override=(
+                Path(os.environ["AAH_PERSONAL_STYLES_PATH"]).expanduser()
+                if os.getenv("AAH_PERSONAL_STYLES_PATH", "").strip()
                 else None
             ),
             delivery_targets_override=(
@@ -102,6 +124,26 @@ class Settings:
             lite_users_override=(
                 Path(os.environ["AAH_LITE_USERS_PATH"]).expanduser()
                 if os.getenv("AAH_LITE_USERS_PATH", "").strip()
+                else None
+            ),
+            character_dictionary_override=(
+                Path(os.environ["AAH_CHARACTER_DICTIONARY_PATH"]).expanduser()
+                if os.getenv("AAH_CHARACTER_DICTIONARY_PATH", "").strip()
+                else None
+            ),
+            character_dictionary_edits_override=(
+                Path(os.environ["AAH_CHARACTER_DICTIONARY_EDITS_PATH"]).expanduser()
+                if os.getenv("AAH_CHARACTER_DICTIONARY_EDITS_PATH", "").strip()
+                else None
+            ),
+            character_favorites_override=(
+                Path(os.environ["AAH_CHARACTER_FAVORITES_PATH"]).expanduser()
+                if os.getenv("AAH_CHARACTER_FAVORITES_PATH", "").strip()
+                else None
+            ),
+            web_root=(
+                Path(os.environ["AAH_WEB_ROOT"]).expanduser()
+                if os.getenv("AAH_WEB_ROOT", "").strip()
                 else None
             ),
             remote_job_timeout_seconds=_float_env(
@@ -120,6 +162,16 @@ class Settings:
         return self.preset_override or (self.plugin_data_dir / "presets.json")
 
     @property
+    def kp_prompt_pool_path(self) -> Path:
+        return self.kp_prompt_pool_override or (
+            self.plugin_data_dir / "kp_prompt_pool.json"
+        )
+
+    @property
+    def bundled_kp_prompt_pool_path(self) -> Path:
+        return self.plugin_dir / "data" / "kp_prompt_pool.json"
+
+    @property
     def output_dir(self) -> Path:
         return self.comfyui_root / "output"
 
@@ -136,6 +188,38 @@ class Settings:
     @property
     def hub_state_dir(self) -> Path:
         return self.plugin_data_dir / "hub_state"
+
+    @property
+    def lora_root(self) -> Path:
+        return self.comfyui_root / "models" / "loras"
+
+    @property
+    def lora_catalog_path(self) -> Path:
+        return self.lora_catalog_override or (self.hub_state_dir / "lora_catalog.json")
+
+    @property
+    def personal_styles_path(self) -> Path:
+        return self.personal_styles_override or (
+            self.hub_state_dir / "personal_styles.json"
+        )
+
+    @property
+    def character_dictionary_path(self) -> Path:
+        return self.character_dictionary_override or (
+            self.plugin_data_dir / "character_dictionary.json"
+        )
+
+    @property
+    def character_dictionary_edits_path(self) -> Path:
+        return self.character_dictionary_edits_override or (
+            self.hub_state_dir / "character_dictionary_edits.json"
+        )
+
+    @property
+    def character_favorites_path(self) -> Path:
+        return self.character_favorites_override or (
+            self.hub_state_dir / "character_favorites.json"
+        )
 
     @property
     def backup_dir(self) -> Path:
@@ -178,6 +262,10 @@ class Settings:
             raise ValueError("AAH_REQUEST_TIMEOUT_SECONDS must be positive")
         if self.remote_job_timeout_seconds <= 0:
             raise ValueError("AAH_REMOTE_JOB_TIMEOUT_SECONDS must be positive")
+        if self.web_root is not None and not (
+            self.web_root / "index.html"
+        ).is_file():
+            raise ValueError("AAH_WEB_ROOT must contain a built Web App index.html")
         if not self.astrbot_bot_id or any(
             value not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-"
             for value in self.astrbot_bot_id

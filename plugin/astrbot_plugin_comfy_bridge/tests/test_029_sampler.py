@@ -51,6 +51,12 @@ class SamplerPresetTests(unittest.TestCase):
         self.assertEqual(options["sampler_steps"], "36")
         self.assertEqual(options["sampler_cfg"], "5.5")
 
+        prompt, options = parse_generation_directives(
+            "调度器=karras scheduler=beta rainy alley"
+        )
+        self.assertEqual(prompt, "rainy alley")
+        self.assertEqual(options["scheduler"], "beta")
+
     def test_default_keeps_existing_sampler_settings(self) -> None:
         workflow, _ = prepare_workflow(
             template(),

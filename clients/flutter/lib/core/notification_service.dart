@@ -10,6 +10,7 @@ class NotificationService {
     if (_initialized) return;
     const settings = InitializationSettings(
       android: AndroidInitializationSettings('@mipmap/ic_launcher'),
+      web: WebInitializationSettings(),
       windows: WindowsInitializationSettings(
         appName: 'AstrAutoAnima Hub',
         appUserModelId: 'RelN.AstrAutoAnima.Hub.Client',
@@ -22,6 +23,15 @@ class NotificationService {
 
   Future<bool> requestPermission() async {
     await initialize();
+    if (kIsWeb) {
+      final web = _plugin.resolvePlatformSpecificImplementation<
+          WebFlutterLocalNotificationsPlugin>();
+      if (web == null) return false;
+      if (web.permissionStatus == WebNotificationPermission.granted) {
+        return true;
+      }
+      return await web.requestNotificationsPermission() ?? false;
+    }
     if (defaultTargetPlatform != TargetPlatform.android) return true;
     return await _plugin
             .resolvePlatformSpecificImplementation<
@@ -32,15 +42,19 @@ class NotificationService {
 
   Future<void> showServerOnline({required String baseUrl}) async {
     await initialize();
-    const details = NotificationDetails(
-      android: AndroidNotificationDetails(
+    final details = NotificationDetails(
+      android: const AndroidNotificationDetails(
         'server_online',
         '服务器上线提醒',
         channelDescription: '工作站从离线恢复为在线时提醒',
         importance: Importance.high,
         priority: Priority.high,
       ),
-      windows: WindowsNotificationDetails(),
+      web: WebNotificationDetails(
+        iconUrl: Uri.parse('icons/Icon-192.png'),
+        lang: 'zh-CN',
+      ),
+      windows: const WindowsNotificationDetails(),
     );
     await _plugin.show(
       id: 1001,

@@ -161,6 +161,111 @@ class HubApi {
     );
   }
 
+  Future<WorkstationMetrics> getWorkstationMetrics() async {
+    return WorkstationMetrics.fromJson(
+      await _get('/api/v1/workstation/metrics'),
+    );
+  }
+
+  Future<CharacterDictionaryResult> searchCharacters({
+    String query = '',
+    int limit = 20,
+    int page = 1,
+  }) async {
+    return CharacterDictionaryResult.fromJson(
+      await _get(
+        '/api/v1/lite/characters',
+        query: {
+          if (query.trim().isNotEmpty) 'query': query.trim(),
+          'limit': '$limit',
+          'page': '$page',
+        },
+      ),
+    );
+  }
+
+  Future<CharacterDictionaryResult> getAdminCharacters({
+    String query = '',
+    int page = 1,
+    int pageSize = 50,
+    bool includeDisabled = true,
+  }) async {
+    return CharacterDictionaryResult.fromJson(
+      await _get(
+        '/api/v1/admin/characters',
+        query: {
+          if (query.trim().isNotEmpty) 'query': query.trim(),
+          'page': '$page',
+          'page_size': '$pageSize',
+          'include_disabled': '$includeDisabled',
+        },
+      ),
+    );
+  }
+
+  Future<MutationResult> updateCharacter({
+    required String tag,
+    required String revision,
+    required Map<String, dynamic> value,
+  }) async {
+    return MutationResult.fromJson(
+      await _write(
+        'PATCH',
+        '/api/v1/admin/characters/${Uri.encodeComponent(tag)}',
+        revision: revision,
+        body: value,
+      ),
+    );
+  }
+
+  Future<MutationResult> deleteCharacter({
+    required String tag,
+    required String revision,
+  }) async {
+    return MutationResult.fromJson(
+      await _write(
+        'DELETE',
+        '/api/v1/admin/characters/${Uri.encodeComponent(tag)}',
+        revision: revision,
+      ),
+    );
+  }
+
+  Future<CharacterFavoriteListResult> getCharacterFavorites() async {
+    return CharacterFavoriteListResult.fromJson(
+      await _get('/api/v1/lite/character-favorites'),
+    );
+  }
+
+  Future<CharacterFavoriteListResult> saveCharacterFavorite({
+    required String tag,
+    required String revision,
+    required String name,
+    required String mode,
+  }) async {
+    return CharacterFavoriteListResult.fromJson(
+      await _write(
+        'PUT',
+        '/api/v1/lite/character-favorites/${Uri.encodeComponent(tag)}',
+        revision: revision,
+        body: {'name': name, 'mode': mode},
+      ),
+    );
+  }
+
+  Future<CharacterFavoriteListResult> deleteCharacterFavorite({
+    required String tag,
+    required String revision,
+  }) async {
+    return CharacterFavoriteListResult.fromJson(
+      await _write(
+        'DELETE',
+        '/api/v1/lite/character-favorites/${Uri.encodeComponent(tag)}',
+        revision: revision,
+      ),
+    );
+  }
+
   Future<PromptPageResult> getPrompts({
     String source = '',
     String safety = '',
@@ -186,6 +291,79 @@ class HubApi {
 
   Future<PresetListResult> getPresets() async {
     return PresetListResult.fromJson(await _get('/api/v1/presets'));
+  }
+
+  Future<LiteUserListResult> getLiteUsers() async {
+    return LiteUserListResult.fromJson(
+      await _get('/api/v1/admin/lite-users'),
+    );
+  }
+
+  Future<LiteUserIssueResult> createLiteUser({
+    required String revision,
+    required String qq,
+    required String label,
+    required bool allowGroup,
+  }) async {
+    return LiteUserIssueResult.fromJson(
+      await _write(
+        'POST',
+        '/api/v1/admin/lite-users',
+        revision: revision,
+        body: {
+          'qq': qq,
+          'label': label,
+          'allow_group': allowGroup,
+        },
+      ),
+    );
+  }
+
+  Future<MutationResult> updateLiteUser({
+    required String qq,
+    required String revision,
+    String? label,
+    bool? allowGroup,
+    bool? enabled,
+  }) async {
+    return MutationResult.fromJson(
+      await _write(
+        'PATCH',
+        '/api/v1/admin/lite-users/${Uri.encodeComponent(qq)}',
+        revision: revision,
+        body: {
+          if (label != null) 'label': label,
+          if (allowGroup != null) 'allow_group': allowGroup,
+          if (enabled != null) 'enabled': enabled,
+        },
+      ),
+    );
+  }
+
+  Future<LiteUserIssueResult> rotateLiteUserToken({
+    required String qq,
+    required String revision,
+  }) async {
+    return LiteUserIssueResult.fromJson(
+      await _write(
+        'POST',
+        '/api/v1/admin/lite-users/${Uri.encodeComponent(qq)}/rotate',
+        revision: revision,
+      ),
+    );
+  }
+
+  Future<MutationResult> deleteLiteUser({
+    required String qq,
+    required String revision,
+  }) async {
+    return MutationResult.fromJson(
+      await _write(
+        'DELETE',
+        '/api/v1/admin/lite-users/${Uri.encodeComponent(qq)}',
+        revision: revision,
+      ),
+    );
   }
 
   Future<PresetListResult> getLitePresets() async {
@@ -248,6 +426,76 @@ class HubApi {
           'page': '$page',
           'page_size': '$pageSize',
         },
+      ),
+    );
+  }
+
+  Future<PromptLikeResult> likeJobPrompt({
+    required String jobId,
+    required String promptId,
+  }) async {
+    return PromptLikeResult.fromJson(
+      await _post(
+        '/api/v1/lite/jobs/${Uri.encodeComponent(jobId)}/likes/${Uri.encodeComponent(promptId)}',
+        body: const {},
+      ),
+    );
+  }
+
+  Future<LoraCatalogResult> getLoraCatalog() async {
+    return LoraCatalogResult.fromJson(await _get('/api/v1/admin/loras'));
+  }
+
+  Future<LoraCatalogResult> getStyleLoras() async {
+    return LoraCatalogResult.fromJson(await _get('/api/v1/lite/style-loras'));
+  }
+
+  Future<MutationResult> updateLora({
+    required String path,
+    required String revision,
+    required Map<String, dynamic> value,
+  }) async {
+    final encodedPath = path.split('/').map(Uri.encodeComponent).join('/');
+    return MutationResult.fromJson(
+      await _write(
+        'PATCH',
+        '/api/v1/admin/loras/$encodedPath',
+        revision: revision,
+        body: value,
+      ),
+    );
+  }
+
+  Future<PersonalStyleListResult> getPersonalStyles() async {
+    return PersonalStyleListResult.fromJson(
+      await _get('/api/v1/lite/personal-styles'),
+    );
+  }
+
+  Future<PersonalStyleListResult> savePersonalStyle({
+    required int slot,
+    required String revision,
+    required Map<String, dynamic> value,
+  }) async {
+    return PersonalStyleListResult.fromJson(
+      await _write(
+        'PUT',
+        '/api/v1/lite/personal-styles/$slot',
+        revision: revision,
+        body: value,
+      ),
+    );
+  }
+
+  Future<PersonalStyleListResult> deletePersonalStyle({
+    required int slot,
+    required String revision,
+  }) async {
+    return PersonalStyleListResult.fromJson(
+      await _write(
+        'DELETE',
+        '/api/v1/lite/personal-styles/$slot',
+        revision: revision,
       ),
     );
   }

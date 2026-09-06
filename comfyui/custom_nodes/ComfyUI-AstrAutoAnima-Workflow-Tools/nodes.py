@@ -116,10 +116,18 @@ _CLOTHING_WORDS = {
 }
 
 _APPEARANCE_WORDS = {
-    "hair", "eyes", "skin", "freckles", "mole", "fangs", "animal ears",
-    "fox ears", "wolf ears", "cat ears", "tail", "wings", "halo", "horns",
+    "hair", "eyes", "skin", "freckles", "mole",
     "twintails", "ponytail", "braid", "bangs", "long hair", "short hair",
     "blush", "smile", "open mouth", "closed eyes",
+}
+
+_SPECIAL_FEATURE_WORDS = {
+    "animal ears", "fox ears", "wolf ears", "cat ears", "dog ears",
+    "bunny ears", "rabbit ears", "horse ears", "mouse ears", "bear ears",
+    "tail", "fox tail", "wolf tail", "cat tail", "dog tail", "dragon tail",
+    "multiple tails", "wings", "feathered wings", "bat wings", "dragon wings",
+    "halo", "horns", "antlers", "fangs", "claws", "paw", "paws",
+    "scales", "fin", "fins", "gills", "tentacles", "kemonomimi",
 }
 
 _TRAINING_NOISE_TAGS = {
@@ -383,6 +391,230 @@ def _extract_json_object(text: str) -> dict[str, Any]:
     return {}
 
 
+def _parse_prompt_batch(value: Any, *, max_batch: int = 8) -> list[str]:
+    try:
+        parsed = json.loads(str(value or ""))
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"prompts_json must be a JSON string array: {exc}") from exc
+    if not isinstance(parsed, list):
+        raise ValueError("prompts_json must be a JSON string array")
+    prompts = [str(item).strip() for item in parsed]
+    if not prompts or any(not item for item in prompts):
+        raise ValueError("prompt batch must contain 1 or more non-empty strings")
+    if len(prompts) > max_batch:
+        raise ValueError(f"prompt batch size {len(prompts)} exceeds {max_batch}")
+    return prompts
+
+
+def _pad_and_cat_tensors(values: list[Any], torch_module: Any) -> Any:
+    if not values:
+        raise ValueError("cannot batch an empty tensor list")
+    ranks = {int(value.ndim) for value in values}
+    if len(ranks) != 1:
+        raise ValueError("conditioning tensors have different ranks")
+    rank = ranks.pop()
+    if rank == 0:
+        return torch_module.stack(values, dim=0)
+    if rank == 1:
+        max_tokens = max(int(value.shape[0]) for value in values)
+        padded_vectors: list[Any] = []
+        for value in values:
+            if int(value.shape[0]) == max_tokens:
+                padded_vectors.append(value)
+                continue
+            expanded = value.new_zeros([max_tokens])
+            expanded[: int(value.shape[0])] = value
+            padded_vectors.append(expanded)
+        return torch_module.stack(padded_vectors, dim=0)
+
+    tail_shapes = {tuple(int(size) for size in value.shape[2:]) for value in values}
+    if len(tail_shapes) != 1:
+        raise ValueError("conditioning tensor feature dimensions do not match")
+    max_tokens = max(int(value.shape[1]) for value in values)
+    padded: list[Any] = []
+    for value in values:
+        if int(value.shape[1]) == max_tokens:
+            padded.append(value)
+            continue
+        target_shape = [int(value.shape[0]), max_tokens, *map(int, value.shape[2:])]
+        expanded = value.new_zeros(target_shape)
+        slices = [slice(None), slice(0, int(value.shape[1]))]
+        slices.extend(slice(None) for _ in value.shape[2:])
+        expanded[tuple(slices)] = value
+        padded.append(expanded)
+    return torch_module.cat(padded, dim=0)
+
+
+def _merge_prompt_conditioning(encoded: list[Any]) -> list[Any]:
+    try:
+        import torch
+    except ImportError as exc:  # pragma: no cover - ComfyUI always provides torch
+        raise RuntimeError("AnimaPromptBatchEncode requires ComfyUI's torch runtime") from exc
+
+    if not encoded or any(not isinstance(item, (list, tuple)) for item in encoded):
+        raise ValueError("CLIP returned an invalid conditioning structure")
+    entry_counts = {len(item) for item in encoded}
+    if len(entry_counts) != 1:
+        raise ValueError("prompts produced different conditioning schedules")
+
+    output: list[Any] = []
+    for entry_index in range(next(iter(entry_counts))):
+        entries = [item[entry_index] for item in encoded]
+        if any(not isinstance(entry, (list, tuple)) or len(entry) != 2 for entry in entries):
+            raise ValueError("CLIP returned an unsupported conditioning entry")
+        tensors = [entry[0] for entry in entries]
+        metadata = [entry[1] for entry in entries]
+        if any(not isinstance(item, dict) for item in metadata):
+            raise ValueError("CLIP conditioning metadata must be dictionaries")
+
+        combined_meta: dict[str, Any] = {}
+        keys = set(metadata[0])
+        if any(set(item) != keys for item in metadata[1:]):
+            raise ValueError("prompts produced different conditioning metadata keys")
+        for key in keys:
+            values = [item[key] for item in metadata]
+            if all(torch.is_tensor(value) for value in values):
+                combined_meta[key] = _pad_and_cat_tensors(values, torch)
+            else:
+                first = values[0]
+                try:
+                    equal = all(value == first for value in values[1:])
+                except Exception:
+                    equal = False
+                if not equal:
+                    raise ValueError(
+                        f"conditioning metadata {key!r} differs between prompts"
+                    )
+                combined_meta[key] = first
+        output.append([_pad_and_cat_tensors(tensors, torch), combined_meta])
+    return output
+
+
+def install_anima_batch_conditioning_compat() -> bool:
+    """Teach ComfyUI's Anima adapter to accept batched T5 token metadata.
+
+    ComfyUI 0.21.1 assumes ``t5xxl_ids`` and ``t5xxl_weights`` are one-
+    dimensional and always adds a batch dimension.  ``AnimaPromptBatchEncode``
+    already emits ``[batch, tokens]`` metadata, so the unconditional unsqueeze
+    turns it into ``[1, batch, tokens]`` and breaks rotary attention.  Preserve
+    the upstream implementation for ordinary single-prompt conditioning and
+    only replace the batched path.
+    """
+
+    try:
+        import torch
+        import comfy.conds as comfy_conds
+        import comfy.model_base as model_base
+    except ImportError:
+        return False
+
+    anima_class = getattr(model_base, "Anima", None)
+    if anima_class is None:
+        return False
+
+    original = anima_class.extra_conds
+    if bool(getattr(original, "_astr_auto_anima_batch_compat", False)):
+        return True
+
+    base_extra_conds = anima_class.__mro__[1].extra_conds
+
+    def extra_conds_with_batch_support(self, **kwargs):
+        token_ids = kwargs.get("t5xxl_ids")
+        token_rank = int(getattr(token_ids, "ndim", 0)) if token_ids is not None else 0
+        if token_ids is None or token_rank <= 1:
+            return original(self, **kwargs)
+        if token_rank != 2:
+            raise RuntimeError(
+                "AstrAutoAnima batch conditioning expected t5xxl_ids with "
+                f"rank 2, got rank {token_rank}."
+            )
+
+        cross_attn = kwargs.get("cross_attn")
+        if cross_attn is None:
+            return original(self, **kwargs)
+        if int(cross_attn.shape[0]) != int(token_ids.shape[0]):
+            raise RuntimeError(
+                "AstrAutoAnima batch conditioning has different prompt and "
+                f"token batch sizes: {cross_attn.shape[0]} != {token_ids.shape[0]}."
+            )
+
+        out = base_extra_conds(self, **kwargs)
+        token_weights = kwargs.get("t5xxl_weights")
+        device = kwargs["device"]
+
+        if token_weights is not None:
+            weight_rank = int(getattr(token_weights, "ndim", 0))
+            if weight_rank == 1:
+                token_weights = token_weights.unsqueeze(0).unsqueeze(-1)
+            elif weight_rank == 2:
+                token_weights = token_weights.unsqueeze(-1)
+            elif weight_rank != 3:
+                raise RuntimeError(
+                    "AstrAutoAnima batch conditioning expected t5xxl_weights "
+                    f"with rank 1, 2, or 3, got rank {weight_rank}."
+                )
+
+        if torch.is_inference_mode_enabled():
+            inference_dtype = self.get_dtype_inference()
+            prepared_weights = (
+                token_weights.to(device=device, dtype=inference_dtype)
+                if token_weights is not None
+                else None
+            )
+            cross_attn = self.diffusion_model.preprocess_text_embeds(
+                cross_attn.to(device=device, dtype=inference_dtype),
+                token_ids.to(device=device),
+                t5xxl_weights=prepared_weights,
+            )
+        else:
+            out["t5xxl_ids"] = comfy_conds.CONDRegular(token_ids)
+            if token_weights is not None:
+                out["t5xxl_weights"] = comfy_conds.CONDRegular(token_weights)
+
+        out["c_crossattn"] = comfy_conds.CONDRegular(cross_attn)
+        return out
+
+    extra_conds_with_batch_support._astr_auto_anima_batch_compat = True
+    extra_conds_with_batch_support._astr_auto_anima_original = original
+    anima_class.extra_conds = extra_conds_with_batch_support
+    return True
+
+
+class AnimaPromptBatchEncode:
+    CATEGORY = "AstrAutoAnima/Generation"
+    FUNCTION = "encode"
+    RETURN_TYPES = ("CONDITIONING",)
+    RETURN_NAMES = ("conditioning",)
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "clip": ("CLIP", {"forceInput": True}),
+                "prompts_json": (
+                    "STRING",
+                    {
+                        "default": "[\"1girl, solo\", \"1girl, outdoors\"]",
+                        "multiline": True,
+                    },
+                ),
+            }
+        }
+
+    def encode(self, clip, prompts_json):
+        if not install_anima_batch_conditioning_compat():
+            raise RuntimeError(
+                "Anima batched conditioning compatibility could not be enabled; "
+                "restart ComfyUI after installing the complete workflow tools package."
+            )
+        prompts = _parse_prompt_batch(prompts_json)
+        encoded = [
+            clip.encode_from_tokens_scheduled(clip.tokenize(prompt))
+            for prompt in prompts
+        ]
+        return (_merge_prompt_conditioning(encoded),)
+
+
 def _json_list(value: Any) -> list[str]:
     if isinstance(value, list):
         return _unique(str(item) for item in value if item is not None)
@@ -397,6 +629,7 @@ def _categorize_tags(tags: Iterable[str]) -> dict[str, list[str]]:
         "action": [],
         "character": [],
         "appearance": [],
+        "special_features": [],
         "clothing": [],
         "composition": [],
         "other": [],
@@ -414,6 +647,8 @@ def _categorize_tags(tags: Iterable[str]) -> dict[str, list[str]]:
             result["scene"].append(tag)
         elif _contains_keyword(tag, _CLOTHING_WORDS):
             result["clothing"].append(tag)
+        elif _contains_keyword(tag, _SPECIAL_FEATURE_WORDS):
+            result["special_features"].append(tag)
         elif _contains_keyword(tag, _APPEARANCE_WORDS):
             result["appearance"].append(tag)
         else:
@@ -1000,6 +1235,7 @@ class AnimaReverseCompiler:
                 "include_action": ("BOOLEAN", {"default": True}),
                 "include_character": ("BOOLEAN", {"default": True}),
                 "include_appearance": ("BOOLEAN", {"default": True}),
+                "include_special_features": ("BOOLEAN", {"default": True}),
                 "include_clothing": ("BOOLEAN", {"default": True}),
                 "include_composition": ("BOOLEAN", {"default": True}),
                 "include_other": ("BOOLEAN", {"default": True}),
@@ -1023,6 +1259,7 @@ class AnimaReverseCompiler:
         include_action,
         include_character,
         include_appearance,
+        include_special_features,
         include_clothing,
         include_composition,
         include_other,
@@ -1046,7 +1283,7 @@ class AnimaReverseCompiler:
 
         categorized = _categorize_tags([*wd["general"], *ct["general"]])
         categorized["character"] = _unique([*wd["character"], *ct["character"], *categorized["character"]])
-        for key in ("scene", "action", "character", "appearance", "clothing", "composition", "other"):
+        for key in ("scene", "action", "character", "appearance", "special_features", "clothing", "composition", "other"):
             categorized[key] = _unique([*categorized[key], *_json_list(joy.get(key))])
 
         all_tags = _unique([*wd["tags"], *ct["tags"], *sum(categorized.values(), [])])
@@ -1057,19 +1294,20 @@ class AnimaReverseCompiler:
             "action": bool(_first(include_action, True)),
             "character": bool(_first(include_character, True)),
             "appearance": bool(_first(include_appearance, True)),
+            "special_features": bool(_first(include_special_features, True)),
             "clothing": bool(_first(include_clothing, True)),
             "composition": bool(_first(include_composition, True)),
             "other": bool(_first(include_other, True)),
             "safety": bool(_first(include_safety, True)),
         }
         if selected_preset == "scene":
-            enabled.update(action=False, character=False, appearance=False, clothing=False, other=False)
+            enabled.update(action=False, character=False, appearance=False, special_features=False, clothing=False, other=False)
         elif selected_preset == "action":
-            enabled.update(scene=False, character=False, appearance=False, clothing=False, other=False)
+            enabled.update(scene=False, character=False, appearance=False, special_features=False, clothing=False, other=False)
         elif selected_preset == "character":
             enabled.update(scene=False, action=False, composition=False, other=False)
         elif selected_preset == "raw":
-            enabled.update(scene=False, action=False, character=False, appearance=False, clothing=False, composition=False, other=False)
+            enabled.update(scene=False, action=False, character=False, appearance=False, special_features=False, clothing=False, composition=False, other=False)
 
         if selected_preset == "safe" or (
             selected_preset == "custom" and enabled["safety"]
@@ -1078,7 +1316,7 @@ class AnimaReverseCompiler:
             for key, values in categorized.items():
                 categorized[key] = [tag for tag in values if not _contains_keyword(tag, blocked)]
 
-        order = ["character", "appearance", "clothing", "action", "composition", "scene", "other"]
+        order = ["character", "appearance", "special_features", "clothing", "action", "composition", "scene", "other"]
         prompt_parts: list[str] = []
         if selected_preset == "raw":
             # Raw mode bypasses category selection, but still normalizes,
@@ -1136,7 +1374,7 @@ class AnimaReverseResultSaver:
                 "image": ("IMAGE", {"forceInput": True}),
                 "structured_json": ("STRING", {"forceInput": True}),
                 "anima_prompt": ("STRING", {"forceInput": True}),
-                "storage_root": ("STRING", {"default": "astr_auto_anima/reverse_history"}),
+                "storage_root": ("STRING", {"default": "/workspace/astrbot-runtime/data/plugin_data/astrbot_plugin_comfy_bridge/reverse_history"}),
                 "qq_user_id": ("STRING", {"default": ""}),
                 "session_type": (["unknown", "private", "group"], {"default": "unknown"}),
                 "session_id": ("STRING", {"default": ""}),
@@ -1160,23 +1398,11 @@ class AnimaReverseResultSaver:
         save_thumbnail,
     ):
         root = Path(str(storage_root)).expanduser().resolve()
-        configured = os.getenv("AAA_REVERSE_ALLOWED_ROOTS", "").strip()
-        allowed_roots = [
-            Path(value).expanduser().resolve()
-            for value in configured.split(os.pathsep)
-            if value.strip()
-        ]
-        if not allowed_roots:
-            workspace = Path("/workspace")
-            allowed_roots = [
-                (workspace if workspace.is_dir() else Path.cwd()).resolve()
-            ]
-        if not any(root == base or base in root.parents for base in allowed_roots):
-            allowed = ", ".join(str(path) for path in allowed_roots)
-            raise ValueError(
-                f"storage_root is outside AAA_REVERSE_ALLOWED_ROOTS: {root}; "
-                f"allowed roots: {allowed}"
-            )
+        workspace = Path("/workspace").resolve()
+        try:
+            root.relative_to(workspace)
+        except ValueError as exc:
+            raise ValueError(f"storage_root must stay under /workspace: {root}") from exc
 
         tensor = image[0].detach().cpu().numpy() if hasattr(image[0], "detach") else np.asarray(image[0])
         array = np.clip(tensor * 255.0, 0, 255).astype(np.uint8)

@@ -2,6 +2,7 @@ import sys
 import tempfile
 import types
 import unittest
+import json
 from pathlib import Path
 
 
@@ -28,6 +29,7 @@ def install_astrbot_stubs():
         command = staticmethod(decorator)
         event_message_type = staticmethod(decorator)
         permission_type = staticmethod(decorator)
+        llm_tool = staticmethod(decorator)
 
     FakeFilter.PermissionType = PermissionType
 
@@ -134,6 +136,9 @@ class FakeEvent:
     def stop_event(self):
         self.stopped = True
 
+    def is_admin(self):
+        return False
+
 
 class MainImportTests(unittest.TestCase):
     def test_plugin_imports_and_pending_key_is_session_scoped(self):
@@ -149,6 +154,24 @@ class MainImportTests(unittest.TestCase):
             plugin._pending_key(FakeEvent()),
             ("bot:GroupMessage:12345", "67890"),
         )
+
+    def test_task_scheduler_overrides_preset_and_rejects_unknown_value(self):
+        with tempfile.TemporaryDirectory() as directory:
+            plugin = ComfyWorkflowBridge(
+                object(),
+                {
+                    "input_dir": str(Path(directory) / "inputs"),
+                    "max_concurrency": 1,
+                },
+            )
+            preset, overrides = plugin._sampler_overrides(
+                {"sampler_preset": "2m_sde", "scheduler": "karras"}
+            )
+            self.assertEqual(preset, "2m_sde")
+            self.assertEqual(overrides["sampler_name"], "dpmpp_2m_sde")
+            self.assertEqual(overrides["scheduler"], "karras")
+            with self.assertRaisesRegex(Exception, "调度器选项"):
+                plugin._sampler_overrides({"scheduler": "unknown"})
 
 
 class FakeImageResolver:
@@ -169,7 +192,7 @@ class PendingImageTests(unittest.IsolatedAsyncioTestCase):
             )
             event = FakeEvent()
             await plugin._begin_pending_image(
-                event, {"style": "demo_style"}, "extra tags"
+                event, {"style": "example_style"}, "extra tags"
             )
             self.assertEqual(len(plugin._pending_images), 1)
             plugin._image_resolver = FakeImageResolver()
@@ -191,7 +214,7 @@ class PendingImageTests(unittest.IsolatedAsyncioTestCase):
                 [
                     (
                         "/tmp/input.png",
-                        {"style": "demo_style"},
+                        {"style": "example_style"},
                         "extra tags",
                         "full",
                         (),
@@ -211,14 +234,204 @@ class PendingImageTests(unittest.IsolatedAsyncioTestCase):
                 },
             )
             extra, options, preset, categories, reverse_only = plugin._parse_reverse_body(
-                "模式=场景 角色=demo_character 画风=demo_style rainy night"
+                "模式=场景 角色=example_character 画风=example_style rainy night"
             )
             self.assertEqual(preset, "scene")
-            self.assertEqual(options["character"], "demo_character")
-            self.assertEqual(options["style"], "demo_style")
+            self.assertEqual(options["character"], "example_character")
+            self.assertEqual(options["style"], "example_style")
             self.assertEqual(extra, "rainy night")
             self.assertEqual(categories, ())
             self.assertFalse(reverse_only)
+
+            extra, options, preset, categories, reverse_only = plugin._parse_reverse_body(
+                "角色=example_character 模式=完整"
+            )
+            self.assertEqual(options["style"], "当前画风")
+            self.assertEqual(options["character"], "example_character")
+
+
+class AgentToolTests(unittest.IsolatedAsyncioTestCase):
+    async def test_disabled_agent_tool_does_not_start_generation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            plugin = ComfyWorkflowBridge(
+                object(),
+                {
+                    "input_dir": str(Path(directory) / "inputs"),
+                    "max_concurrency": 1,
+                    "agent_tools_enabled": False,
+                },
+            )
+            result = [
+                item
+                async for item in plugin.anima_generate_image(
+                    FakeEvent(), "1girl, solo"
+                )
+            ]
+            self.assertEqual(result, ["AstrAutoAnima 自主绘图工具当前已关闭。"])
+
+    async def test_agent_tool_uses_its_own_defaults(self):
+        with tempfile.TemporaryDirectory() as directory:
+            preset_path = Path(directory) / "presets.json"
+            preset_path.write_text(
+                json.dumps(
+                    {
+                        "version": 1,
+                        "styles": {"默认画风": {"loras": [], "prompt": ""}},
+                        "characters": {
+                            "默认角色": {"lora": None, "prompt": "1girl"}
+                        },
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            plugin = ComfyWorkflowBridge(
+                object(),
+                {
+                    "input_dir": str(Path(directory) / "inputs"),
+                    "preset_store_path": str(preset_path),
+                    "max_concurrency": 1,
+                    "agent_tools_enabled": True,
+                    "agent_tool_group_enabled": True,
+                    "agent_tool_default_character": "默认角色",
+                    "agent_tool_default_style": "默认画风",
+                    "agent_tool_default_ratio": "9:16",
+                    "agent_tool_default_quality": "quick",
+                    "agent_tool_default_sampler": "2m",
+                    "agent_tool_default_scheduler": "karras",
+                    "agent_tool_user_cooldown_seconds": 0,
+                },
+            )
+            delivered = []
+
+            async def fake_deliver(_event, **kwargs):
+                delivered.append(kwargs)
+                return True
+
+            plugin._deliver_generation = fake_deliver
+            result = [
+                item
+                async for item in plugin.anima_generate_image(
+                    FakeEvent(), "1girl, solo, outdoors"
+                )
+            ]
+            self.assertEqual(len(delivered), 1)
+            self.assertEqual(delivered[0]["options"]["character"], "默认角色")
+            self.assertEqual(delivered[0]["options"]["style"], "默认画风")
+            self.assertEqual(delivered[0]["options"]["ratio"], "9:16")
+            self.assertTrue(delivered[0]["strict_no_style"])
+            self.assertIn("图片已生成并发送", result[0])
+
+
+class FiveDrawBatchTests(unittest.IsolatedAsyncioTestCase):
+    @staticmethod
+    def _plans():
+        return [
+            (
+                {"id": f"B-{index}", "prompt": f"scene {index}"},
+                {"character": "铃兰", "style": "默认画风", "ratio": "2:3"},
+                {},
+            )
+            for index in range(1, 6)
+        ]
+
+    async def test_ordinary_five_draw_uses_2_2_1_micro_batches(self):
+        with tempfile.TemporaryDirectory() as directory:
+            plugin = ComfyWorkflowBridge(
+                object(),
+                {
+                    "input_dir": str(Path(directory) / "inputs"),
+                    "max_concurrency": 1,
+                    "five_draw_batch_enabled": True,
+                    "five_draw_micro_batch_size": 2,
+                },
+            )
+            calls = []
+
+            async def fake_deliver(_event, **kwargs):
+                calls.append(kwargs)
+                return True
+
+            plugin._deliver_generation = fake_deliver
+            successes = await plugin._deliver_random_draw_plans(
+                FakeEvent(),
+                draw_plans=self._plans(),
+                user_prompt="extra",
+                quality="quality",
+                chaos=False,
+            )
+            self.assertEqual(successes, 5)
+            self.assertEqual(
+                [len(call["batch_prompts"]) for call in calls if call.get("batch_prompts")],
+                [2, 2],
+            )
+            self.assertNotIn("batch_prompts", calls[-1])
+            self.assertTrue(all(not call["send_errors"] for call in calls[:-1]))
+
+    async def test_failed_micro_batch_falls_back_only_that_chunk(self):
+        with tempfile.TemporaryDirectory() as directory:
+            plugin = ComfyWorkflowBridge(
+                object(),
+                {
+                    "input_dir": str(Path(directory) / "inputs"),
+                    "max_concurrency": 1,
+                    "five_draw_batch_enabled": True,
+                    "five_draw_micro_batch_size": 2,
+                    "five_draw_batch_fallback_sequential": True,
+                },
+            )
+            calls = []
+
+            async def fake_deliver(_event, **kwargs):
+                calls.append(kwargs)
+                batch = kwargs.get("batch_prompts")
+                return not (batch and "scene 3" in batch[0])
+
+            plugin._deliver_generation = fake_deliver
+            event = FakeEvent()
+            successes = await plugin._deliver_random_draw_plans(
+                event,
+                draw_plans=self._plans(),
+                user_prompt="",
+                quality="",
+                chaos=False,
+            )
+            self.assertEqual(successes, 5)
+            self.assertEqual(
+                [len(call["batch_prompts"]) for call in calls if call.get("batch_prompts")],
+                [2, 2],
+            )
+            fallback_calls = [call for call in calls if not call.get("batch_prompts")]
+            self.assertEqual(len(fallback_calls), 3)
+            self.assertTrue(any("自动改为逐张生成" in text for text in event.sent))
+
+    async def test_chaos_five_draw_remains_sequential(self):
+        with tempfile.TemporaryDirectory() as directory:
+            plugin = ComfyWorkflowBridge(
+                object(),
+                {
+                    "input_dir": str(Path(directory) / "inputs"),
+                    "max_concurrency": 1,
+                    "five_draw_batch_enabled": True,
+                },
+            )
+            calls = []
+
+            async def fake_deliver(_event, **kwargs):
+                calls.append(kwargs)
+                return True
+
+            plugin._deliver_generation = fake_deliver
+            successes = await plugin._deliver_random_draw_plans(
+                FakeEvent(),
+                draw_plans=self._plans(),
+                user_prompt="",
+                quality="",
+                chaos=True,
+            )
+            self.assertEqual(successes, 5)
+            self.assertEqual(len(calls), 5)
+            self.assertTrue(all("batch_prompts" not in call for call in calls))
 
 
 if __name__ == "__main__":

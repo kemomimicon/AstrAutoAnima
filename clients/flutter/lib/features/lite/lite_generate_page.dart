@@ -2,10 +2,12 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../core/command_builder.dart';
+import '../../core/character_use_request.dart';
 import '../../core/hub_api.dart';
 import '../../core/job_image_store.dart';
 import '../../core/models.dart';
@@ -16,6 +18,7 @@ class LiteGeneratePage extends StatefulWidget {
     required this.api,
     required this.serverOnlineReminderEnabled,
     required this.onServerOnlineReminderChanged,
+    this.characterRequest,
     this.serverReachable,
     super.key,
   });
@@ -24,6 +27,7 @@ class LiteGeneratePage extends StatefulWidget {
   final bool serverOnlineReminderEnabled;
   final bool? serverReachable;
   final ValueChanged<bool> onServerOnlineReminderChanged;
+  final ValueListenable<CharacterUseRequest?>? characterRequest;
 
   @override
   State<LiteGeneratePage> createState() => _LiteGeneratePageState();
@@ -32,17 +36,31 @@ class LiteGeneratePage extends StatefulWidget {
 class _LiteGeneratePageState extends State<LiteGeneratePage> {
   final JobImageStore _imageStore = JobImageStore();
   final Set<String> _autoDownloadedJobs = {};
-  late Future<(PresetListResult, DeliveryTargetListResult)> _data = _loadData();
+  final Map<String, RemoteJobResult> _activeJobs = {};
+  final Map<String, Timer> _jobTimers = {};
+  late Future<
+      (
+        PresetListResult,
+        DeliveryTargetListResult,
+        PersonalStyleListResult,
+        CharacterFavoriteListResult
+      )> _data = _loadData();
   final TextEditingController _promptController = TextEditingController();
-  Timer? _jobTimer;
   ImageCommandKind _kind = ImageCommandKind.direct;
   bool _fiveDraw = false;
   bool _submitting = false;
   String _poolFilter = '';
   String _character = '';
+  String _presetCharacter = '';
+  String _dictionaryCharacter = '';
+  bool _useDictionaryCharacter = false;
+  int _characterFieldRevision = 0;
+  String _characterTagMode = 'weak';
   String _style = '';
+  int _personalStyleSlot = 0;
   String _ratio = '';
   String _sampler = '';
+  String _scheduler = '';
   String _reversePreset = 'full';
   bool _customReverseCategories = false;
   final Set<String> _reverseCategories = {'scene', 'action'};
@@ -71,6 +89,9 @@ class _LiteGeneratePageState extends State<LiteGeneratePage> {
     'D': 'D · Discord',
     'C': 'C · Codex',
     'R': 'R · Reverse',
+    'K': 'K · KP 安全模板（独立库）',
+    'K/S': 'K/S · KP 成人模板（仅私聊）',
+    'P': 'P · 我点赞收藏的模板',
     'B/N': 'B/N',
     'D/N': 'D/N',
     'C/N': 'C/N',
@@ -87,6 +108,18 @@ class _LiteGeneratePageState extends State<LiteGeneratePage> {
     '9:16',
     '16:9',
   ];
+  static const _schedulers = <String, String>{
+    '': '原有 · 沿用工作流调度器',
+    'normal': 'normal · 标准',
+    'karras': 'karras',
+    'exponential': 'exponential',
+    'sgm_uniform': 'sgm_uniform',
+    'simple': 'simple',
+    'ddim_uniform': 'ddim_uniform',
+    'beta': 'beta',
+    'linear_quadratic': 'linear_quadratic',
+    'kl_optimal': 'kl_optimal',
+  };
   static const _reversePresets = <String, String>{
     'full': '完整 · 综合角色、动作、场景与构图',
     'scene': '场景 · 环境与构图',
@@ -100,6 +133,7 @@ class _LiteGeneratePageState extends State<LiteGeneratePage> {
     'action': '动作',
     'character': '角色',
     'appearance': '外观',
+    'special_features': '特殊特征',
     'clothing': '服装',
     'composition': '构图',
     'other': '其他',
@@ -109,7 +143,20 @@ class _LiteGeneratePageState extends State<LiteGeneratePage> {
   @override
   void initState() {
     super.initState();
+    widget.characterRequest?.addListener(_applyCharacterRequest);
     unawaited(_loadDownloadSettings());
+  }
+
+  void _applyCharacterRequest() {
+    final request = widget.characterRequest?.value;
+    if (request == null || !mounted) return;
+    setState(() {
+      _character = request.tag;
+      _dictionaryCharacter = request.tag;
+      _useDictionaryCharacter = true;
+      _characterTagMode = request.mode;
+      _characterFieldRevision = request.sequence;
+    });
   }
 
   Future<void> _loadDownloadSettings() async {
@@ -142,6 +189,10 @@ class _LiteGeneratePageState extends State<LiteGeneratePage> {
   }
 
   Future<void> _chooseDownloadDirectory() async {
+    if (!_imageStore.supportsDirectorySelection) {
+      _notice('Web App 会使用 Safari 的下载目录，保存位置由浏览器管理。');
+      return;
+    }
     if (_imageStore.usesPublicDownloads) {
       try {
         final selected = await _imageStore.chooseAndroidDirectory(
@@ -204,21 +255,44 @@ class _LiteGeneratePageState extends State<LiteGeneratePage> {
         job: job,
         directory: directory,
       );
-      _notice('已自动保存 ${paths.length} 张图片到 $directory');
+      _notice(
+        _imageStore.usesBrowserDownloads
+            ? '已向浏览器提交 ${paths.length} 张图片下载'
+            : '已自动保存 ${paths.length} 张图片到 $directory',
+      );
     } on Exception catch (error) {
       _notice('任务已完成，但自动保存失败：$error', error: true);
     }
   }
 
-  Future<(PresetListResult, DeliveryTargetListResult)> _loadData() async {
-    final presets = await widget.api.getLitePresets();
-    final targets = await widget.api.getDeliveryTargets();
-    return (presets, targets);
+  Future<
+      (
+        PresetListResult,
+        DeliveryTargetListResult,
+        PersonalStyleListResult,
+        CharacterFavoriteListResult
+      )> _loadData() async {
+    final values = await Future.wait([
+      widget.api.getLitePresets(),
+      widget.api.getDeliveryTargets(),
+      widget.api.getPersonalStyles(),
+      widget.api.getCharacterFavorites(),
+    ]);
+    return (
+      values[0] as PresetListResult,
+      values[1] as DeliveryTargetListResult,
+      values[2] as PersonalStyleListResult,
+      values[3] as CharacterFavoriteListResult,
+    );
   }
 
   @override
   void dispose() {
-    _jobTimer?.cancel();
+    for (final timer in _jobTimers.values) {
+      timer.cancel();
+    }
+    _jobTimers.clear();
+    widget.characterRequest?.removeListener(_applyCharacterRequest);
     _promptController.dispose();
     super.dispose();
   }
@@ -230,9 +304,11 @@ class _LiteGeneratePageState extends State<LiteGeneratePage> {
         fiveDraw: _fiveDraw,
         poolFilter: _poolFilter.isEmpty ? _safety : _poolFilter,
         character: _character,
+        characterTagMode: _useDictionaryCharacter ? _characterTagMode : 'off',
         style: _style,
         ratio: _ratio,
         sampler: _sampler,
+        scheduler: _scheduler,
         steps: _customSamplerParameters ? _steps : null,
         cfg: _customSamplerParameters ? _cfg : null,
         prompt: _promptController.text,
@@ -242,14 +318,16 @@ class _LiteGeneratePageState extends State<LiteGeneratePage> {
         reverseOnly: _reverseOnly,
         profile: _profile,
         parentJobId: _parentJobId,
-        scale:
-            (_kind == ImageCommandKind.hq || _kind == ImageCommandKind.refine)
-                ? _enhanceScale
-                : null,
-        denoise:
-            (_kind == ImageCommandKind.hq || _kind == ImageCommandKind.refine)
-                ? _enhanceDenoise
-                : null,
+        scale: (_kind == ImageCommandKind.hq ||
+                    _kind == ImageCommandKind.refine) &&
+                _profile != 'seedvr2'
+            ? _enhanceScale
+            : null,
+        denoise: (_kind == ImageCommandKind.hq ||
+                    _kind == ImageCommandKind.refine) &&
+                _profile != 'seedvr2'
+            ? _enhanceDenoise
+            : null,
       );
 
   String get _kindValue => switch (_kind) {
@@ -323,6 +401,7 @@ class _LiteGeneratePageState extends State<LiteGeneratePage> {
   }
 
   Future<void> _submit(List<DeliveryTarget> targets) async {
+    if (_submitting) return;
     final target = targets.where((item) => item.id == _targetId).firstOrNull;
     if (target == null) {
       _notice('请先选择投递目标。', error: true);
@@ -346,6 +425,14 @@ class _LiteGeneratePageState extends State<LiteGeneratePage> {
         _sourceImage == null &&
         !(_kind == ImageCommandKind.refine && _parentJobId.trim().isNotEmpty)) {
       _notice('图片反推/精修必须选择图片，精修也可以填写历史任务 ID。', error: true);
+      return;
+    }
+    if (_kind == ImageCommandKind.refine &&
+        _profile != 'seedvr2' &&
+        _sourceImage != null &&
+        _parentJobId.trim().isEmpty &&
+        _promptController.text.trim().isEmpty) {
+      _notice('上传外部图片精修时必须填写补充提示词，或填写历史任务 ID。', error: true);
       return;
     }
     if (_kind == ImageCommandKind.reverse && target.isGroup) {
@@ -409,9 +496,14 @@ class _LiteGeneratePageState extends State<LiteGeneratePage> {
         'five_draw': _fiveDraw,
         'pool_filter': _poolFilter,
         'character': _character,
+        'character_tag_mode':
+            _useDictionaryCharacter ? _characterTagMode : 'off',
         'style': _style,
+        if (!(_kind == ImageCommandKind.chaos) && _personalStyleSlot > 0)
+          'personal_style_slot': _personalStyleSlot,
         'ratio': _ratio,
         'sampler': _sampler,
+        'scheduler': _scheduler,
         if (_customSamplerParameters) 'steps': _steps,
         if (_customSamplerParameters) 'cfg': _cfg,
         'prompt': _promptController.text.trim(),
@@ -428,8 +520,8 @@ class _LiteGeneratePageState extends State<LiteGeneratePage> {
         if (_kind == ImageCommandKind.hq ||
             _kind == ImageCommandKind.refine) ...{
           'profile': _profile,
-          'scale': _enhanceScale,
-          'denoise': _enhanceDenoise,
+          if (_profile != 'seedvr2') 'scale': _enhanceScale,
+          if (_profile != 'seedvr2') 'denoise': _enhanceDenoise,
           if (_kind == ImageCommandKind.refine)
             'parent_job_id': _parentJobId.trim(),
           if (_kind == ImageCommandKind.refine && _sourceImage != null) ...{
@@ -440,12 +532,16 @@ class _LiteGeneratePageState extends State<LiteGeneratePage> {
         },
       });
       if (!mounted) return;
-      setState(() => _job = job);
-      _jobTimer?.cancel();
-      _jobTimer = Timer.periodic(
+      setState(() {
+        _job = job;
+        _activeJobs[job.id] = job;
+      });
+      _jobTimers.remove(job.id)?.cancel();
+      _jobTimers[job.id] = Timer.periodic(
         const Duration(seconds: 2),
         (_) => unawaited(_pollJob(job.id)),
       );
+      _notice('任务已加入队列，可继续提交新任务。');
       unawaited(_pollJob(job.id));
     } on HubApiException catch (error) {
       _notice(error.message, error: true);
@@ -458,16 +554,35 @@ class _LiteGeneratePageState extends State<LiteGeneratePage> {
     try {
       final job = await widget.api.getRemoteJob(id);
       if (!mounted) return;
-      setState(() => _job = job);
+      setState(() {
+        if (job.isFinished) {
+          _activeJobs.remove(id);
+        } else {
+          _activeJobs[id] = job;
+        }
+        if (_job?.id == id) {
+          _job = job;
+        }
+      });
       if (job.isFinished) {
-        _jobTimer?.cancel();
-        _jobTimer = null;
-        _notice(job.message, error: job.status == 'failed');
+        _jobTimers.remove(id)?.cancel();
+        final shortId = job.id.length > 8 ? job.id.substring(0, 8) : job.id;
+        _notice(
+          '${job.message}｜任务 $shortId',
+          error: job.status == 'failed',
+        );
         await _autoDownload(job);
       }
     } on HubApiException catch (error) {
-      _jobTimer?.cancel();
-      _jobTimer = null;
+      _jobTimers.remove(id)?.cancel();
+      if (mounted) {
+        setState(() {
+          _activeJobs.remove(id);
+          if (_job?.id == id) {
+            _job = null;
+          }
+        });
+      }
       _notice('任务状态读取失败：${error.message}', error: true);
     }
   }
@@ -482,11 +597,21 @@ class _LiteGeneratePageState extends State<LiteGeneratePage> {
     final refine = _kind == ImageCommandKind.refine;
     final enhance = hq || refine;
     final chinese = _kind == ImageCommandKind.chinese;
-    return FutureBuilder<(PresetListResult, DeliveryTargetListResult)>(
+    return FutureBuilder<
+        (
+          PresetListResult,
+          DeliveryTargetListResult,
+          PersonalStyleListResult,
+          CharacterFavoriteListResult
+        )>(
       future: _data,
       builder: (context, snapshot) {
         final presets = snapshot.data?.$1;
         final targets = snapshot.data?.$2.targets ?? const <DeliveryTarget>[];
+        final personalStyles =
+            snapshot.data?.$3.items ?? const <PersonalStyle>[];
+        final favoriteCharacters =
+            snapshot.data?.$4.items ?? const <CharacterFavorite>[];
         final characters =
             presets?.characters.map((item) => item.name).toList() ??
                 const <String>[];
@@ -535,32 +660,35 @@ class _LiteGeneratePageState extends State<LiteGeneratePage> {
                     secondary: const Icon(Icons.download_for_offline_outlined),
                     title: const Text('生成完成后自动保存到本地'),
                     subtitle: Text(
-                      _downloadDirectory.isEmpty
-                          ? '开启后使用系统默认下载目录'
-                          : _downloadDirectory,
+                      _imageStore.usesBrowserDownloads
+                          ? 'Web App 将通过 Safari 下载图片；首次使用时请允许下载'
+                          : _downloadDirectory.isEmpty
+                              ? '开启后使用系统默认下载目录'
+                              : _downloadDirectory,
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
-                  Padding(
-                    padding: const EdgeInsets.only(right: 12, bottom: 10),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.end,
-                      children: [
-                        if (_imageStore.usesPublicDownloads &&
-                            _downloadDirectoryUri.isNotEmpty)
-                          TextButton(
-                            onPressed: _resetDownloadDirectory,
-                            child: const Text('恢复默认'),
+                  if (_imageStore.supportsDirectorySelection)
+                    Padding(
+                      padding: const EdgeInsets.only(right: 12, bottom: 10),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        children: [
+                          if (_imageStore.usesPublicDownloads &&
+                              _downloadDirectoryUri.isNotEmpty)
+                            TextButton(
+                              onPressed: _resetDownloadDirectory,
+                              child: const Text('恢复默认'),
+                            ),
+                          TextButton.icon(
+                            onPressed: _chooseDownloadDirectory,
+                            icon: const Icon(Icons.folder_outlined),
+                            label: const Text('更改保存目录'),
                           ),
-                        TextButton.icon(
-                          onPressed: _chooseDownloadDirectory,
-                          icon: const Icon(Icons.folder_outlined),
-                          label: const Text('更改保存目录'),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
-                  ),
                 ],
               ),
             ),
@@ -639,7 +767,7 @@ class _LiteGeneratePageState extends State<LiteGeneratePage> {
                           _enhanceScale = 1.25;
                           _enhanceDenoise = 0.28;
                         } else if (_kind == ImageCommandKind.refine) {
-                          _profile = 'light';
+                          _profile = 'seedvr2';
                           _enhanceScale = 1.25;
                           _enhanceDenoise = 0.25;
                         }
@@ -677,8 +805,11 @@ class _LiteGeneratePageState extends State<LiteGeneratePage> {
                             .map((entry) => DropdownMenuItem(
                                 value: entry.key, child: Text(entry.value)))
                             .toList(),
-                        onChanged: (value) =>
-                            setState(() => _poolFilter = value ?? ''),
+                        onChanged: (value) => setState(() {
+                          _poolFilter = value ?? '';
+                          if (_poolFilter == 'K') _safety = 'N';
+                          if (_poolFilter == 'K/S') _safety = 'S';
+                        }),
                       ),
                       CheckboxListTile(
                         value: _fiveDraw,
@@ -845,9 +976,13 @@ class _LiteGeneratePageState extends State<LiteGeneratePage> {
                                   value: 'medium',
                                   child: Text('Medium · 1.5x 中低重绘（Beta）'),
                                 ),
+                                DropdownMenuItem(
+                                  value: 'seedvr2',
+                                  child: Text('SeedVR2 · 智能分块放大至 4096px'),
+                                ),
                               ],
                         onChanged: (value) => setState(() {
-                          _profile = value ?? (hq ? 'stable' : 'light');
+                          _profile = value ?? (hq ? 'stable' : 'seedvr2');
                           if (_profile == 'stable') {
                             _enhanceScale = 1.25;
                             _enhanceDenoise = 0.28;
@@ -864,31 +999,43 @@ class _LiteGeneratePageState extends State<LiteGeneratePage> {
                         }),
                       ),
                       const SizedBox(height: 8),
-                      Text('放大倍率：${_enhanceScale.toStringAsFixed(2)}x'),
-                      Slider(
-                        value: _enhanceScale,
-                        min: 1.0,
-                        max: 2.0,
-                        divisions: 20,
-                        label: _enhanceScale.toStringAsFixed(2),
-                        onChanged: (value) =>
-                            setState(() => _enhanceScale = value),
-                      ),
-                      Text('重绘强度：${_enhanceDenoise.toStringAsFixed(2)}'),
-                      Slider(
-                        value: _enhanceDenoise,
-                        min: 0.0,
-                        max: 1.0,
-                        divisions: 100,
-                        label: _enhanceDenoise.toStringAsFixed(2),
-                        onChanged: (value) =>
-                            setState(() => _enhanceDenoise = value),
-                      ),
+                      if (_profile == 'seedvr2')
+                        const ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          leading: Icon(Icons.hd_outlined),
+                          title: Text('SeedVR2 智能放大'),
+                          subtitle: Text(
+                              '最长边 4096px · 1024 分块 · 64px 重叠 · content-aware 融合'),
+                        )
+                      else ...[
+                        Text('放大倍率：${_enhanceScale.toStringAsFixed(2)}x'),
+                        Slider(
+                          value: _enhanceScale,
+                          min: 1.0,
+                          max: 2.0,
+                          divisions: 20,
+                          label: _enhanceScale.toStringAsFixed(2),
+                          onChanged: (value) =>
+                              setState(() => _enhanceScale = value),
+                        ),
+                        Text('重绘强度：${_enhanceDenoise.toStringAsFixed(2)}'),
+                        Slider(
+                          value: _enhanceDenoise,
+                          min: 0.0,
+                          max: 1.0,
+                          divisions: 100,
+                          label: _enhanceDenoise.toStringAsFixed(2),
+                          onChanged: (value) =>
+                              setState(() => _enhanceDenoise = value),
+                        ),
+                      ],
                       if (refine) ...[
                         TextField(
-                          decoration: const InputDecoration(
+                          decoration: InputDecoration(
                             labelText: '历史任务 ID（可选）',
-                            helperText: '填写 job_xxx 可恢复原 Prompt、LoRA 与父子关系',
+                            helperText: _profile == 'seedvr2'
+                                ? 'SeedVR2 可直接上传图片放大，不需要补充提示词或历史任务 ID'
+                                : '填写 job_xxx 可恢复原 Prompt、LoRA 与父子关系；外部图片若不填 ID，必须填写补充提示词',
                           ),
                           onChanged: (value) => _parentJobId = value,
                         ),
@@ -931,21 +1078,118 @@ class _LiteGeneratePageState extends State<LiteGeneratePage> {
                     ],
                     const SizedBox(height: 12),
                     DropdownButtonFormField<String>(
-                      initialValue: _character,
+                      key: ValueKey('preset-character-$_presetCharacter'),
+                      initialValue: _presetCharacter,
                       decoration: InputDecoration(
-                          labelText: '角色',
-                          helperText: chaos ? '混沌时刻会随机角色' : null),
+                        labelText: '预设角色',
+                        helperText: chaos
+                            ? '混沌时刻会随机角色'
+                            : _useDictionaryCharacter
+                                ? '当前改用下方词表角色'
+                                : '沿用已有角色 LoRA / 文本预设下拉菜单',
+                      ),
                       items: [
                         const DropdownMenuItem(value: '', child: Text('不指定')),
                         ...characters.map((name) =>
                             DropdownMenuItem(value: name, child: Text(name))),
                       ],
-                      onChanged: chaos
+                      onChanged: chaos || _useDictionaryCharacter
                           ? null
-                          : (value) => setState(() => _character = value ?? ''),
+                          : (value) => setState(() {
+                                _presetCharacter = value ?? '';
+                                _character = _presetCharacter;
+                              }),
                     ),
+                    if (!chaos) ...[
+                      const SizedBox(height: 6),
+                      SwitchListTile.adaptive(
+                        value: _useDictionaryCharacter,
+                        contentPadding: EdgeInsets.zero,
+                        title: const Text('使用 Danbooru 角色词表'),
+                        subtitle: const Text('开启后不使用上方预设角色，改用中文/英文词表输入'),
+                        onChanged: (value) => setState(() {
+                          _useDictionaryCharacter = value;
+                          _character =
+                              value ? _dictionaryCharacter : _presetCharacter;
+                        }),
+                      ),
+                    ],
+                    if (!chaos && _useDictionaryCharacter) ...[
+                      const SizedBox(height: 8),
+                      Autocomplete<CharacterFavorite>(
+                        key: ValueKey(
+                            'dictionary-character-$_characterFieldRevision'),
+                        displayStringForOption: (item) => item.name,
+                        optionsBuilder: (value) {
+                          final query = value.text.trim().toLowerCase();
+                          return favoriteCharacters.where((item) =>
+                              query.isEmpty ||
+                              item.name.toLowerCase().contains(query) ||
+                              item.tag.toLowerCase().contains(query));
+                        },
+                        onSelected: (item) => setState(() {
+                          _dictionaryCharacter = item.tag;
+                          _character = item.tag;
+                          _characterTagMode = item.mode;
+                        }),
+                        fieldViewBuilder:
+                            (context, controller, focusNode, onSubmitted) {
+                          if (controller.text.isEmpty &&
+                              _dictionaryCharacter.isNotEmpty) {
+                            controller.text = _dictionaryCharacter;
+                          }
+                          return TextFormField(
+                            controller: controller,
+                            focusNode: focusNode,
+                            decoration: InputDecoration(
+                              labelText: '词表角色名 / Danbooru tag',
+                              helperText: favoriteCharacters.isEmpty
+                                  ? '可自由输入；收藏角色后会出现在下拉建议中'
+                                  : '可自由输入，或选择个人星标收藏角色',
+                              suffixIcon: controller.text.isEmpty
+                                  ? null
+                                  : IconButton(
+                                      tooltip: '清空词表角色',
+                                      onPressed: () {
+                                        controller.clear();
+                                        setState(() {
+                                          _dictionaryCharacter = '';
+                                          _character = '';
+                                        });
+                                      },
+                                      icon: const Icon(Icons.clear),
+                                    ),
+                            ),
+                            onChanged: (value) => setState(() {
+                              _dictionaryCharacter = value.trim();
+                              _character = _dictionaryCharacter;
+                            }),
+                            onFieldSubmitted: (_) => onSubmitted(),
+                          );
+                        },
+                      ),
+                      const SizedBox(height: 12),
+                      DropdownButtonFormField<String>(
+                        initialValue: _characterTagMode,
+                        decoration: const InputDecoration(
+                          labelText: '裸模角色标签模式',
+                          helperText: '弱模式仅角色/作品 tag；强模式再加入固定外貌特征',
+                        ),
+                        items: const [
+                          DropdownMenuItem(
+                              value: 'weak', child: Text('弱 · 角色 + 作品 tag')),
+                          DropdownMenuItem(
+                              value: 'strong', child: Text('强 · 再添加固定外貌特征')),
+                          DropdownMenuItem(
+                              value: 'off', child: Text('关闭 · 原样使用输入')),
+                        ],
+                        onChanged: (value) =>
+                            setState(() => _characterTagMode = value ?? 'weak'),
+                      ),
+                    ],
                     const SizedBox(height: 12),
                     DropdownButtonFormField<String>(
+                      key: ValueKey('global-style-$_style'),
                       initialValue: _style,
                       decoration: InputDecoration(
                           labelText: '画风',
@@ -957,7 +1201,37 @@ class _LiteGeneratePageState extends State<LiteGeneratePage> {
                       ],
                       onChanged: chaos
                           ? null
-                          : (value) => setState(() => _style = value ?? ''),
+                          : (value) => setState(() {
+                                _style = value ?? '';
+                                if (_style.isNotEmpty) _personalStyleSlot = 0;
+                              }),
+                    ),
+                    const SizedBox(height: 12),
+                    DropdownButtonFormField<int>(
+                      key: ValueKey('personal-style-$_personalStyleSlot'),
+                      initialValue: _personalStyleSlot,
+                      decoration: InputDecoration(
+                        labelText: '我的画风预设',
+                        helperText: chaos
+                            ? '混沌时刻不使用个人预设'
+                            : personalStyles.isEmpty
+                                ? '请先到“预设”页创建方案'
+                                : '与上方公共画风二选一',
+                      ),
+                      items: [
+                        const DropdownMenuItem<int>(
+                            value: 0, child: Text('不使用')),
+                        ...personalStyles.map((item) => DropdownMenuItem<int>(
+                              value: item.slot,
+                              child: Text('槽位 ${item.slot} · ${item.name}'),
+                            )),
+                      ],
+                      onChanged: chaos
+                          ? null
+                          : (value) => setState(() {
+                                _personalStyleSlot = value ?? 0;
+                                if (_personalStyleSlot > 0) _style = '';
+                              }),
                     ),
                     const SizedBox(height: 12),
                     DropdownButtonFormField<String>(
@@ -1006,6 +1280,24 @@ class _LiteGeneratePageState extends State<LiteGeneratePage> {
                           _cfg = _sampler.isEmpty ? 5.0 : 6.0;
                         }
                       }),
+                    ),
+                    const SizedBox(height: 12),
+                    DropdownButtonFormField<String>(
+                      initialValue: _scheduler,
+                      decoration: const InputDecoration(
+                        labelText: '调度器',
+                        helperText: '仅覆盖本次任务；留空沿用工作流或采样器预设',
+                      ),
+                      items: _schedulers.entries
+                          .map(
+                            (entry) => DropdownMenuItem(
+                              value: entry.key,
+                              child: Text(entry.value),
+                            ),
+                          )
+                          .toList(),
+                      onChanged: (value) =>
+                          setState(() => _scheduler = value ?? ''),
                     ),
                     SwitchListTile(
                       value: _customSamplerParameters,
@@ -1077,6 +1369,13 @@ class _LiteGeneratePageState extends State<LiteGeneratePage> {
                       const SizedBox(height: 14),
                       _JobStatusCard(job: job),
                     ],
+                    if (_activeJobs.isNotEmpty) ...[
+                      const SizedBox(height: 10),
+                      Text(
+                        '当前排队/生成 ${_activeJobs.length} 个任务；可继续提交，Hub 会依次处理。',
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                    ],
                     const SizedBox(height: 16),
                     FilledButton.icon(
                       onPressed:
@@ -1091,9 +1390,11 @@ class _LiteGeneratePageState extends State<LiteGeneratePage> {
                       label: Text(
                         _submitting
                             ? '正在提交…'
-                            : reverse && _reverseOnly
-                                ? '发送并仅反推'
-                                : '发送并生成',
+                            : _activeJobs.isNotEmpty
+                                ? '继续加入队列（${_activeJobs.length} 个待处理）'
+                                : reverse && _reverseOnly
+                                    ? '发送并仅反推'
+                                    : '发送并生成',
                       ),
                     ),
                     const SizedBox(height: 10),
@@ -1143,11 +1444,31 @@ class _JobStatusCard extends StatelessWidget {
         color: color.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(12),
       ),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, color: color),
-          const SizedBox(width: 12),
-          Expanded(child: Text('$label · ${job.message}')),
+          Row(
+            children: [
+              Icon(icon, color: color),
+              const SizedBox(width: 12),
+              Expanded(child: Text('$label · ${job.message}')),
+            ],
+          ),
+          if (job.promptIds.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            Text('本次提示词编号', style: Theme.of(context).textTheme.labelMedium),
+            const SizedBox(height: 6),
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: job.promptIds
+                  .map((id) => Chip(
+                        avatar: const Icon(Icons.tag, size: 16),
+                        label: SelectableText(id),
+                      ))
+                  .toList(),
+            ),
+          ],
         ],
       ),
     );

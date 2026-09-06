@@ -12,11 +12,13 @@ from workflow_runtime import (
     WorkflowError,
     configure_hq_workflow,
     configure_refine_workflow,
+    configure_seedvr2_workflow,
 )
 
 
-REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
+RELEASE_ROOT = Path(__file__).resolve().parents[3]
 PLUGIN_ROOT = Path(__file__).resolve().parents[1]
+WORKFLOW_ROOT = RELEASE_ROOT / "comfyui" / "workflows"
 
 
 def load_json(path: Path):
@@ -38,6 +40,7 @@ class WorkflowRegistryTests(unittest.TestCase):
                 "quick_txt2img_v1",
                 "refine_existing_v1",
                 "reverse_anime_v1",
+                "seedvr2_refine_v1",
             ),
         )
 
@@ -53,6 +56,13 @@ class WorkflowRegistryTests(unittest.TestCase):
         self.assertEqual(refine.profile("")[0], "light")
         self.assertEqual(refine.profile("medium")[1]["enhance"]["scale"], 1.5)
 
+        seedvr2 = self.registry.resolve("seedvr2_refine_v1")
+        self.assertEqual(seedvr2.profile("")[0], "seedvr2")
+        self.assertEqual(
+            seedvr2.profile("seedvr2")[1]["enhance"]["target_resolution"],
+            4096,
+        )
+
     def test_unknown_workflow_and_profile_fail_clearly(self):
         with self.assertRaisesRegex(WorkflowError, "WORKFLOW_NOT_FOUND"):
             self.registry.resolve("missing")
@@ -63,11 +73,15 @@ class WorkflowRegistryTests(unittest.TestCase):
         pairs = (
             (
                 "hq_txt2img_anima_v1",
-                REPOSITORY_ROOT / "comfyui" / "workflows" / "Anima_HQ_Txt2Img_Beta_api.json",
+                WORKFLOW_ROOT / "Anima_HQ_Txt2Img_Beta_api.json",
             ),
             (
                 "refine_existing_v1",
-                REPOSITORY_ROOT / "comfyui" / "workflows" / "Anima_Refine_Existing_Beta_api.json",
+                WORKFLOW_ROOT / "Anima_Refine_Existing_Beta_api.json",
+            ),
+            (
+                "seedvr2_refine_v1",
+                WORKFLOW_ROOT / "Anima_SeedVR2_Refine_Beta_api.json",
             ),
         )
         for workflow_id, path in pairs:
@@ -80,7 +94,7 @@ class WorkflowRegistryTests(unittest.TestCase):
 class HqRefineConfigurationTests(unittest.TestCase):
     def test_hq_profile_configures_both_stages_and_syncs_lora_chain(self):
         workflow = load_json(
-            REPOSITORY_ROOT / "comfyui" / "workflows" / "Anima_HQ_Txt2Img_Beta_api.json"
+            WORKFLOW_ROOT / "Anima_HQ_Txt2Img_Beta_api.json"
         )
         workflow["19"]["inputs"]["model"] = ["900001", 0]
         workflow["19"]["inputs"]["positive"] = ["11", 0]
@@ -122,7 +136,7 @@ class HqRefineConfigurationTests(unittest.TestCase):
 
     def test_refine_profile_injects_image_and_overrides(self):
         workflow = load_json(
-            REPOSITORY_ROOT / "comfyui" / "workflows" / "Anima_Refine_Existing_Beta_api.json"
+            WORKFLOW_ROOT / "Anima_Refine_Existing_Beta_api.json"
         )
         result = configure_refine_workflow(
             workflow,
@@ -152,7 +166,7 @@ class HqRefineConfigurationTests(unittest.TestCase):
 
     def test_invalid_enhancement_values_are_rejected(self):
         workflow = load_json(
-            REPOSITORY_ROOT / "comfyui" / "workflows" / "Anima_Refine_Existing_Beta_api.json"
+            WORKFLOW_ROOT / "Anima_Refine_Existing_Beta_api.json"
         )
         with self.assertRaisesRegex(WorkflowError, "scale"):
             configure_refine_workflow(
@@ -165,6 +179,36 @@ class HqRefineConfigurationTests(unittest.TestCase):
                 seed=1,
                 scale_override=3.0,
             )
+
+    def test_seedvr2_injects_image_seed_and_tiling_profile(self):
+        workflow = load_json(
+            WORKFLOW_ROOT / "Anima_SeedVR2_Refine_Beta_api.json"
+        )
+        result = configure_seedvr2_workflow(
+            workflow,
+            image_name="incoming/source.png",
+            image_node_id="1",
+            upscaler_node_id="4",
+            profile={
+                "enhance": {
+                    "target_resolution": 4096,
+                    "tile_width": 1024,
+                    "tile_height": 1024,
+                    "tile_padding": 64,
+                    "tile_upscale_resolution": 1536,
+                    "mask_blur": 3,
+                    "anti_aliasing_strength": 0.1,
+                }
+            },
+            seed=789,
+        )
+        inputs = workflow["4"]["inputs"]
+        self.assertEqual(workflow["1"]["inputs"]["image"], "incoming/source.png")
+        self.assertEqual(inputs["seed"], 789)
+        self.assertEqual(inputs["new_resolution"], 4096)
+        self.assertEqual(inputs["tile_width"], 1024)
+        self.assertEqual(inputs["tile_padding"], 64)
+        self.assertEqual(result["target_resolution"], 4096)
 
 
 class JobStoreTests(unittest.TestCase):

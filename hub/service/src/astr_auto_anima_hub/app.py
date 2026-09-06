@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from contextlib import asynccontextmanager
 from datetime import datetime
 
@@ -7,9 +8,17 @@ from typing import Annotated, Any
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Response, status
 from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from . import __version__
 from .auth import AuthPrincipal, require_admin, require_reader
+from .character_catalog import search_character_dictionary
+from .character_management import disable_character, update_character
+from .character_favorites import (
+    delete_character_favorite,
+    list_character_favorites,
+    write_character_favorite,
+)
 from .config import Settings
 from .management import (
     create_prompt,
@@ -20,7 +29,22 @@ from .management import (
     update_prompt,
     write_preset,
 )
+from .lite_user_management import (
+    create_lite_user,
+    delete_lite_user,
+    list_lite_users,
+    rotate_lite_user_token,
+    update_lite_user,
+)
 from .probes import collect_workstation_status
+from .system_metrics import collect_system_metrics
+from .lora_catalog import list_style_loras, scan_loras, update_lora
+from .personal_styles import (
+    delete_personal_style,
+    list_personal_styles,
+    write_personal_style,
+)
+from .prompt_likes import promote_k_prompt
 from .repositories import (
     RepositoryError,
     file_revision,
@@ -31,9 +55,18 @@ from .remote_jobs import RemoteJobError, RemoteJobManager
 from .schemas import (
     HealthResponse,
     DeliveryTargetListResponse,
+    LiteUserCreateRequest,
+    LiteUserIssueResponse,
+    LiteUserListResponse,
+    LiteUserUpdateRequest,
+    LoraCatalogResponse,
+    LoraCatalogUpdateRequest,
     MutationResponse,
     PresetListResponse,
     PresetWriteRequest,
+    PersonalStyleListResponse,
+    PersonalStyleWriteRequest,
+    PromptLikeResponse,
     PromptCreateRequest,
     PromptImportRequest,
     PromptPage,
@@ -43,6 +76,11 @@ from .schemas import (
     RemoteJobResponse,
     SyncRevisionsResponse,
     WorkstationStatus,
+    WorkstationMetrics,
+    CharacterDictionaryResponse,
+    CharacterDictionaryUpdateRequest,
+    CharacterFavoriteListResponse,
+    CharacterFavoriteWriteRequest,
 )
 from .storage import DuplicateResource, ResourceNotFound, RevisionConflict
 
@@ -151,6 +189,135 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     @app.get(
+        "/api/v1/lite/characters",
+        response_model=CharacterDictionaryResponse,
+        tags=["lite"],
+        dependencies=[Depends(require_reader)],
+    )
+    async def lite_character_dictionary(
+        query: str = Query(default="", max_length=200),
+        limit: int = Query(default=20, ge=1, le=50),
+        page: int = Query(default=1, ge=1),
+    ) -> CharacterDictionaryResponse:
+        """Search the server-local Chinese/English character dictionary."""
+
+        return search_character_dictionary(
+            resolved.character_dictionary_path,
+            query=query,
+            limit=limit,
+            page=page,
+            edits_path=resolved.character_dictionary_edits_path,
+        )
+
+    @app.get(
+        "/api/v1/lite/character-favorites",
+        response_model=CharacterFavoriteListResponse,
+        tags=["lite"],
+    )
+    def lite_character_favorites(
+        principal: Annotated[AuthPrincipal, Depends(require_reader)],
+    ) -> CharacterFavoriteListResponse:
+        try:
+            return list_character_favorites(resolved, principal)
+        except RepositoryError as exc:
+            _raise_management_error(exc)
+
+    @app.put(
+        "/api/v1/lite/character-favorites/{tag}",
+        response_model=CharacterFavoriteListResponse,
+        tags=["lite"],
+    )
+    def lite_character_favorite_write(
+        tag: str,
+        payload: CharacterFavoriteWriteRequest,
+        principal: Annotated[AuthPrincipal, Depends(require_reader)],
+        if_match: Annotated[str | None, Header(alias="If-Match")] = None,
+    ) -> CharacterFavoriteListResponse:
+        try:
+            return write_character_favorite(
+                resolved, principal, tag, payload, _expected_revision(if_match)
+            )
+        except RepositoryError as exc:
+            _raise_management_error(exc)
+
+    @app.delete(
+        "/api/v1/lite/character-favorites/{tag}",
+        response_model=CharacterFavoriteListResponse,
+        tags=["lite"],
+    )
+    def lite_character_favorite_delete(
+        tag: str,
+        principal: Annotated[AuthPrincipal, Depends(require_reader)],
+        if_match: Annotated[str | None, Header(alias="If-Match")] = None,
+    ) -> CharacterFavoriteListResponse:
+        try:
+            return delete_character_favorite(
+                resolved, principal, tag, _expected_revision(if_match)
+            )
+        except RepositoryError as exc:
+            _raise_management_error(exc)
+
+    @app.get(
+        "/api/v1/lite/style-loras",
+        response_model=LoraCatalogResponse,
+        tags=["lite"],
+        dependencies=[Depends(require_reader)],
+    )
+    async def lite_style_loras() -> LoraCatalogResponse:
+        try:
+            return list_style_loras(resolved)
+        except RepositoryError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    @app.get(
+        "/api/v1/lite/personal-styles",
+        response_model=PersonalStyleListResponse,
+        tags=["lite"],
+    )
+    async def lite_personal_styles(
+        principal: Annotated[AuthPrincipal, Depends(require_reader)],
+    ) -> PersonalStyleListResponse:
+        try:
+            return list_personal_styles(resolved, principal)
+        except RepositoryError as exc:
+            _raise_management_error(exc)
+
+    @app.put(
+        "/api/v1/lite/personal-styles/{slot}",
+        response_model=PersonalStyleListResponse,
+        tags=["lite"],
+    )
+    def lite_personal_style_write(
+        slot: int,
+        payload: PersonalStyleWriteRequest,
+        principal: Annotated[AuthPrincipal, Depends(require_reader)],
+        if_match: Annotated[str | None, Header(alias="If-Match")] = None,
+    ) -> PersonalStyleListResponse:
+        try:
+            return write_personal_style(
+                resolved, principal, slot, payload, _expected_revision(if_match)
+            )
+        except RepositoryError as exc:
+            _raise_management_error(exc)
+
+    @app.delete(
+        "/api/v1/lite/personal-styles/{slot}",
+        response_model=PersonalStyleListResponse,
+        tags=["lite"],
+    )
+    def lite_personal_style_delete(
+        slot: int,
+        principal: Annotated[AuthPrincipal, Depends(require_reader)],
+        if_match: Annotated[str | None, Header(alias="If-Match")] = None,
+    ) -> PersonalStyleListResponse:
+        try:
+            return delete_personal_style(
+                resolved, principal, slot, _expected_revision(if_match)
+            )
+        except RepositoryError as exc:
+            _raise_management_error(exc)
+
+    @app.get(
         "/api/v1/lite/delivery-targets",
         response_model=DeliveryTargetListResponse,
         tags=["lite"],
@@ -234,6 +401,30 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             filename=image.filename,
         )
 
+    @app.post(
+        "/api/v1/lite/jobs/{job_id}/likes/{prompt_id}",
+        response_model=PromptLikeResponse,
+        tags=["lite"],
+    )
+    def lite_job_like_prompt(
+        job_id: str,
+        prompt_id: str,
+        principal: Annotated[AuthPrincipal, Depends(require_reader)],
+    ) -> PromptLikeResponse:
+        job = app.state.remote_jobs.get(job_id, principal)
+        if job is None:
+            raise HTTPException(status_code=404, detail="remote job not found")
+        if job.status != "succeeded":
+            raise HTTPException(status_code=409, detail="only successful jobs can be liked")
+        if prompt_id not in job.prompt_ids:
+            raise HTTPException(status_code=404, detail="prompt is not part of this job")
+        try:
+            result = promote_k_prompt(resolved, prompt_id, principal)
+        except RepositoryError as exc:
+            _raise_management_error(exc)
+        app.state.remote_jobs.mark_liked(job_id, prompt_id, principal)
+        return result
+
     @app.get(
         "/api/v1/workstation/status",
         response_model=WorkstationStatus,
@@ -242,6 +433,203 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     async def workstation_status() -> WorkstationStatus:
         return await collect_workstation_status(resolved)
+
+    @app.get(
+        "/api/v1/workstation/metrics",
+        response_model=WorkstationMetrics,
+        tags=["system"],
+        dependencies=[Depends(require_admin)],
+    )
+    async def workstation_metrics() -> WorkstationMetrics:
+        return await asyncio.to_thread(collect_system_metrics)
+
+    @app.get(
+        "/api/v1/admin/characters",
+        response_model=CharacterDictionaryResponse,
+        tags=["characters"],
+        dependencies=[Depends(require_admin)],
+    )
+    async def admin_characters(
+        query: str = Query(default="", max_length=200),
+        page: int = Query(default=1, ge=1),
+        page_size: int = Query(default=50, ge=1, le=200),
+        include_disabled: bool = True,
+    ) -> CharacterDictionaryResponse:
+        result = search_character_dictionary(
+            resolved.character_dictionary_path,
+            query=query,
+            limit=page_size,
+            page=page,
+            edits_path=resolved.character_dictionary_edits_path,
+            include_disabled=include_disabled,
+        )
+        edit_revision = (
+            file_revision(
+                resolved.character_dictionary_edits_path,
+                "character_dictionary",
+            ).revision
+            or "missing"
+        )
+        return result.model_copy(update={"revision": edit_revision})
+
+    @app.patch(
+        "/api/v1/admin/characters/{tag}",
+        response_model=MutationResponse,
+        tags=["characters"],
+        dependencies=[Depends(require_admin)],
+    )
+    def admin_character_update(
+        tag: str,
+        payload: CharacterDictionaryUpdateRequest,
+        if_match: Annotated[str | None, Header(alias="If-Match")] = None,
+        device_name: Annotated[str | None, Header(alias="X-Device-Name")] = None,
+    ) -> MutationResponse:
+        try:
+            return update_character(
+                resolved, tag, payload, _expected_revision(if_match), _actor(device_name)
+            )
+        except RepositoryError as exc:
+            _raise_management_error(exc)
+
+    @app.delete(
+        "/api/v1/admin/characters/{tag}",
+        response_model=MutationResponse,
+        tags=["characters"],
+        dependencies=[Depends(require_admin)],
+    )
+    def admin_character_delete(
+        tag: str,
+        if_match: Annotated[str | None, Header(alias="If-Match")] = None,
+        device_name: Annotated[str | None, Header(alias="X-Device-Name")] = None,
+    ) -> MutationResponse:
+        try:
+            return disable_character(
+                resolved, tag, _expected_revision(if_match), _actor(device_name)
+            )
+        except RepositoryError as exc:
+            _raise_management_error(exc)
+
+    @app.get(
+        "/api/v1/admin/loras",
+        response_model=LoraCatalogResponse,
+        tags=["loras"],
+    )
+    def admin_loras(
+        principal: Annotated[AuthPrincipal, Depends(require_admin)],
+    ) -> LoraCatalogResponse:
+        try:
+            return scan_loras(resolved, f"admin:{principal.subject}")
+        except RepositoryError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    @app.patch(
+        "/api/v1/admin/loras/{relative_path:path}",
+        response_model=MutationResponse,
+        tags=["loras"],
+    )
+    def admin_lora_update(
+        relative_path: str,
+        payload: LoraCatalogUpdateRequest,
+        principal: Annotated[AuthPrincipal, Depends(require_admin)],
+        if_match: Annotated[str | None, Header(alias="If-Match")] = None,
+    ) -> MutationResponse:
+        try:
+            return update_lora(
+                resolved,
+                relative_path,
+                payload,
+                _expected_revision(if_match),
+                f"admin:{principal.subject}",
+            )
+        except RepositoryError as exc:
+            _raise_management_error(exc)
+
+    @app.get(
+        "/api/v1/admin/lite-users",
+        response_model=LiteUserListResponse,
+        tags=["users"],
+        dependencies=[Depends(require_admin)],
+    )
+    def lite_user_list() -> LiteUserListResponse:
+        try:
+            return list_lite_users(resolved)
+        except RepositoryError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    @app.post(
+        "/api/v1/admin/lite-users",
+        response_model=LiteUserIssueResponse,
+        tags=["users"],
+        dependencies=[Depends(require_admin)],
+    )
+    def lite_user_create(
+        payload: LiteUserCreateRequest,
+        if_match: Annotated[str | None, Header(alias="If-Match")] = None,
+        device_name: Annotated[str | None, Header(alias="X-Device-Name")] = None,
+    ) -> LiteUserIssueResponse:
+        expected = _expected_revision(if_match)
+        try:
+            return create_lite_user(resolved, payload, expected, _actor(device_name))
+        except RepositoryError as exc:
+            _raise_management_error(exc)
+
+    @app.patch(
+        "/api/v1/admin/lite-users/{qq}",
+        response_model=MutationResponse,
+        tags=["users"],
+        dependencies=[Depends(require_admin)],
+    )
+    def lite_user_update(
+        qq: str,
+        payload: LiteUserUpdateRequest,
+        if_match: Annotated[str | None, Header(alias="If-Match")] = None,
+        device_name: Annotated[str | None, Header(alias="X-Device-Name")] = None,
+    ) -> MutationResponse:
+        expected = _expected_revision(if_match)
+        try:
+            return update_lite_user(
+                resolved, qq, payload, expected, _actor(device_name)
+            )
+        except RepositoryError as exc:
+            _raise_management_error(exc)
+
+    @app.post(
+        "/api/v1/admin/lite-users/{qq}/rotate",
+        response_model=LiteUserIssueResponse,
+        tags=["users"],
+        dependencies=[Depends(require_admin)],
+    )
+    def lite_user_rotate(
+        qq: str,
+        if_match: Annotated[str | None, Header(alias="If-Match")] = None,
+        device_name: Annotated[str | None, Header(alias="X-Device-Name")] = None,
+    ) -> LiteUserIssueResponse:
+        expected = _expected_revision(if_match)
+        try:
+            return rotate_lite_user_token(
+                resolved, qq, expected, _actor(device_name)
+            )
+        except RepositoryError as exc:
+            _raise_management_error(exc)
+
+    @app.delete(
+        "/api/v1/admin/lite-users/{qq}",
+        response_model=MutationResponse,
+        tags=["users"],
+        dependencies=[Depends(require_admin)],
+    )
+    def lite_user_delete(
+        qq: str,
+        if_match: Annotated[str | None, Header(alias="If-Match")] = None,
+        device_name: Annotated[str | None, Header(alias="X-Device-Name")] = None,
+    ) -> MutationResponse:
+        expected = _expected_revision(if_match)
+        try:
+            return delete_lite_user(
+                resolved, qq, expected, _actor(device_name)
+            )
+        except RepositoryError as exc:
+            _raise_management_error(exc)
 
     @app.get(
         "/api/v1/sync/revisions",
@@ -484,6 +872,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             )
         except RepositoryError as exc:
             _raise_management_error(exc)
+
+    if resolved.web_root is not None:
+        app.mount(
+            "/",
+            StaticFiles(directory=str(resolved.web_root), html=True),
+            name="web-app",
+        )
 
     return app
 

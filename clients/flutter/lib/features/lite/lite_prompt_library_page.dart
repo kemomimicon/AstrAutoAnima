@@ -72,7 +72,7 @@ class _LitePromptLibraryPageState extends State<LitePromptLibraryPage> {
                     child: DropdownButtonFormField<String>(
                       initialValue: _source,
                       decoration: const InputDecoration(labelText: '来源'),
-                      items: ['', 'B', 'G', 'D', 'C', 'R']
+                      items: ['', 'B', 'G', 'D', 'C', 'R', 'P']
                           .map((value) => DropdownMenuItem(
                               value: value,
                               child: Text(value.isEmpty ? '全部' : value)))
@@ -134,7 +134,8 @@ class _LitePromptLibraryPageState extends State<LitePromptLibraryPage> {
                     spacing: 8,
                     crossAxisAlignment: WrapCrossAlignment.center,
                     children: [
-                      Chip(label: Text('${item.sourceCode}/${item.safetyCode}')),
+                      Chip(
+                          label: Text('${item.sourceCode}/${item.safetyCode}')),
                       const Tooltip(
                         message: '查看完整提示词',
                         child: Icon(Icons.open_in_new),

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+import tempfile
 from pathlib import Path
 
 from astr_auto_anima_hub.config import Settings
@@ -50,6 +51,17 @@ class SettingsTests(unittest.TestCase):
                 admin_token="a" * 32,
                 lite_token="a" * 32,
             ).validate_for_startup()
+
+    def test_web_root_requires_built_index(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            web_root = Path(temporary) / "web"
+            web_root.mkdir()
+            settings = Settings(admin_token="a" * 32, web_root=web_root)
+            with self.assertRaisesRegex(ValueError, "AAH_WEB_ROOT"):
+                settings.validate_for_startup()
+
+            (web_root / "index.html").write_text("web app", encoding="utf-8")
+            settings.validate_for_startup()
 
 
 if __name__ == "__main__":

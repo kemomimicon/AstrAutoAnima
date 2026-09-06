@@ -23,6 +23,7 @@ class _LiteJobHistoryPageState extends State<LiteJobHistoryPage> {
   String _downloadDirectory = '';
   String _downloadDirectoryUri = '';
   bool _downloading = false;
+  final Set<String> _liking = {};
 
   static const _kindLabels = <String, String>{
     '': '全部类型',
@@ -100,6 +101,10 @@ class _LiteJobHistoryPageState extends State<LiteJobHistoryPage> {
   }
 
   Future<void> _chooseDirectory() async {
+    if (!_imageStore.supportsDirectorySelection) {
+      _notice('Web App 会使用 Safari 的下载目录，保存位置由浏览器管理。');
+      return;
+    }
     if (_imageStore.usesPublicDownloads) {
       try {
         final current = await _imageStore.loadSettings();
@@ -159,11 +164,33 @@ class _LiteJobHistoryPageState extends State<LiteJobHistoryPage> {
         job: job,
         directory: directory,
       );
-      _notice('已保存 ${paths.length} 张图片到 $directory');
+      _notice(
+        _imageStore.usesBrowserDownloads
+            ? '已向浏览器提交 ${paths.length} 张图片下载'
+            : '已保存 ${paths.length} 张图片到 $directory',
+      );
     } on Exception catch (error) {
       _notice('保存图片失败：$error', error: true);
     } finally {
       if (mounted) setState(() => _downloading = false);
+    }
+  }
+
+  Future<void> _like(RemoteJobResult job, String promptId) async {
+    final key = '${job.id}:$promptId';
+    if (!_liking.add(key)) return;
+    setState(() {});
+    try {
+      final result =
+          await widget.api.likeJobPrompt(jobId: job.id, promptId: promptId);
+      _notice(
+          result.action == 'already_liked' ? '这条模板已经收藏在 P 组。' : '已点赞并保存到 P 组。');
+      _refresh();
+    } on HubApiException catch (error) {
+      _notice(error.message, error: true);
+    } finally {
+      _liking.remove(key);
+      if (mounted) setState(() {});
     }
   }
 
@@ -263,20 +290,23 @@ class _LiteJobHistoryPageState extends State<LiteJobHistoryPage> {
                         },
                       ),
                     ),
-                    OutlinedButton.icon(
-                      onPressed: _chooseDirectory,
-                      icon: const Icon(Icons.folder_outlined),
-                      label: Text(
-                        _imageStore.usesPublicDownloads ? '更改保存目录' : '保存目录',
+                    if (_imageStore.supportsDirectorySelection)
+                      OutlinedButton.icon(
+                        onPressed: _chooseDirectory,
+                        icon: const Icon(Icons.folder_outlined),
+                        label: Text(
+                          _imageStore.usesPublicDownloads ? '更改保存目录' : '保存目录',
+                        ),
                       ),
-                    ),
                     if (_imageStore.usesPublicDownloads &&
                         _downloadDirectoryUri.isNotEmpty)
                       TextButton(
                         onPressed: _resetDirectory,
                         child: const Text('恢复默认'),
                       ),
-                    if (_downloadDirectory.isNotEmpty)
+                    if (_imageStore.usesBrowserDownloads)
+                      const Text('图片会保存到 Safari 下载目录')
+                    else if (_downloadDirectory.isNotEmpty)
                       ConstrainedBox(
                         constraints: const BoxConstraints(maxWidth: 360),
                         child: Text(
@@ -380,6 +410,35 @@ class _LiteJobHistoryPageState extends State<LiteJobHistoryPage> {
             SelectableText(job.commandPreview),
             const SizedBox(height: 6),
             Text('${job.targetLabel} · ${job.message}'),
+            if (job.promptIds.isNotEmpty) ...[
+              const SizedBox(height: 10),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: job.promptIds.map((promptId) {
+                  if (!promptId.startsWith('kp-')) {
+                    return Chip(
+                      avatar: const Icon(Icons.tag, size: 16),
+                      label: SelectableText(promptId),
+                    );
+                  }
+                  final liked = job.likedPromptIds.contains(promptId);
+                  final busy = _liking.contains('${job.id}:$promptId');
+                  return FilledButton.tonalIcon(
+                    onPressed:
+                        liked || busy ? null : () => _like(job, promptId),
+                    icon: busy
+                        ? const SizedBox.square(
+                            dimension: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2))
+                        : Icon(
+                            liked ? Icons.thumb_up : Icons.thumb_up_outlined),
+                    label:
+                        Text(liked ? '已收藏到 P · $promptId' : '点赞收藏 · $promptId'),
+                  );
+                }).toList(),
+              ),
+            ],
             if (job.images.isNotEmpty) ...[
               const SizedBox(height: 14),
               Wrap(

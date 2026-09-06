@@ -4,15 +4,16 @@
 LoRA、分级随机提示词、图片反推、HQ/放大精修、远程 Hub 和 Windows/Android 客户端组合为
 一套可在云服务器或本地计算机部署的方案。
 
-> 当前为 Beta 公测包。请先在测试群和备份配置上验证，再迁移生产环境。
+> 当前为 `0.4.0` 正式版。HQ、Refine、Reverse、Training 等高级工作流仍为实验性组件，
+> 请先在测试群和备份配置上验证，再迁移生产环境。
 
 ## 组件版本
 
 | 组件 | 公开包版本 | 作用 |
 | --- | --- | --- |
-| AstrBot 插件 | `0.3.1-beta.1` | QQ 指令、工作流调度、预设、提示词池、任务记录 |
-| Hub 服务 | `0.3.8.dev2` | 令牌鉴权、远程任务、预设/提示词/图片记录 API |
-| Flutter 客户端 | `0.3.8-dev.3+14` | Windows/Android 管理和远程生图 |
+| AstrBot 插件 | `0.4.0` | QQ 指令、工作流调度、预设、提示词池、任务记录 |
+| Hub 服务 | `0.4.0` | 令牌鉴权、远程任务、预设/提示词/图片记录 API |
+| Flutter 客户端 | `0.4.0+24` | Web/Windows/Android 管理和远程生图 |
 | 自定义节点 | Workflow Tools | 训练数据质检、反推编译与记录保存 |
 | 工作流 | HQ / Refine / Reverse / Training Beta | 多工作流模板；安装前必须填写模型占位符 |
 
@@ -26,7 +27,7 @@ LoRA、分级随机提示词、图片反推、HQ/放大精修、远程 Hub 和 W
 
 基础环境只列官方入口，本仓库不重复提供其安装教程：
 
-- AstrBot：<https://github.com/AstrBotDevs/AstrBot> / <https://astrbot.org/zh/docs>
+- AstrBot：<https://github.com/AstrBotDevs/AstrBot> / <https://docs.astrbot.app/>
 - ComfyUI：<https://github.com/Comfy-Org/ComfyUI> / <https://docs.comfy.org/>
 - NapCatQQ：<https://github.com/NapNeko/NapCatQQ> / <https://napneko.github.io/>
 - Anima Master：<https://github.com/YayiMiko/anima-master>
@@ -43,6 +44,10 @@ LoRA、分级随机提示词、图片反推、HQ/放大精修、远程 Hub 和 W
 - `/aicn` 中文提示词转换、`/aip` 可复选反推和仅返回提示词模式。
 - Hub 管理端、普通用户令牌、Windows/Android 客户端、历史任务与图片查看/保存。
 - 无第三方依赖的本地提示词管理器和 Hub 用户令牌管理器。
+- 提示词库可建立任意自定义分组，不要求沿用作者的来源组命名；固定 B/G/D/C/R 与 N/H/S
+  只作为兼容和安全路由层保留。
+- 面向新手的一键部署助手：先自动探测常见目录、预检并备份，再部署本项目组件；所有联网
+  拉取项默认关闭，只有用户主动勾选后才下载。
 
 ## 仓库结构
 
@@ -60,7 +65,8 @@ scripts/                发布前检查与辅助脚本
 
 ## 快速开始
 
-1. 阅读 [安装教程](docs/INSTALL.md)，先确认 AstrBot、NapCat 和 ComfyUI 已各自可用。
+1. 阅读 [懒人包说明](docs/EASY_INSTALL.md) 或 [详细安装教程](docs/INSTALL.md)，先确认 AstrBot、
+   NapCat 和 ComfyUI 已各自可用。
 2. 安装 AstrBot 插件、自定义节点和所需的工作流 JSON。
 3. 在工作流中把 `YOUR_ANIMA_*`、`YOUR_STYLE_LORA_*` 替换成自己实际存在的模型。
 4. 在 AstrBot 插件配置页填写各 API 工作流绝对路径和正确节点 ID。
@@ -71,19 +77,21 @@ scripts/                发布前检查与辅助脚本
 完整说明：
 
 - [详细安装](docs/INSTALL.md)
+- [一键部署懒人包](docs/EASY_INSTALL.md)
 - [使用手册](docs/USAGE.md)
 - [本地/服务器部署](docs/DEPLOYMENT.md)
 - [常见错误排查](docs/TROUBLESHOOTING.md)
 - [本地管理工具](docs/TOOLS.md)
 - [特色、优点与限制](docs/FEATURES_AND_LIMITATIONS.md)
 - [隐私与公开包边界](docs/PRIVACY.md)
+- [发布包及校验说明](docs/RELEASE_ARTIFACTS.md)
 - [第三方组件与许可证](THIRD_PARTY_NOTICES.md)
 
 ## 公开包不包含什么
 
-本仓库不包含服务器令牌、QQ 登录数据、真实 QQ 号、私有提示词库、角色/画风预设、作者的
-默认生产工作流、模型、LoRA、生成图片、反推历史、日志、备份或服务器目录快照。工作流模板
-中的 `YOUR_*` 均为必须由部署者填写的占位符。
+本仓库不包含服务器令牌、QQ 登录数据、真实 QQ 号、私有/第三方提示词语料、角色/画风预设、
+作者的默认生产工作流、私人启动图、模型、LoRA、生成图片、反推历史、日志、备份或服务器
+目录快照。工作流模板中的 `YOUR_*` 均为必须由部署者填写的占位符。
 
 ## 优点与限制（摘要）
 

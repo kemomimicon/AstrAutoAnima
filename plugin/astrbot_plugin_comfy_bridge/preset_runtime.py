@@ -20,6 +20,9 @@ EMPTY_PRESETS: dict[str, Any] = {
 DIRECTIVE_NAMES = {
     "角色": "character",
     "role": "character",
+    "角色模式": "character_tag_mode",
+    "角色标签": "character_tag_mode",
+    "character_mode": "character_tag_mode",
     "画风": "style",
     "style": "style",
     "角色权重": "character_strength",
@@ -32,6 +35,8 @@ DIRECTIVE_NAMES = {
     "style_scale": "style_scale",
     "采样器": "sampler_preset",
     "sampler": "sampler_preset",
+    "调度器": "scheduler",
+    "scheduler": "scheduler",
     "步数": "sampler_steps",
     "step": "sampler_steps",
     "steps": "sampler_steps",
@@ -302,6 +307,8 @@ def resolve_presets(
         folded_prompt = prompt.casefold()
         matches = []
         for candidate, preset in styles.items():
+            if isinstance(preset, dict) and preset.get("hidden"):
+                continue
             needles = preset.get("match", []) if isinstance(preset, dict) else []
             if any(str(needle).casefold() in folded_prompt for needle in needles if str(needle)):
                 matches.append(candidate)

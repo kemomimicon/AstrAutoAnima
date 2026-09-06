@@ -1,31 +1,67 @@
 {
   "8": {
     "class_type": "VAEDecode",
-    "inputs": {"samples": ["30", 0], "vae": ["15", 0]},
-    "_meta": {"title": "HQ VAE 解码"}
+    "inputs": {
+      "samples": [
+        "30",
+        0
+      ],
+      "vae": [
+        "15",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "HQ VAE 解码"
+    }
   },
   "9": {
     "class_type": "SaveImage",
-    "inputs": {"filename_prefix": "astrbot/hq", "images": ["8", 0]},
-    "_meta": {"title": "保存 HQ 图像"}
+    "inputs": {
+      "filename_prefix": "astrbot/hq",
+      "images": [
+        "8",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "保存 HQ 图像"
+    }
   },
   "11": {
     "class_type": "CLIPTextEncode",
-    "inputs": {"text": "1girl, solo", "clip": ["49", 1]},
-    "_meta": {"title": "正面提示词"}
+    "inputs": {
+      "text": "1girl, solo",
+      "clip": [
+        "49",
+        1
+      ]
+    },
+    "_meta": {
+      "title": "正面提示词"
+    }
   },
   "12": {
     "class_type": "CLIPTextEncode",
     "inputs": {
       "text": "worst quality, low quality, score_1, score_2, score_3, blurry, jpeg artifacts, malformed hands, extra fingers, missing fingers, watermark, signature, logo, unreadable text",
-      "clip": ["49", 1]
+      "clip": [
+        "49",
+        1
+      ]
     },
-    "_meta": {"title": "负面提示词"}
+    "_meta": {
+      "title": "负面提示词"
+    }
   },
   "15": {
     "class_type": "VAELoader",
-    "inputs": {"vae_name": "YOUR_ANIMA_VAE.safetensors"},
-    "_meta": {"title": "加载 VAE"}
+    "inputs": {
+      "vae_name": "YOUR_ANIMA_VAE.safetensors"
+    },
+    "_meta": {
+      "title": "加载 VAE"
+    }
   },
   "19": {
     "class_type": "KSampler",
@@ -36,22 +72,51 @@
       "sampler_name": "er_sde",
       "scheduler": "normal",
       "denoise": 1.0,
-      "model": ["49", 0],
-      "positive": ["11", 0],
-      "negative": ["12", 0],
-      "latent_image": ["28", 0]
+      "model": [
+        "49",
+        0
+      ],
+      "positive": [
+        "11",
+        0
+      ],
+      "negative": [
+        "12",
+        0
+      ],
+      "latent_image": [
+        "28",
+        0
+      ]
     },
-    "_meta": {"title": "第一阶段 Anima 采样"}
+    "_meta": {
+      "title": "第一阶段 Anima 采样"
+    }
   },
   "28": {
     "class_type": "EmptyLatentImage",
-    "inputs": {"width": 1024, "height": 1536, "batch_size": 1},
-    "_meta": {"title": "基础画布"}
+    "inputs": {
+      "width": 1024,
+      "height": 1536,
+      "batch_size": 1
+    },
+    "_meta": {
+      "title": "基础画布"
+    }
   },
   "29": {
     "class_type": "LatentUpscaleBy",
-    "inputs": {"upscale_method": "bislerp", "scale_by": 1.25, "samples": ["19", 0]},
-    "_meta": {"title": "Latent 放大"}
+    "inputs": {
+      "upscale_method": "bislerp",
+      "scale_by": 1.25,
+      "samples": [
+        "19",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Latent 放大"
+    }
   },
   "30": {
     "class_type": "KSampler",
@@ -62,41 +127,122 @@
       "sampler_name": "er_sde",
       "scheduler": "normal",
       "denoise": 0.28,
-      "model": ["49", 0],
-      "positive": ["11", 0],
-      "negative": ["12", 0],
-      "latent_image": ["29", 0]
+      "model": [
+        "49",
+        0
+      ],
+      "positive": [
+        "11",
+        0
+      ],
+      "negative": [
+        "12",
+        0
+      ],
+      "latent_image": [
+        "29",
+        0
+      ]
     },
-    "_meta": {"title": "同 Anima 低重绘 Highres"}
+    "_meta": {
+      "title": "同 Anima 低重绘 Highres"
+    }
   },
   "44": {
     "class_type": "UNETLoader",
-    "inputs": {"unet_name": "YOUR_ANIMA_UNET.safetensors", "weight_dtype": "default"},
-    "_meta": {"title": "加载 Anima UNet"}
+    "inputs": {
+      "unet_name": "YOUR_ANIMA_UNET.safetensors",
+      "weight_dtype": "default"
+    },
+    "_meta": {
+      "title": "加载 Anima UNet"
+    }
   },
   "45": {
     "class_type": "CLIPLoader",
-    "inputs": {"clip_name": "YOUR_ANIMA_CLIP.safetensors", "type": "stable_diffusion", "device": "default"},
-    "_meta": {"title": "加载 CLIP"}
+    "inputs": {
+      "clip_name": "YOUR_ANIMA_CLIP.safetensors",
+      "type": "stable_diffusion",
+      "device": "default"
+    },
+    "_meta": {
+      "title": "加载 CLIP"
+    }
   },
   "46": {
     "class_type": "LoraLoader",
-    "inputs": {"lora_name": "YOUR_STYLE_LORA_1.safetensors", "strength_model": 0.0, "strength_clip": 0.0, "model": ["44", 0], "clip": ["45", 0]},
-    "_meta": {"title": "画风 LoRA 1"}
+    "inputs": {
+      "lora_name": "YOUR_STYLE_LORA_1.safetensors",
+      "strength_model": 0.6,
+      "strength_clip": 0.6,
+      "model": [
+        "44",
+        0
+      ],
+      "clip": [
+        "45",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "画风 LoRA 1"
+    }
   },
   "47": {
     "class_type": "LoraLoader",
-    "inputs": {"lora_name": "YOUR_STYLE_LORA_2.safetensors", "strength_model": 0.0, "strength_clip": 0.0, "model": ["46", 0], "clip": ["46", 1]},
-    "_meta": {"title": "画风 LoRA 2"}
+    "inputs": {
+      "lora_name": "YOUR_STYLE_LORA_2.safetensors",
+      "strength_model": 0.4,
+      "strength_clip": 0.4,
+      "model": [
+        "46",
+        0
+      ],
+      "clip": [
+        "46",
+        1
+      ]
+    },
+    "_meta": {
+      "title": "画风 LoRA 2"
+    }
   },
   "48": {
     "class_type": "LoraLoader",
-    "inputs": {"lora_name": "YOUR_STYLE_LORA_3.safetensors", "strength_model": 0.0, "strength_clip": 0.0, "model": ["47", 0], "clip": ["47", 1]},
-    "_meta": {"title": "画风 LoRA 3"}
+    "inputs": {
+      "lora_name": "YOUR_STYLE_LORA_3.safetensors",
+      "strength_model": 0.9,
+      "strength_clip": 0.9,
+      "model": [
+        "47",
+        0
+      ],
+      "clip": [
+        "47",
+        1
+      ]
+    },
+    "_meta": {
+      "title": "画风 LoRA 3"
+    }
   },
   "49": {
     "class_type": "LoraLoader",
-    "inputs": {"lora_name": "YOUR_STYLE_LORA_4.safetensors", "strength_model": 0.0, "strength_clip": 0.0, "model": ["48", 0], "clip": ["48", 1]},
-    "_meta": {"title": "画风 LoRA 4"}
+    "inputs": {
+      "lora_name": "YOUR_STYLE_LORA_4.safetensors",
+      "strength_model": 0.8,
+      "strength_clip": 0.8,
+      "model": [
+        "48",
+        0
+      ],
+      "clip": [
+        "48",
+        1
+      ]
+    },
+    "_meta": {
+      "title": "画风 LoRA 4"
+    }
   }
 }

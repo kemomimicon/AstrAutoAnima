@@ -87,7 +87,7 @@
         "Node name for S&R": "AnimaBatchFolderLoader"
       },
       "widgets_values": [
-        "YOUR_TRAINING_DATASET_DIR",
+        "/workspace/train",
         ".png,.jpg,.jpeg,.webp,.bmp",
         "",
         false,
@@ -723,10 +723,10 @@
         "Node name for S&R": "AnimaBatchTrainConfig"
       },
       "widgets_values": [
-        "YOUR_TRAIN_WRAPPER.py",
-        "YOUR_TRAIN_PYTHON",
-        "YOUR_ANIMA_MODEL_PATH",
-        "YOUR_LORA_OUTPUT_DIR",
+        "/workspace/anima_train_network_wrapper.py",
+        "/workspace/sd-scripts/.venv/bin/python",
+        "/workspace/ComfyUI/models/diffusion_models/YOUR_ANIMA_UNET.safetensors",
+        "/workspace/ComfyUI/models/loras/anima_lora",
         "1024,1024",
         1,
         10,
@@ -740,7 +740,7 @@
         1,
         ",",
         ".txt",
-        "--qwen3 YOUR_ANIMA_CLIP_PATH --vae YOUR_ANIMA_VAE_PATH --save_model_as safetensors --network_module networks.lora_anima --network_train_unet_only --lr_scheduler constant --timestep_sampling sigmoid --discrete_flow_shift 1.0 --gradient_checkpointing --cache_latents --vae_chunk_size 64 --vae_disable_cache --max_data_loader_n_workers 0",
+        "--qwen3 /workspace/ComfyUI/models/clip/YOUR_ANIMA_CLIP.safetensors --vae /workspace/ComfyUI/models/vae/YOUR_ANIMA_VAE.safetensors --save_model_as safetensors --network_module networks.lora_anima --network_train_unet_only --lr_scheduler constant --timestep_sampling sigmoid --discrete_flow_shift 1.0 --gradient_checkpointing --cache_latents --vae_chunk_size 64 --vae_disable_cache --max_data_loader_n_workers 0",
         true,
         "standard",
         "target_steps",

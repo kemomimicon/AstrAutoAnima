@@ -22,6 +22,8 @@ SOURCE_NAME_TO_CODE = {
     "discord": "D",
     "codex": "C",
     "reverse": "R",
+    "liked": "P",
+    "personal": "P",
 }
 SAFETY_NAME_TO_CODE = {"normal": "N", "nsfw": "H", "sexual": "S"}
 
@@ -62,7 +64,7 @@ def file_revision(path: Path, name: str) -> RevisionInfo:
 
 def _source_code(item: dict[str, Any]) -> str:
     value = str(item.get("source_code", "")).strip().upper()
-    if value in {"B", "G", "D", "C", "R"}:
+    if value in {"B", "G", "D", "C", "R", "P"}:
         return value
     return SOURCE_NAME_TO_CODE.get(
         str(item.get("source_group", "basic")).strip().casefold(), "B"
@@ -167,7 +169,7 @@ def list_presets(path: Path) -> PresetListResponse:
 
     style_items: list[PresetSummary] = []
     for name, raw in styles.items():
-        if not isinstance(raw, dict):
+        if not isinstance(raw, dict) or bool(raw.get("hidden", False)):
             continue
         loras = raw.get("loras", [])
         style_items.append(

@@ -654,7 +654,7 @@
         -1,
         4096,
         "You are the visual analysis branch of an Anima reverse-prompt compiler. Return one valid JSON object only. Do not use markdown. Use concise lowercase English Danbooru-style tags inside arrays. Do not invent artist names, copyright names, model names, quality tags, or hidden details. If uncertain, omit the item. Safety must follow the visible image, not assumptions.",
-        "Analyze the image and return exactly this JSON shape: {\"scene\":[],\"action\":[],\"character\":[],\"appearance\":[],\"clothing\":[],\"composition\":[],\"other\":[],\"safety\":{\"level\":\"normal|nsfw|sexual|uncertain\",\"reasons\":[]}}. Scene covers environment, time, weather and lighting. Action covers pose, interaction and movement. Character covers recognized identity only when visually reliable. Appearance covers visible physical features. Clothing covers garments and accessories. Composition covers shot type, angle, viewpoint and depth of field. The safety policy is: normal includes ordinary content, underwear and non-explicit body exposure up to approximately R15; nsfw includes complete nudity without sexual activity; sexual includes sexual acts or emphasized genitals. Output JSON only.",
+        "Analyze the image and return exactly this JSON shape: {\"scene\":[],\"action\":[],\"character\":[],\"appearance\":[],\"special_features\":[],\"clothing\":[],\"composition\":[],\"other\":[],\"safety\":{\"level\":\"normal|nsfw|sexual|uncertain\",\"reasons\":[]}}. Scene covers environment, time, weather and lighting. Action covers pose, interaction and movement. Character covers recognized identity only when visually reliable. Appearance covers ordinary physical traits such as hair, eyes, skin and body traits. Special_features covers non-human or supernatural anatomy and identity details such as animal ears, tails, wings, horns, halo, fangs, claws, scales, fins or tentacles. Clothing covers garments and accessories. Composition covers shot type, angle, viewpoint and depth of field. The safety policy is: normal includes ordinary content, underwear and non-explicit body exposure up to approximately R15; nsfw includes complete nudity without sexual activity; sexual includes sexual acts or emphasized genitals. Output JSON only.",
         768,
         0.2,
         0.9,
@@ -671,8 +671,8 @@
         140.0
       ],
       "size": [
-    560.0,
-    760.0
+        560.0,
+        760.0
       ],
       "flags": {},
       "order": 6,
@@ -778,6 +778,15 @@
           "link": null
         },
         {
+          "localized_name": "include_special_features",
+          "name": "include_special_features",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "include_special_features"
+          },
+          "link": null
+        },
+        {
           "localized_name": "include_clothing",
           "name": "include_clothing",
           "type": "BOOLEAN",
@@ -786,25 +795,25 @@
           },
           "link": null
         },
-    {
-      "localized_name": "include_composition",
+        {
+          "localized_name": "include_composition",
           "name": "include_composition",
           "type": "BOOLEAN",
           "widget": {
             "name": "include_composition"
           },
-      "link": null
-    },
-    {
-      "localized_name": "include_other",
-      "name": "include_other",
-      "type": "BOOLEAN",
-      "widget": {
-        "name": "include_other"
-      },
-      "link": null
-    },
-    {
+          "link": null
+        },
+        {
+          "localized_name": "include_other",
+          "name": "include_other",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "include_other"
+          },
+          "link": null
+        },
+        {
           "localized_name": "include_safety",
           "name": "include_safety",
           "type": "BOOLEAN",
@@ -857,10 +866,11 @@
         true,
         true,
         true,
-    true,
-    true,
-    true,
-    true
+        true,
+        true,
+        true,
+        true,
+        true
       ]
     },
     {
@@ -987,7 +997,7 @@
         "Node name for S&R": "AnimaReverseResultSaver"
       },
       "widgets_values": [
-        "astr_auto_anima/reverse_history",
+        "/workspace/astrbot-runtime/data/plugin_data/astrbot_plugin_comfy_bridge/reverse_history",
         "",
         "unknown",
         "",

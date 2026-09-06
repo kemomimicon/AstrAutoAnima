@@ -1,17 +1,41 @@
-# AstrAutoAnima 0.3.1-beta.1
+# AstrAutoAnima 0.4.0 正式版
 
-首次完整公开 Beta：AstrBot 插件、HQ/Refine/Reverse/Training 工作流、自定义节点、Hub 服务、
-Windows/Android 客户端源码与二进制、提示词批量管理工具和用户令牌管理工具。
+这是首个按统一稳定版本号发布的完整套件，包含 AstrBot 插件、Hub、Web/Windows/Android
+客户端源码、自定义节点、六套高级工作流模板、本地提示词管理器、令牌管理器和一键部署助手。
 
-安装前必读：
+## 本版重点
 
-- 只验证 AstrBot 绘画大师（Anima Master）`0.7.2`；上游 `0.8.0` 尚未测试。
-- 公开提示词池为 0 条，需导入自己的审核库。
-- 工作流已经脱敏，`YOUR_*` 模型、LoRA、训练路径占位符必须填写。
-- 不包含模型、LoRA、QQ 数据、令牌、私人预设、生成图和服务器配置。
-- HQ、Refine、Reverse、Training 仍为 Beta，请先在测试实例验证。
+- 插件、Hub 和客户端统一升级到 `0.4.0`。
+- 同步当前 Quick/HQ/Refine/SeedVR2/Reverse/Training 能力、任务历史、图片保存、用户管理、
+  LoRA/角色词典与个人画风配置。
+- 随机提示词支持任意自定义分组：`@rain`；`@rain+night` 表示同时属于两组。
+- 本地提示词库编辑器可创建、重命名、删除自定义分组，并批量导入/导出 JSON 或 CSV。
+- 新增图形化一键部署助手：自动探测常见目录、部署前预检、覆盖前备份；所有外部下载与依赖
+  安装默认关闭，只在用户主动勾选后执行。
+- 公开包移除私人/第三方提示词语料、令牌、QQ 数据、预设、真实模型/LoRA 名、生产路径、
+  图片、日志和私人启动素材。
 
-验证结果：插件 66 项、Hub 37 项、管理工具 4 项、Flutter 9 项测试通过；Flutter Analyze 0 问题；
-JSON/Python/隐私扫描通过。
+## 兼容性
 
-详细安装和排错请阅读仓库 `README.md` 与 `docs/`。
+- AstrBot：`>=4.17,<5`。
+- AstrBot 绘画大师（Anima Master）：只完整联调 `0.7.2`。
+- 上游 `0.8.0` 尚未回归测试；升级前必须备份并在测试实例验证。
+- Python：3.10+。
+
+## 发布包边界
+
+公开主提示词池和 K 池均为 0 条。`examples/prompt_pool.custom-groups.example.json` 只有两条
+普通内容的格式示例，用户需要自行导入有权使用且已经审核的语料。模型、外部节点及基础环境
+不随包分发。
+
+HQ、Refine、SeedVR2、Reverse 与 Training 工作流仍是实验性模板。其 `YOUR_*` 占位符必须
+在 ComfyUI 中替换后重新导出 API JSON，不能直接用于生产。
+
+安装前阅读 [一键部署说明](docs/EASY_INSTALL.md)、[详细安装](docs/INSTALL.md) 和
+[排错手册](docs/TROUBLESHOOTING.md)。
+
+## 客户端构建说明
+
+GitHub Release 中的 Android APK 是社区测试签名构建，可直接用于侧载验证，但不等同于
+Google Play 的正式签名包。计划二次分发或上架应用商店时，请自行配置独立 keystore、保护
+签名密钥，并重新构建。Windows 与 Web 构建不包含服务器地址、Hub 令牌或云平台密钥。

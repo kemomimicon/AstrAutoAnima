@@ -1,0 +1,94 @@
+{
+  "pack_version": "0.5.0",
+  "created_at": "2026-08-30",
+  "custom_nodes": [
+    {
+      "name": "ComfyUI-Booru-Tagger",
+      "repository": "https://github.com/nestflow/ComfyUI-Booru-Tagger.git",
+      "commit": "d5b24d886f7cb4fa55899871e561375e721c1b6e",
+      "required_class_types": [
+        "Load Booru Tagger",
+        "Booru Tagger"
+      ]
+    },
+    {
+      "name": "ComfyUI-joycaption-beta-one-GGUF",
+      "repository": "https://github.com/judian17/ComfyUI-joycaption-beta-one-GGUF.git",
+      "commit": "f96f00093c99572262c494a50934b3e251b05bf8",
+      "required_class_types": [
+        "JJC_JoyCaption_Custom_GGUF"
+      ]
+    },
+    {
+      "name": "ComfyUI-AstrAutoAnima-Workflow-Tools",
+      "source": "included_in_pack",
+      "required_class_types": [
+        "AnimaPromptBatchEncode",
+        "AnimaCaptionBatchGuard",
+        "AnimaReverseCompiler",
+        "AnimaReverseResultSaver"
+      ]
+    },
+    {
+      "name": "ComfyUI-SeedVR2_VideoUpscaler",
+      "repository": "https://github.com/numz/ComfyUI-SeedVR2_VideoUpscaler.git",
+      "required_class_types": [
+        "SeedVR2LoadDiTModel",
+        "SeedVR2LoadVAEModel"
+      ]
+    },
+    {
+      "name": "comfyui-seedvr2-tilingupscaler",
+      "repository": "https://github.com/moonwhaler/comfyui-seedvr2-tilingupscaler.git",
+      "required_class_types": [
+        "SeedVR2TilingUpscaler"
+      ]
+    }
+  ],
+  "models": [
+    {
+      "logical_name": "WD-EVA02 v3",
+      "repository": "SmilingWolf/wd-eva02-large-tagger-v3",
+      "selector": "wd-eva02-large-tagger-v3",
+      "managed_by": "ComfyUI-Booru-Tagger"
+    },
+    {
+      "logical_name": "CL Tagger v2.00",
+      "repository": "cella110n/cl_tagger_v2",
+      "selector": "cl-tagger-v2-v2_00",
+      "gated": true,
+      "redistributable_in_pack": false,
+      "target_root": "/workspace/ComfyUI/models/booru_tagger"
+    },
+    {
+      "logical_name": "JoyCaption Beta One Q6_K",
+      "repository": "mradermacher/llama-joycaption-beta-one-hf-llava-GGUF",
+      "filename": "llama-joycaption-beta-one-hf-llava.Q6_K.gguf",
+      "target_root": "/workspace/ComfyUI/models/llava_gguf"
+    },
+    {
+      "logical_name": "JoyCaption Beta One mmproj F16",
+      "repository": "concedo/llama-joycaption-beta-one-hf-llava-mmproj-gguf",
+      "filename": "llama-joycaption-beta-one-llava-mmproj-model-f16.gguf",
+      "target_root": "/workspace/ComfyUI/models/llava_gguf"
+    },
+    {
+      "logical_name": "SeedVR2 3B Q4_K_M",
+      "filename": "seedvr2_ema_3b-Q4_K_M.gguf",
+      "managed_by": "ComfyUI-SeedVR2_VideoUpscaler"
+    },
+    {
+      "logical_name": "SeedVR2 VAE FP16",
+      "filename": "ema_vae_fp16.safetensors",
+      "managed_by": "ComfyUI-SeedVR2_VideoUpscaler"
+    }
+  ],
+  "workflows": [
+    "Anima_WD_EVA02_Safe_Caption_Train_v2.json",
+    "Anima_WD_CT_JoyCaption_Reverse_Beta.json",
+    "Anima_WD_CT_JoyCaption_Reverse_Beta_api.json",
+    "Anima_HQ_Txt2Img_Beta_api.json",
+    "Anima_Refine_Existing_Beta_api.json",
+    "Anima_SeedVR2_Refine_Beta_api.json"
+  ]
+}

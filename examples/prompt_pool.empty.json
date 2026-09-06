@@ -1,7 +1,8 @@
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "catalog_revision": 1,
-  "release_version": "user-library",
+  "release_version": "custom",
+  "description": "Your reviewed prompt pool",
   "source_groups": {
     "B": {"name": "basic", "default": true},
     "G": {"name": "generate", "default": true},
@@ -14,6 +15,7 @@
     "H": {"name": "nsfw", "default": true},
     "S": {"name": "sexual", "default": false}
   },
+  "custom_group_definitions": [],
   "quality_presets": {"general": ""},
   "prompts": [],
   "deleted_prompt_ids": []

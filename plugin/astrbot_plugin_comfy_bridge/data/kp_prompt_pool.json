@@ -1,0 +1,12 @@
+{
+  "schema_version": 3,
+  "catalog_revision": 1,
+  "release_version": "public-empty-0.4.0",
+  "description": "Public empty K pool. No upstream prompt corpus is redistributed.",
+  "source_groups": {"K": {"name": "custom-dynamic", "default": false}},
+  "safety_groups": {"N": {"name": "normal", "default": true}},
+  "custom_group_definitions": [],
+  "quality_presets": {"general": ""},
+  "prompts": [],
+  "deleted_prompt_ids": []
+}

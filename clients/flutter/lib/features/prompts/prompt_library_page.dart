@@ -236,6 +236,7 @@ class _PromptLibraryPageState extends State<PromptLibraryPage> {
                       DropdownMenuItem(value: 'D', child: Text('D · Discord')),
                       DropdownMenuItem(value: 'C', child: Text('C · Codex')),
                       DropdownMenuItem(value: 'R', child: Text('R · Reverse')),
+                      DropdownMenuItem(value: 'P', child: Text('P · Liked')),
                     ],
                     onChanged: (value) => _source = value ?? '',
                   ),

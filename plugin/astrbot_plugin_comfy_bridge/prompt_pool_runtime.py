@@ -16,9 +16,10 @@ except ImportError:  # pragma: no cover - direct local tests
 
 
 VALID_SAFETY_LABELS = {"normal", "nsfw", "sexual"}
-SOURCE_CODES = ("B", "G", "D", "C", "R")
+SOURCE_CODES = ("B", "G", "D", "C", "R", "K", "P")
+MANAGEABLE_SOURCE_CODES = ("B", "G", "D", "C", "R", "P")
 SAFETY_CODES = ("N", "H", "S")
-DEFAULT_SOURCE_CODES = ("B", "G", "D")
+DEFAULT_SOURCE_CODES = ("B", "G", "D", "P")
 DEFAULT_SAFETY_CODES = ("N", "H")
 SOURCE_NAME_TO_CODE = {
     "basic": "B",
@@ -26,9 +27,13 @@ SOURCE_NAME_TO_CODE = {
     "discord": "D",
     "codex": "C",
     "reverse": "R",
+    "kprompt": "K",
+    "liked": "P",
+    "personal": "P",
 }
 SAFETY_NAME_TO_CODE = {"normal": "N", "nsfw": "H", "sexual": "S"}
 CODE_TO_SAFETY_NAME = {value: key for key, value in SAFETY_NAME_TO_CODE.items()}
+CUSTOM_GROUP_ID_PATTERN = re.compile(r"^[^\s@/+,]{1,64}$", flags=re.UNICODE)
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -104,12 +109,19 @@ def _merge_prompt_pools(
             "D": "discord-",
             "C": "codex-",
             "R": "reverse-",
+            "K": "kp-",
+            "P": "liked-",
         }.get(existing_source, "")
         is_replaced_catalog_item = (
             existing_source in replacement_sources
             and bool(catalog_prefix)
             and prompt_id.casefold().startswith(catalog_prefix)
         )
+        if existing_source == "K" and bool(existing.get("runtime_generated")):
+            # Runtime-composed K records are persisted so Hub/App can like the
+            # exact prompt. They are history, not bundled catalog records, and
+            # therefore must survive a managed K catalog upgrade.
+            is_replaced_catalog_item = False
         if is_replaced_catalog_item:
             if bundled_item is None:
                 continue
@@ -203,50 +215,105 @@ def load_prompt_pool(path: Path) -> dict[str, Any]:
             raise WorkflowError(
                 f"随机提示词 {prompt_id} 的 safety_level 必须是 normal/nsfw/sexual。"
             )
+        groups = item.get("custom_groups", [])
+        if isinstance(groups, str):
+            groups = [groups]
+        if not isinstance(groups, list):
+            raise WorkflowError(
+                f"随机提示词 {prompt_id} 的 custom_groups 必须是数组。"
+            )
+        for group in groups:
+            validate_custom_group_id(str(group))
         identifiers.add(prompt_id)
     return data
+
+
+def validate_custom_group_id(value: str) -> str:
+    group_id = str(value or "").strip().casefold()
+    if not CUSTOM_GROUP_ID_PATTERN.fullmatch(group_id):
+        raise WorkflowError(
+            "自定义分组 ID 长度须为 1-64，且不能包含空格或 @ / + ,。"
+        )
+    return group_id
+
+
+def prompt_entry_custom_groups(item: dict[str, Any]) -> list[str]:
+    raw = item.get("custom_groups", [])
+    if isinstance(raw, str):
+        raw = [raw]
+    if not isinstance(raw, list):
+        return []
+    result: list[str] = []
+    for value in raw:
+        try:
+            group_id = validate_custom_group_id(str(value))
+        except WorkflowError:
+            continue
+        if group_id not in result:
+            result.append(group_id)
+    return result
+
+
+def decode_custom_group_token(token: str) -> list[str] | None:
+    candidate = str(token or "").strip()
+    if not candidate.startswith("@") or len(candidate) == 1:
+        return None
+    raw_groups = [part for part in re.split(r"[+,]", candidate[1:]) if part]
+    if not raw_groups:
+        return None
+    try:
+        return list(dict.fromkeys(validate_custom_group_id(part) for part in raw_groups))
+    except WorkflowError:
+        return None
 
 
 def parse_group_selector(body: str) -> tuple[str, dict[str, Any]]:
     """Consume a leading `C/H`-style selector and apply safe defaults."""
 
     stripped = str(body or "").strip()
-    token = ""
+    tokens: list[str] = []
     rest = stripped
-    if stripped:
-        match = re.match(r"^(\S+)(?:\s+(.*))?$", stripped, flags=re.S)
+    parts: list[str] = []
+    custom_groups: list[str] = []
+    while rest:
+        match = re.match(r"^(\S+)(?:\s+(.*))?$", rest, flags=re.S)
         first = match.group(1) if match else ""
         candidate = first.upper()
-        parts = [part for part in re.split(r"[/+,]", candidate) if part]
+        candidate_parts = [part for part in re.split(r"[/+,]", candidate) if part]
         valid_codes = set(SOURCE_CODES + SAFETY_CODES)
         is_code_token = (
             first == candidate
-            and bool(parts)
-            and all(len(part) == 1 and part in valid_codes for part in parts)
+            and bool(candidate_parts)
+            and all(len(part) == 1 and part in valid_codes for part in candidate_parts)
         )
         alias_code = SOURCE_NAME_TO_CODE.get(first.casefold()) or SAFETY_NAME_TO_CODE.get(
             first.casefold()
         )
-        if is_code_token:
-            token = candidate
-            rest = (match.group(2) or "").strip() if match else ""
+        custom = decode_custom_group_token(first)
+        if is_code_token and not parts:
+            tokens.append(candidate)
+            parts = candidate_parts
         elif alias_code:
-            token = alias_code
+            if parts:
+                break
+            tokens.append(alias_code)
             parts = [alias_code]
-            rest = (match.group(2) or "").strip() if match else ""
+        elif custom is not None and not custom_groups:
+            tokens.append("@" + "+".join(custom))
+            custom_groups = custom
         else:
-            parts = []
-    else:
-        parts = []
+            break
+        rest = (match.group(2) or "").strip() if match else ""
 
     requested_sources = [code for code in parts if code in SOURCE_CODES]
     requested_safety = [code for code in parts if code in SAFETY_CODES]
     sources = requested_sources or list(DEFAULT_SOURCE_CODES)
     safety = requested_safety or list(DEFAULT_SAFETY_CODES)
     return rest, {
-        "token": token,
+        "token": " ".join(tokens),
         "source_codes": sources,
         "safety_codes": safety,
+        "custom_groups": custom_groups,
         "explicit_sources": bool(requested_sources),
         "explicit_safety": bool(requested_safety),
         "protected_fallback": False,
@@ -298,7 +365,8 @@ def apply_protected_character_policy(
 def describe_selection(selection: dict[str, Any]) -> str:
     sources = ",".join(selection.get("source_codes", DEFAULT_SOURCE_CODES))
     safety = ",".join(selection.get("safety_codes", DEFAULT_SAFETY_CODES))
-    return f"{sources}/{safety}"
+    custom = "+".join(selection.get("custom_groups", []))
+    return f"{sources}/{safety}" + (f" @{custom}" if custom else "")
 
 
 def _entry_source_code(item: dict[str, Any]) -> str:
@@ -362,9 +430,13 @@ def select_random_prompt(
     *,
     source_codes: list[str] | tuple[str, ...] = DEFAULT_SOURCE_CODES,
     safety_codes: list[str] | tuple[str, ...] = DEFAULT_SAFETY_CODES,
+    custom_groups: list[str] | tuple[str, ...] = (),
 ) -> tuple[dict[str, Any], list[str], bool]:
     source_set = {str(code).upper() for code in source_codes}
     safety_set = {str(code).upper() for code in safety_codes}
+    required_groups = {
+        validate_custom_group_id(str(group)) for group in custom_groups
+    }
     eligible = [
         item
         for item in pool.get("prompts", [])
@@ -372,11 +444,14 @@ def select_random_prompt(
         and bool(item.get("enabled", True))
         and _entry_source_code(item) in source_set
         and _entry_safety_code(item) in safety_set
+        and required_groups.issubset(set(prompt_entry_custom_groups(item)))
     ]
     if not eligible:
         sources = ",".join(sorted(source_set)) or "无"
         safety = ",".join(sorted(safety_set)) or "无"
-        raise WorkflowError(f"所选范围 {sources}/{safety} 暂无可用提示词。")
+        custom = "+".join(sorted(required_groups))
+        custom_text = f" @{custom}" if custom else ""
+        raise WorkflowError(f"所选范围 {sources}/{safety}{custom_text} 暂无可用提示词。")
 
     matched = _matched_categories(pool, user_prompt)
     candidates = eligible
@@ -403,6 +478,7 @@ def select_random_prompts(
     *,
     source_codes: list[str] | tuple[str, ...] = DEFAULT_SOURCE_CODES,
     safety_codes: list[str] | tuple[str, ...] = DEFAULT_SAFETY_CODES,
+    custom_groups: list[str] | tuple[str, ...] = (),
 ) -> tuple[list[dict[str, Any]], list[str], bool]:
     """Select distinct records without replacement for multi-draw generation."""
 
@@ -423,6 +499,7 @@ def select_random_prompts(
             user_prompt,
             source_codes=source_codes,
             safety_codes=safety_codes,
+            custom_groups=custom_groups,
         )
         selected.append(item)
         excluded_ids.add(str(item.get("id", "")))
@@ -449,11 +526,14 @@ def prompt_pool_stats(pool: dict[str, Any]) -> dict[str, Any]:
     labels = {label: 0 for label in sorted(VALID_SAFETY_LABELS)}
     sources = {code: 0 for code in SOURCE_CODES}
     safety_codes = {code: 0 for code in SAFETY_CODES}
+    custom_groups: dict[str, int] = {}
     for item in prompts:
         label = str(item.get("safety_level", "normal")).lower()
         labels[label] = labels.get(label, 0) + 1
         sources[_entry_source_code(item)] += 1
         safety_codes[_entry_safety_code(item)] += 1
+        for group in prompt_entry_custom_groups(item):
+            custom_groups[group] = custom_groups.get(group, 0) + 1
     return {
         "total": len(prompts),
         "enabled": len(enabled),
@@ -461,6 +541,7 @@ def prompt_pool_stats(pool: dict[str, Any]) -> dict[str, Any]:
         "labels": labels,
         "sources": sources,
         "safety_codes": safety_codes,
+        "custom_groups": dict(sorted(custom_groups.items())),
     }
 
 
@@ -481,11 +562,15 @@ def filter_prompt_entries(
     *,
     source_codes: list[str] | tuple[str, ...] = SOURCE_CODES,
     safety_codes: list[str] | tuple[str, ...] = SAFETY_CODES,
+    custom_groups: list[str] | tuple[str, ...] = (),
     keyword: str = "",
     include_disabled: bool = True,
 ) -> list[dict[str, Any]]:
     source_set = {str(code).upper() for code in source_codes}
     safety_set = {str(code).upper() for code in safety_codes}
+    required_groups = {
+        validate_custom_group_id(str(group)) for group in custom_groups
+    }
     folded_keyword = str(keyword or "").strip().casefold()
     result: list[dict[str, Any]] = []
     for item in pool.get("prompts", []):
@@ -496,6 +581,8 @@ def filter_prompt_entries(
         if _entry_source_code(item) not in source_set:
             continue
         if _entry_safety_code(item) not in safety_set:
+            continue
+        if not required_groups.issubset(set(prompt_entry_custom_groups(item))):
             continue
         if folded_keyword:
             searchable = "\n".join(
@@ -535,8 +622,8 @@ def _source_group_name(code: str) -> str:
 def _validate_management_codes(source_code: str, safety_code: str) -> tuple[str, str]:
     source = str(source_code).strip().upper()
     safety = str(safety_code).strip().upper()
-    if source not in SOURCE_CODES:
-        raise WorkflowError(f"来源组必须是 {'/'.join(SOURCE_CODES)}。")
+    if source not in MANAGEABLE_SOURCE_CODES:
+        raise WorkflowError(f"来源组必须是 {'/'.join(MANAGEABLE_SOURCE_CODES)}。")
     if safety not in SAFETY_CODES:
         raise WorkflowError(f"级别组必须是 {'/'.join(SAFETY_CODES)}。")
     return source, safety

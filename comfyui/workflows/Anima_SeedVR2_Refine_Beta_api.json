@@ -1,0 +1,92 @@
+{
+  "1": {
+    "inputs": {
+      "image": "seedvr2_input.png",
+      "upload": "image"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "SeedVR2 输入图片"
+    }
+  },
+  "2": {
+    "inputs": {
+      "model": "YOUR_SEEDVR2_MODEL.gguf",
+      "device": "cuda:0",
+      "blocks_to_swap": 32,
+      "swap_io_components": true,
+      "offload_device": "cpu",
+      "cache_model": false,
+      "attention_mode": "sdpa"
+    },
+    "class_type": "SeedVR2LoadDiTModel",
+    "_meta": {
+      "title": "加载 SeedVR2 DiT"
+    }
+  },
+  "3": {
+    "inputs": {
+      "model": "YOUR_SEEDVR2_VAE.safetensors",
+      "device": "cuda:0",
+      "encode_tiled": true,
+      "encode_tile_size": 1024,
+      "encode_tile_overlap": 128,
+      "decode_tiled": true,
+      "decode_tile_size": 1024,
+      "decode_tile_overlap": 128,
+      "tile_debug": "false",
+      "offload_device": "cpu",
+      "cache_model": false
+    },
+    "class_type": "SeedVR2LoadVAEModel",
+    "_meta": {
+      "title": "加载 SeedVR2 VAE"
+    }
+  },
+  "4": {
+    "inputs": {
+      "image": [
+        "1",
+        0
+      ],
+      "dit": [
+        "2",
+        0
+      ],
+      "vae": [
+        "3",
+        0
+      ],
+      "seed": 100,
+      "new_resolution": 4096,
+      "tile_width": 1024,
+      "tile_height": 1024,
+      "mask_blur": 3,
+      "tile_padding": 64,
+      "tile_upscale_resolution": 1536,
+      "tiling_strategy": "Linear",
+      "anti_aliasing_strength": 0.1,
+      "blending_method": "content_aware",
+      "color_correction": "lab",
+      "resolution_target": "longest",
+      "tile_batch_size": 1
+    },
+    "class_type": "SeedVR2TilingUpscaler",
+    "_meta": {
+      "title": "SeedVR2 分块放大"
+    }
+  },
+  "5": {
+    "inputs": {
+      "filename_prefix": "AstrAutoAnima/SeedVR2",
+      "images": [
+        "4",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "保存 SeedVR2 图片"
+    }
+  }
+}

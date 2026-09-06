@@ -2,7 +2,7 @@
 
 本文只说明 AstrAutoAnima 自身的安装。AstrBot、ComfyUI、NapCatQQ 的安装请使用各自官方文档：
 
-- AstrBot：<https://astrbot.org/zh/docs>
+- AstrBot：<https://docs.astrbot.app/>
 - ComfyUI：<https://docs.comfy.org/>
 - NapCatQQ：<https://napneko.github.io/>
 - Anima Master：<https://github.com/YayiMiko/anima-master>
@@ -56,16 +56,20 @@ ASTRBOT_DATA/plugin_data/astrbot_plugin_comfy_bridge
 完整重启 AstrBot。日志中应出现：
 
 ```text
-Plugin astrbot_plugin_comfy_bridge (0.3.1-beta.1)
+Plugin astrbot_plugin_comfy_bridge (0.4.0)
 ```
 
 公开包的内置提示词池是空的，不会覆盖私人库。新安装需要按第 7 节导入自己的提示词。
 
+电脑小白推荐直接双击仓库根目录的 `一键部署_AstrAutoAnima.bat`。图形助手会尝试填写常见
+目录，默认只选择离线的插件与工作流；联网拉取必须逐项勾选。完整说明见
+[一键部署懒人包](EASY_INSTALL.md)。
+
 也可以先用跨平台安装器做只读预演，再明确执行：
 
 ```bash
-python scripts/install_project.py --astrbot-data "ASTRBOT_DATA" --comfyui-root "COMFYUI_ROOT"
-python scripts/install_project.py --astrbot-data "ASTRBOT_DATA" --comfyui-root "COMFYUI_ROOT" --apply
+python tools/easy_installer.py --astrbot-data "ASTRBOT_DATA" --comfyui-root "COMFYUI_ROOT" --hub-home "HUB_HOME"
+python tools/easy_installer.py --astrbot-data "ASTRBOT_DATA" --comfyui-root "COMFYUI_ROOT" --hub-home "HUB_HOME" --apply
 ```
 
 安装器会备份已存在的插件、自定义节点和同名工作流，但绝不触碰 `plugin_data`；服务重启仍需
@@ -109,6 +113,7 @@ AnimaReverseResultSaver
 | --- | --- | --- |
 | `Anima_HQ_Txt2Img_Beta_api.json` | HQ Stable/Beauty | Beta |
 | `Anima_Refine_Existing_Beta_api.json` | 已有图放大低重绘 | Beta |
+| `Anima_SeedVR2_Refine_Beta_api.json` | SeedVR2 分块放大 | Beta |
 | `Anima_WD_CT_JoyCaption_Reverse_Beta.json` | 可视化反推工作流 | Beta |
 | `Anima_WD_CT_JoyCaption_Reverse_Beta_api.json` | 插件调用反推 API | Beta |
 | `Anima_WD_EVA02_Safe_Caption_Train_v2.json` | 独立炼丹打标/质检 | Beta |
@@ -255,7 +260,7 @@ flutter build apk --release
 按顺序完成：
 
 1. ComfyUI `/system_stats` 返回 200。
-2. AstrBot 日志出现插件 `0.3.1-beta.1`，QQ `/aimg_status` 有响应。
+2. AstrBot 日志出现插件 `0.4.0`，QQ `/aimg_status` 有响应。
 3. `/aimg 1girl, solo` 成功回图。
 4. 配置预设后验证角色/画风 LoRA。
 5. `/aip 仅反推 分类=场景,动作` 成功返回文本。

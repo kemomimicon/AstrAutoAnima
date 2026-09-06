@@ -30,6 +30,20 @@ android {
         versionName = flutter.versionName
     }
 
+    flavorDimensions += "edition"
+    productFlavors {
+        create("admin") {
+            dimension = "edition"
+            applicationIdSuffix = ".admin"
+            resValue("string", "app_name", "AstrAutoAnima 管理端")
+        }
+        create("service") {
+            dimension = "edition"
+            applicationIdSuffix = ".service"
+            resValue("string", "app_name", "AstrAutoAnima")
+        }
+    }
+
     buildTypes {
         release {
             // TODO: Add your own signing config for the release build.

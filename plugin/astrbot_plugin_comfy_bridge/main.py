@@ -42,6 +42,7 @@ from .prompt_pool_runtime import (
     add_prompt_entry,
     apply_protected_character_policy,
     compose_random_body,
+    decode_custom_group_token,
     decode_group_code_token,
     delete_prompt_entry,
     describe_selection,
@@ -53,12 +54,19 @@ from .prompt_pool_runtime import (
     load_prompt_pool,
     parse_group_selector,
     parse_protected_characters,
+    prompt_entry_custom_groups,
     prompt_pool_stats,
     quality_prompt,
     require_source_safety_selector,
     select_random_prompt,
     select_random_prompts,
     update_prompt_entry,
+)
+from .kp_dynamic_runtime import (
+    assemble_dynamic_k_prompts,
+    dynamic_k_history_count,
+    load_kp_module_catalog,
+    persist_dynamic_k_entries,
 )
 from .workflow_runtime import (
     RATIO_PRESETS,
@@ -68,13 +76,16 @@ from .workflow_runtime import (
     build_prompt_text,
     configure_hq_workflow,
     configure_refine_workflow,
+    configure_seedvr2_workflow,
     describe_workflow,
     extract_command_body,
     extract_command_prompt,
     extract_output_images,
     extract_reverse_result,
     history_error,
+    history_failed,
     load_api_workflow,
+    prepare_prompt_batch_workflow,
     prepare_workflow,
     prepare_reverse_workflow,
     resolve_canvas_size,
@@ -82,6 +93,12 @@ from .workflow_runtime import (
 from .image_runtime import EventImageResolver
 from .job_runtime import JobStore
 from .llm_runtime import reverse_image_prompt, translate_chinese_prompt
+from .cleanup_runtime import CleanupReport, cleanup_old_output_images
+from .character_dictionary_runtime import resolve_character
+from .agent_tools_runtime import (
+    build_agent_generation_request,
+    list_agent_presets,
+)
 from .workflow_registry import (
     WorkflowDefinition,
     load_workflow_registry,
@@ -107,6 +124,7 @@ REVERSE_CATEGORY_ALIASES = {
     "动作": "action", "姿势": "action", "action": "action",
     "角色": "character", "人物": "character", "character": "character",
     "外观": "appearance", "外貌": "appearance", "appearance": "appearance",
+    "特殊特征": "special_features", "兽征": "special_features", "special": "special_features", "special_features": "special_features",
     "服装": "clothing", "衣着": "clothing", "clothing": "clothing",
     "构图": "composition", "镜头": "composition", "composition": "composition",
     "其他": "other", "细节": "other", "other": "other",
@@ -117,6 +135,7 @@ REVERSE_CATEGORY_LABELS = {
     "action": "动作",
     "character": "角色",
     "appearance": "外观",
+    "special_features": "特殊特征",
     "clothing": "服装",
     "composition": "构图",
     "other": "其他",
@@ -125,7 +144,7 @@ REVERSE_PRESET_CATEGORIES = {
     "full": tuple(REVERSE_CATEGORY_LABELS),
     "scene": ("scene", "composition"),
     "action": ("action", "composition"),
-    "character": ("character", "appearance", "clothing"),
+    "character": ("character", "appearance", "special_features", "clothing"),
     "safe": tuple(REVERSE_CATEGORY_LABELS),
 }
 
@@ -137,9 +156,23 @@ class ComfyWorkflowBridge(Star):
         concurrency = max(1, int(config.get("max_concurrency", 1)))
         self._semaphore = asyncio.Semaphore(concurrency)
         self._five_draw_cooldowns: dict[str, float] = {}
+        self._five_draw_active_users: set[str] = set()
+        self._five_draw_lock = asyncio.Lock()
+        self._agent_tool_cooldowns: dict[str, float] = {}
+        self._agent_tool_active_users: set[str] = set()
+        self._agent_tool_lock = asyncio.Lock()
         self._pending_images: dict[tuple[str, str], PendingImageRequest] = {}
         self._pending_lock = asyncio.Lock()
         self._image_resolver = EventImageResolver(self._input_dir(), logger)
+        self._cleanup_task: asyncio.Task[Any] | None = None
+
+    async def initialize(self):
+        """Start the bounded plugin-output cleanup worker."""
+        if bool(self.config.get("output_cleanup_enabled", True)):
+            self._cleanup_task = asyncio.create_task(
+                self._output_cleanup_loop(),
+                name="aaa-output-cleanup",
+            )
 
     def _base_url(self) -> str:
         value = str(
@@ -221,6 +254,56 @@ class ComfyWorkflowBridge(Star):
         output_dir.mkdir(parents=True, exist_ok=True)
         return output_dir.resolve()
 
+    def _output_retention_hours(self) -> float:
+        try:
+            return max(
+                1.0,
+                float(self.config.get("output_retention_hours", 48)),
+            )
+        except (TypeError, ValueError):
+            return 48.0
+
+    def _output_cleanup_interval_seconds(self) -> int:
+        try:
+            minutes = float(
+                self.config.get("output_cleanup_interval_minutes", 60)
+            )
+        except (TypeError, ValueError):
+            minutes = 60.0
+        return max(300, int(minutes * 60))
+
+    async def _cleanup_plugin_outputs(self) -> CleanupReport:
+        return await asyncio.to_thread(
+            cleanup_old_output_images,
+            self._output_dir(),
+            self._output_retention_hours(),
+        )
+
+    async def _output_cleanup_loop(self) -> None:
+        while True:
+            try:
+                report = await self._cleanup_plugin_outputs()
+                if report.deleted or report.failed:
+                    logger.info(
+                        "[comfy_bridge] output cleanup scanned=%s deleted=%s "
+                        "deleted_bytes=%s failed=%s retention_hours=%s dir=%s",
+                        report.scanned,
+                        report.deleted,
+                        report.deleted_bytes,
+                        report.failed,
+                        self._output_retention_hours(),
+                        self._output_dir(),
+                    )
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                logger.warning(
+                    "[comfy_bridge] output cleanup failed: %s: %s",
+                    type(exc).__name__,
+                    exc,
+                )
+            await asyncio.sleep(self._output_cleanup_interval_seconds())
+
     def _input_dir(self) -> Path:
         configured = str(self.config.get("input_dir", "")).strip()
         if configured:
@@ -246,6 +329,34 @@ class ComfyWorkflowBridge(Star):
             path = Path.cwd() / path
         return path.resolve()
 
+    def _character_dictionary_path(self) -> Path:
+        configured = str(self.config.get("character_dictionary_path", "")).strip()
+        if configured:
+            path = Path(configured).expanduser()
+        else:
+            path = Path(
+                "data/plugin_data/astrbot_plugin_comfy_bridge/character_dictionary.json"
+            )
+        if not path.is_absolute():
+            path = Path.cwd() / path
+        return path.resolve()
+
+    def _character_dictionary_edits_path(self) -> Path:
+        configured = str(
+            self.config.get("character_dictionary_edits_path", "")
+        ).strip()
+        if configured:
+            path = Path(configured).expanduser()
+        else:
+            path = Path(
+                "/workspace/astrbot-runtime/data/plugin_data/"
+                "astrbot_plugin_comfy_bridge/hub_state/"
+                "character_dictionary_edits.json"
+            )
+        if not path.is_absolute():
+            path = Path(__file__).resolve().parent / path
+        return path.resolve()
+
     def _prompt_pool_path(self) -> Path:
         configured = str(self.config.get("prompt_pool_path", "")).strip()
         if configured:
@@ -259,6 +370,88 @@ class ComfyWorkflowBridge(Star):
             path = Path.cwd() / path
         bundled = Path(__file__).resolve().parent / "data" / "anima_random_prompt_pool.json"
         return ensure_prompt_pool(path.resolve(), bundled)
+
+    def _kp_prompt_pool_path(self) -> Path:
+        """Return the isolated K prompt pool, installing the bundled catalog once."""
+
+        path = self._prompt_pool_path().with_name("kp_prompt_pool.json")
+        bundled = Path(__file__).resolve().parent / "data" / "kp_prompt_pool.json"
+        return ensure_prompt_pool(path.resolve(), bundled)
+
+    def _kp_dynamic_catalog_path(self) -> Path:
+        raw = str(self.config.get("kp_dynamic_modules_path", "")).strip()
+        if not raw:
+            return Path(__file__).resolve().parent / "data" / "kp_dynamic_modules.json"
+        path = Path(raw).expanduser()
+        if not path.is_absolute():
+            path = Path(__file__).resolve().parent / path
+        return path.resolve()
+
+    def _kp_dynamic_items(
+        self,
+        pool: dict[str, Any],
+        selection: dict[str, Any],
+        *,
+        count: int,
+        options: dict[str, Any],
+        user_prompt: str = "",
+        excluded_ids: set[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        try:
+            catalog = load_kp_module_catalog(self._kp_dynamic_catalog_path())
+            return assemble_dynamic_k_prompts(
+                pool,
+                catalog,
+                count,
+                safety_codes=selection.get("safety_codes", ["N", "H"]),
+                preserve_character=bool(str(options.get("character", "")).strip()),
+                min_optional_modules=int(
+                    self.config.get("kp_dynamic_optional_modules_min", 4)
+                ),
+                max_optional_modules=int(
+                    self.config.get("kp_dynamic_optional_modules_max", 7)
+                ),
+                max_tags=int(self.config.get("kp_dynamic_max_tags", 72)),
+                excluded_ids=excluded_ids,
+            )
+        except WorkflowError:
+            if not bool(self.config.get("kp_dynamic_fallback_examples", True)):
+                raise
+            logger.exception("KP dynamic composition failed; falling back to examples")
+            working_pool = dict(pool)
+            if excluded_ids:
+                working_pool["prompts"] = [
+                    item
+                    for item in pool.get("prompts", [])
+                    if str(item.get("id", "")) not in excluded_ids
+                    and not bool(item.get("runtime_generated"))
+                ]
+            selected, _, _ = select_random_prompts(
+                working_pool,
+                count,
+                user_prompt,
+                source_codes=["K"],
+                safety_codes=selection.get("safety_codes", ["N", "H"]),
+            )
+            return selected
+
+    def _random_prompt_pool(self, selection: dict[str, Any]) -> dict[str, Any]:
+        sources = list(selection.get("source_codes", []))
+        if "K" not in sources:
+            return load_prompt_pool(self._prompt_pool_path())
+        if selection.get("custom_groups"):
+            raise WorkflowError("K 动态库不支持自定义分组筛选；请移除 @分组。")
+        if sources != ["K"]:
+            raise WorkflowError("K 组使用独立 KP 库，必须单独选择 K；可写 K/N、K/H 或 K/S。")
+        pool = load_prompt_pool(self._kp_prompt_pool_path())
+        if not bool(self.config.get("kp_dynamic_enabled", True)):
+            pool = dict(pool)
+            pool["prompts"] = [
+                item
+                for item in pool.get("prompts", [])
+                if not (isinstance(item, dict) and item.get("runtime_generated"))
+            ]
+        return pool
 
     def _prompt_pool_trash_path(self) -> Path:
         return self._prompt_pool_path().with_name("prompt_pool_trash.json")
@@ -339,27 +532,36 @@ class ComfyWorkflowBridge(Star):
     @staticmethod
     def _parse_pool_filter(
         body: str,
-    ) -> tuple[list[str], list[str], int, str, str]:
+    ) -> tuple[list[str], list[str], list[str], int, str, str]:
         remaining = str(body or "").strip()
         sources = list(SOURCE_CODES)
         safety = list(SAFETY_CODES)
-        selector = "ALL"
-        if remaining:
+        custom_groups: list[str] = []
+        selectors: list[str] = []
+        while remaining:
             first, _, tail = remaining.partition(" ")
             decoded = decode_group_code_token(first)
-            if decoded is not None:
+            custom = decode_custom_group_token(first)
+            if decoded is not None and not any(not item.startswith("@") for item in selectors):
                 selected_sources, selected_safety = decoded
                 sources = selected_sources or sources
                 safety = selected_safety or safety
-                selector = first.upper()
+                selectors.append(first.upper())
                 remaining = tail.strip()
+            elif custom is not None and not custom_groups:
+                custom_groups = custom
+                selectors.append("@" + "+".join(custom))
+                remaining = tail.strip()
+            else:
+                break
+        selector = " ".join(selectors) or "ALL"
         page = 1
         if remaining:
             first, _, tail = remaining.partition(" ")
             if first.isdigit():
                 page = max(1, int(first))
                 remaining = tail.strip()
-        return sources, safety, page, remaining, selector
+        return sources, safety, custom_groups, page, remaining, selector
 
     @staticmethod
     def _format_prompt_entry(item: dict[str, Any], *, full: bool = True) -> str:
@@ -367,12 +569,14 @@ class ComfyWorkflowBridge(Star):
         if not full and len(prompt) > 140:
             prompt = prompt[:137] + "..."
         categories = ", ".join(str(value) for value in item.get("categories", []))
+        custom_groups = ", ".join(prompt_entry_custom_groups(item))
         return (
             f"ID：{item.get('id', '?')}\n"
             f"名称：{item.get('name', '未命名')}\n"
             f"分组：{item.get('source_code', '?')}/{item.get('safety_code', '?')}｜"
             f"启用：{bool(item.get('enabled', True))}｜权重：{item.get('weight', 1)}\n"
             f"分类：{categories or '无'}\n"
+            f"自定义分组：{custom_groups or '无'}\n"
             f"提示词：{prompt}"
         )
 
@@ -481,6 +685,27 @@ class ComfyWorkflowBridge(Star):
                 "采样器选项只能是 原有、2m、2m_sde 或 2m_sde_gpu。"
             )
 
+        requested_scheduler = str(options.get("scheduler", "")).strip().casefold()
+        supported_schedulers = {
+            "normal",
+            "karras",
+            "exponential",
+            "sgm_uniform",
+            "simple",
+            "ddim_uniform",
+            "beta",
+            "linear_quadratic",
+            "kl_optimal",
+        }
+        if requested_scheduler:
+            if requested_scheduler not in supported_schedulers:
+                raise WorkflowError(
+                    "调度器选项只能是 normal、karras、exponential、"
+                    "sgm_uniform、simple、ddim_uniform、beta、"
+                    "linear_quadratic 或 kl_optimal。"
+                )
+            overrides["scheduler"] = requested_scheduler
+
         if "sampler_steps" in options:
             try:
                 overrides["steps"] = int(str(options["sampler_steps"]).strip())
@@ -506,6 +731,65 @@ class ComfyWorkflowBridge(Star):
     def _start_five_draw_cooldown(self, event: AstrMessageEvent) -> None:
         if not event.is_admin():
             self._five_draw_cooldowns[str(event.get_sender_id())] = time.monotonic()
+
+    async def _claim_five_draw(self, event: AstrMessageEvent) -> tuple[bool, str]:
+        sender_id = str(event.get_sender_id() or "unknown-sender")
+        if self._event_is_admin(event) or not bool(
+            self.config.get("five_draw_single_active", True)
+        ):
+            return True, sender_id
+        async with self._five_draw_lock:
+            if sender_id in self._five_draw_active_users:
+                return False, sender_id
+            self._five_draw_active_users.add(sender_id)
+        return True, sender_id
+
+    async def _release_five_draw(
+        self, event: AstrMessageEvent, sender_id: str
+    ) -> None:
+        if self._event_is_admin(event):
+            return
+        async with self._five_draw_lock:
+            self._five_draw_active_users.discard(sender_id)
+
+    @staticmethod
+    def _event_is_admin(event: AstrMessageEvent) -> bool:
+        checker = getattr(event, "is_admin", None)
+        if not callable(checker):
+            return False
+        try:
+            return bool(checker())
+        except Exception:
+            return False
+
+    async def _claim_agent_tool_generation(
+        self, event: AstrMessageEvent
+    ) -> tuple[bool, str]:
+        sender_id = str(event.get_sender_id() or "unknown-sender")
+        if self._event_is_admin(event):
+            return True, sender_id
+        cooldown = max(
+            0, int(self.config.get("agent_tool_user_cooldown_seconds", 30))
+        )
+        elapsed = time.monotonic() - self._agent_tool_cooldowns.get(sender_id, 0.0)
+        remaining = max(0, int(cooldown - elapsed + 0.999))
+        async with self._agent_tool_lock:
+            if sender_id in self._agent_tool_active_users:
+                return False, "该用户已有自主绘图任务正在执行。"
+            if remaining > 0:
+                return False, f"自主绘图冷却中，请等待 {remaining} 秒。"
+            self._agent_tool_active_users.add(sender_id)
+        return True, sender_id
+
+    async def _release_agent_tool_generation(
+        self, event: AstrMessageEvent, sender_id: str, *, success: bool
+    ) -> None:
+        if self._event_is_admin(event):
+            return
+        async with self._agent_tool_lock:
+            self._agent_tool_active_users.discard(sender_id)
+            if success:
+                self._agent_tool_cooldowns[sender_id] = time.monotonic()
 
     async def _response_json(self, response: aiohttp.ClientResponse) -> Any:
         text = await response.text()
@@ -544,14 +828,14 @@ class ComfyWorkflowBridge(Star):
             record = data.get(prompt_id) if isinstance(data, dict) else None
             if isinstance(record, dict):
                 status = record.get("status", {})
+                if history_failed(record):
+                    raise WorkflowError(history_error(record))
                 completed = (
                     status.get("completed", False)
                     if isinstance(status, dict)
                     else False
                 )
                 if completed:
-                    if status.get("status_str") == "error":
-                        raise WorkflowError(history_error(record))
                     return record
 
             await asyncio.sleep(self._poll_interval())
@@ -563,9 +847,15 @@ class ComfyWorkflowBridge(Star):
         session: aiohttp.ClientSession,
         prompt_id: str,
         image_refs: list[dict[str, str]],
+        *,
+        max_images_override: int | None = None,
     ) -> list[Path]:
         output_dir = self._output_dir()
-        max_images = max(1, int(self.config.get("max_images", 4)))
+        max_images = (
+            max(1, int(max_images_override))
+            if max_images_override is not None
+            else max(1, int(self.config.get("max_images", 4)))
+        )
         paths: list[Path] = []
 
         for index, image_ref in enumerate(image_refs[:max_images], start=1):
@@ -647,6 +937,24 @@ class ComfyWorkflowBridge(Star):
     ) -> dict[str, Any]:
         template = load_api_workflow(self._reverse_workflow_path())
         qq_user_id, session_type, session_id = self._reverse_session_metadata(event)
+        effective_categories = tuple(reverse_categories)
+        if str(options.get("character", "")).strip():
+            if not effective_categories:
+                effective_categories = tuple(
+                    category
+                    for category in (
+                        REVERSE_PRESET_CATEGORIES.get(reverse_preset)
+                        or tuple(REVERSE_CATEGORY_LABELS)
+                    )
+                    if category != "appearance"
+                )
+                if reverse_preset == "safe":
+                    effective_categories = (*effective_categories, "safety")
+            else:
+                effective_categories = tuple(
+                    category for category in effective_categories
+                    if category != "appearance"
+                )
         timeout = aiohttp.ClientTimeout(total=self._timeout_seconds() + 30)
         async with aiohttp.ClientSession(timeout=timeout) as session:
             uploaded_name = await self._upload_reverse_image(session, image_path)
@@ -654,7 +962,7 @@ class ComfyWorkflowBridge(Star):
                 template,
                 image_name=uploaded_name,
                 preset=reverse_preset,
-                categories=reverse_categories or None,
+                categories=effective_categories or None,
                 image_node_id=str(
                     self.config.get("reverse_image_node_id", "1")
                 ).strip(),
@@ -686,7 +994,7 @@ class ComfyWorkflowBridge(Star):
                 prompt_id,
                 self._reverse_workflow_path(),
                 reverse_preset,
-                ",".join(reverse_categories),
+                ",".join(effective_categories),
             )
             record = await self._wait_for_history(session, prompt_id)
         result = extract_reverse_result(
@@ -695,6 +1003,7 @@ class ComfyWorkflowBridge(Star):
             allow_empty_prompt=reverse_only,
         )
         result["prompt_id"] = prompt_id
+        result["effective_categories"] = effective_categories
         return result
 
     async def _generate(
@@ -711,7 +1020,17 @@ class ComfyWorkflowBridge(Star):
         source_image_path: str = "",
         parent_job_id: str | None = None,
         metadata_restore: str = "none",
+        batch_prompts: list[str] | None = None,
     ) -> tuple[list[Path], int | None, str, dict[str, Any]]:
+        clean_batch_prompts = [
+            str(item or "").strip() for item in (batch_prompts or [])
+        ]
+        if clean_batch_prompts:
+            if workflow_type != "quick_txt2img_v1":
+                raise WorkflowError("批量提示词当前仅支持 Quick 生图工作流。")
+            if any(not item for item in clean_batch_prompts):
+                raise WorkflowError("批量提示词中不能包含空内容。")
+            prompt = clean_batch_prompts[0]
         definition, workflow_path = self._workflow_definition(workflow_type)
         selected_profile, profile_data = definition.profile(profile)
         template = load_api_workflow(workflow_path)
@@ -793,6 +1112,24 @@ class ComfyWorkflowBridge(Star):
         character_text = ""
         if character_name and character is None:
             character_text = character_name
+            dictionary_path = self._character_dictionary_path()
+            if (
+                bool(self.config.get("character_dictionary_enabled", True))
+                and dictionary_path.is_file()
+            ):
+                match = resolve_character(
+                    dictionary_path,
+                    character_name,
+                    mode=str(
+                        options.get("character_tag_mode")
+                        or self.config.get("character_dictionary_default_mode", "weak")
+                    ),
+                    edits_path=self._character_dictionary_edits_path(),
+                )
+                if match is not None:
+                    character_text = match.prompt
+                    options["_character_dictionary_tag"] = match.tag
+                    options["_character_dictionary_mode"] = match.mode
         if strict_no_style and not style_name:
             style = {"loras": [], "prompt": "", "match": []}
         positive_node_id = mapping.get("positive", "11")
@@ -840,27 +1177,34 @@ class ComfyWorkflowBridge(Star):
             latent_node_id=mapping.get("latent", ""),
             width=width,
             height=height,
+        ) if workflow_type != "seedvr2_refine_v1" else (
+            copy.deepcopy(template),
+            secrets.randbelow(2**32) if bool(self.config.get("randomize_seed", True))
+            else int(self.config.get("fixed_seed", 0)) % (2**32),
         )
-        plan = apply_lora_plan(
-            workflow,
-            style=style,
-            character=character,
-            style_slot_ids=self._style_slot_ids(),
-            positive_node_id=positive_node_id,
-            negative_node_id=negative_node_id,
-            sampler_node_id=sampler_node_id,
-            character_node_id=str(
-                self.config.get("character_lora_node_id", "900001")
-            ).strip(),
-            options=options,
-            style_mode=str(self.config.get("style_lora_mode", "dynamic")),
-            dynamic_style_node_id_start=int(
-                self.config.get("dynamic_style_node_id_start", 900100)
-            ),
-            max_dynamic_style_loras=int(
-                self.config.get("max_dynamic_style_loras", 16)
-            ),
-        )
+        if workflow_type == "seedvr2_refine_v1":
+            plan = {"style_loras": [], "character_lora": None}
+        else:
+            plan = apply_lora_plan(
+                workflow,
+                style=style,
+                character=character,
+                style_slot_ids=self._style_slot_ids(),
+                positive_node_id=positive_node_id,
+                negative_node_id=negative_node_id,
+                sampler_node_id=sampler_node_id,
+                character_node_id=str(
+                    self.config.get("character_lora_node_id", "900001")
+                ).strip(),
+                options=options,
+                style_mode=str(self.config.get("style_lora_mode", "dynamic")),
+                dynamic_style_node_id_start=int(
+                    self.config.get("dynamic_style_node_id_start", 900100)
+                ),
+                max_dynamic_style_loras=int(
+                    self.config.get("max_dynamic_style_loras", 16)
+                ),
+            )
         plan["style_name"] = style_name
         plan["character_name"] = character_name
         plan["character_source"] = (
@@ -870,6 +1214,31 @@ class ComfyWorkflowBridge(Star):
             if character is not None or character_text
             else "none"
         )
+        if options.get("_character_dictionary_tag"):
+            plan["character_source"] = "dictionary"
+            plan["character_dictionary"] = {
+                "tag": str(options["_character_dictionary_tag"]),
+                "mode": str(options.get("_character_dictionary_mode", "weak")),
+            }
+        compiled_batch_prompts: list[str] = []
+        if clean_batch_prompts:
+            compiled_batch_prompts = [
+                build_prompt_text(
+                    dynamic_prefix,
+                    item,
+                    str(self.config.get("positive_suffix", "")),
+                )
+                for item in clean_batch_prompts
+            ]
+            workflow = prepare_prompt_batch_workflow(
+                workflow,
+                positive_node_id=positive_node_id,
+                latent_node_id=mapping.get("latent", ""),
+                prompts=compiled_batch_prompts,
+                max_batch=5,
+            )
+            plan["batch_size"] = len(compiled_batch_prompts)
+            plan["batch_prompts"] = list(compiled_batch_prompts)
         if width is not None and height is not None:
             plan["canvas"] = f"{width}x{height}"
         sampler_inputs = workflow.get(sampler_node_id, {}).get("inputs", {})
@@ -914,8 +1283,14 @@ class ComfyWorkflowBridge(Star):
             }
 
         job_store = self._job_store()
-        compiled_prompt = str(
-            workflow.get(positive_node_id, {}).get("inputs", {}).get("text", prompt)
+        compiled_prompt = (
+            compiled_batch_prompts[0]
+            if compiled_batch_prompts
+            else str(
+                workflow.get(positive_node_id, {})
+                .get("inputs", {})
+                .get("text", prompt)
+            )
         )
         job = job_store.create_job(
             workflow_type=definition.workflow_id,
@@ -925,6 +1300,8 @@ class ComfyWorkflowBridge(Star):
             input_data={
                 "prompt": prompt,
                 "compiled_prompt": compiled_prompt,
+                "batch_prompts": list(compiled_batch_prompts),
+                "batch_size": len(compiled_batch_prompts) or 1,
                 "negative": str(
                     workflow.get(negative_node_id, {}).get("inputs", {}).get("text", "")
                 ),
@@ -943,7 +1320,7 @@ class ComfyWorkflowBridge(Star):
         timeout = aiohttp.ClientTimeout(total=self._timeout_seconds() + 30)
         try:
             async with aiohttp.ClientSession(timeout=timeout) as session:
-                if workflow_type == "refine_existing_v1":
+                if workflow_type in {"refine_existing_v1", "seedvr2_refine_v1"}:
                     if not source_image_path:
                         raise WorkflowError("INVALID_INPUT：精修任务缺少输入图片。")
                     source_asset = job_store.register_asset(
@@ -956,34 +1333,50 @@ class ComfyWorkflowBridge(Star):
                     uploaded_name = await self._upload_reverse_image(
                         session, source_image_path
                     )
-                    refine_plan = configure_refine_workflow(
-                        workflow,
-                        image_name=uploaded_name,
-                        image_node_id=mapping.get("image", "1"),
-                        upscale_node_id=mapping.get("upscale", "2"),
-                        sampler_node_id=sampler_node_id,
-                        profile={
-                            **copy.deepcopy(profile_data),
-                            "sampling": dict(sampler_overrides),
-                        },
-                        seed=int(seed or 0),
-                        scale_override=(
-                            float(scale_override) if scale_override is not None else None
-                        ),
-                        denoise_override=(
-                            float(denoise_override)
-                            if denoise_override is not None
-                            else None
-                        ),
-                    )
-                    refine_plan["metadata_restore"] = metadata_restore
-                    plan["enhance"] = {
-                        "profile": selected_profile,
-                        "scale": refine_plan["scale"],
-                        "denoise": refine_plan["sampling"].get("denoise"),
-                        "detailer": [],
-                        "tile": False,
-                    }
+                    if workflow_type == "seedvr2_refine_v1":
+                        refine_plan = configure_seedvr2_workflow(
+                            workflow,
+                            image_name=uploaded_name,
+                            image_node_id=mapping.get("image", "1"),
+                            upscaler_node_id=mapping.get("upscaler", "4"),
+                            profile=copy.deepcopy(profile_data),
+                            seed=int(seed or 0),
+                        )
+                        plan["enhance"] = {
+                            "profile": selected_profile,
+                            "target_resolution": refine_plan["target_resolution"],
+                            "tile": True,
+                            "seedvr2": refine_plan,
+                        }
+                    else:
+                        refine_plan = configure_refine_workflow(
+                            workflow,
+                            image_name=uploaded_name,
+                            image_node_id=mapping.get("image", "1"),
+                            upscale_node_id=mapping.get("upscale", "2"),
+                            sampler_node_id=sampler_node_id,
+                            profile={
+                                **copy.deepcopy(profile_data),
+                                "sampling": dict(sampler_overrides),
+                            },
+                            seed=int(seed or 0),
+                            scale_override=(
+                                float(scale_override) if scale_override is not None else None
+                            ),
+                            denoise_override=(
+                                float(denoise_override)
+                                if denoise_override is not None
+                                else None
+                            ),
+                        )
+                        refine_plan["metadata_restore"] = metadata_restore
+                        plan["enhance"] = {
+                            "profile": selected_profile,
+                            "scale": refine_plan["scale"],
+                            "denoise": refine_plan["sampling"].get("denoise"),
+                            "detailer": [],
+                            "tile": False,
+                        }
                 prompt_id = await self._submit_workflow(session, workflow)
                 logger.info(
                     "Comfy bridge submitted job_id=%s prompt_id=%s workflow=%s profile=%s",
@@ -996,7 +1389,21 @@ class ComfyWorkflowBridge(Star):
                 image_refs = extract_output_images(record)
                 if not image_refs:
                     raise WorkflowError("任务成功但没有找到 SaveImage/PreviewImage 输出。")
-                paths = await self._download_images(session, prompt_id, image_refs)
+                paths = await self._download_images(
+                    session,
+                    prompt_id,
+                    image_refs,
+                    max_images_override=(
+                        len(compiled_batch_prompts)
+                        if compiled_batch_prompts
+                        else None
+                    ),
+                )
+                if compiled_batch_prompts and len(paths) != len(compiled_batch_prompts):
+                    raise WorkflowError(
+                        "批次任务输出数量异常："
+                        f"期望 {len(compiled_batch_prompts)} 张，实际 {len(paths)} 张。"
+                    )
             assets = [
                 job_store.register_asset(
                     path,
@@ -1072,8 +1479,16 @@ class ComfyWorkflowBridge(Star):
         source_image_path: str = "",
         parent_job_id: str | None = None,
         metadata_restore: str = "none",
+        send_progress: bool | None = None,
+        batch_prompts: list[str] | None = None,
+        send_errors: bool = True,
     ) -> bool:
-        if bool(self.config.get("send_progress", True)):
+        progress_enabled = (
+            bool(self.config.get("send_progress", True))
+            if send_progress is None
+            else bool(send_progress)
+        )
+        if progress_enabled:
             await event.send(event.plain_result("已提交生成请求，正在等待 ComfyUI…"))
         try:
             async with self._semaphore:
@@ -1089,25 +1504,31 @@ class ComfyWorkflowBridge(Star):
                     source_image_path=source_image_path,
                     parent_job_id=parent_job_id,
                     metadata_restore=metadata_restore,
+                    batch_prompts=batch_prompts,
                 )
         except (WorkflowError, aiohttp.ClientError, asyncio.TimeoutError) as exc:
             logger.warning("Comfy bridge generation failed: %s", exc)
-            await event.send(event.plain_result(f"生成失败：{exc}"))
+            if send_errors:
+                await event.send(event.plain_result(f"生成失败：{exc}"))
             return False
         except Exception as exc:
             logger.exception("Unexpected Comfy bridge error")
-            await event.send(
-                event.plain_result(
-                    f"生成失败：未预期错误 {type(exc).__name__}: {exc}"
+            if send_errors:
+                await event.send(
+                    event.plain_result(
+                        f"生成失败：未预期错误 {type(exc).__name__}: {exc}"
+                    )
                 )
-            )
             return False
 
         labels = []
         if plan.get("style_name"):
             labels.append(f"画风={plan['style_name']}")
         if plan.get("character_name"):
-            source = "LoRA" if plan.get("character_source") == "lora" else "文本"
+            source = {
+                "lora": "LoRA",
+                "dictionary": "角色词典",
+            }.get(str(plan.get("character_source")), "文本")
             labels.append(f"角色={plan['character_name']}({source})")
         if plan.get("canvas"):
             labels.append(f"画布={plan['canvas']}")
@@ -1115,9 +1536,14 @@ class ComfyWorkflowBridge(Star):
             labels.append(f"Profile={plan['profile']}")
         enhance = plan.get("enhance", {})
         if isinstance(enhance, dict) and enhance:
-            labels.append(
-                f"增强={enhance.get('scale', '?')}x/denoise={enhance.get('denoise', '?')}"
-            )
+            if enhance.get("target_resolution"):
+                labels.append(
+                    f"增强=SeedVR2/最长边{enhance.get('target_resolution')}px"
+                )
+            else:
+                labels.append(
+                    f"增强={enhance.get('scale', '?')}x/denoise={enhance.get('denoise', '?')}"
+                )
         sampler = plan.get("sampler", {})
         if isinstance(sampler, dict) and sampler.get("custom"):
             sampler_label = {
@@ -1163,17 +1589,46 @@ class ComfyWorkflowBridge(Star):
         chaos: bool = False,
     ) -> None:
         event.should_call_llm(False)
-        if draw_count == 5:
+        if draw_count == 5 and chaos:
             remaining = self._five_draw_cooldown_remaining(event)
             if remaining > 0:
                 await event.send(
-                    event.plain_result(f"五连抽冷却中，请等待 {remaining} 秒后再试。")
+                    event.plain_result(
+                        f"混沌五连抽冷却中，请等待 {remaining} 秒后再试。"
+                    )
+                )
+                return
+        claimed = False
+        sender_id = ""
+        if draw_count == 5 and not chaos:
+            claimed, sender_id = await self._claim_five_draw(event)
+            if not claimed:
+                await event.send(
+                    event.plain_result("你已有普通五连抽正在执行，请等待完成后再试。")
                 )
                 return
         try:
+            await self._execute_random_picture(
+                event, body, draw_count=draw_count, chaos=chaos
+            )
+        finally:
+            if claimed:
+                await self._release_five_draw(event, sender_id)
+
+    async def _execute_random_picture(
+        self,
+        event: AstrMessageEvent,
+        body: str,
+        *,
+        draw_count: int = 1,
+        chaos: bool = False,
+    ) -> None:
+        try:
             body, selection = parse_group_selector(body)
+            if "S" in selection.get("safety_codes", []) and not self._is_private_event(event):
+                raise WorkflowError("S 组只能在 QQ 私聊或 App 的私聊目标中调用。")
             user_prompt, options = parse_generation_directives(body)
-            pool = load_prompt_pool(self._prompt_pool_path())
+            pool = self._random_prompt_pool(selection)
             quality = self._random_quality_prompt(pool)
             draw_plans: list[tuple[dict[str, Any], dict[str, Any], dict[str, Any]]] = []
             matched_categories: list[str] = []
@@ -1181,7 +1636,11 @@ class ComfyWorkflowBridge(Star):
 
             if chaos:
                 presets = load_presets(self._preset_path())
-                style_names = sorted(presets.get("styles", {}))
+                style_names = sorted(
+                    name
+                    for name, value in presets.get("styles", {}).items()
+                    if not (isinstance(value, dict) and value.get("hidden"))
+                )
                 character_names = sorted(presets.get("characters", {}))
                 ratio_names = sorted(RATIO_PRESETS)
                 if not style_names or not character_names:
@@ -1199,18 +1658,33 @@ class ComfyWorkflowBridge(Star):
                         str(draw_options["character"]),
                         self.config.get("sexual_protected_characters", ""),
                     )
-                    working_pool = dict(pool)
-                    working_pool["prompts"] = [
-                        item
-                        for item in pool.get("prompts", [])
-                        if str(item.get("id", "")) not in excluded_ids
-                    ]
-                    selected, matched, used = select_random_prompt(
-                        working_pool,
-                        user_prompt,
-                        source_codes=draw_selection["source_codes"],
-                        safety_codes=draw_selection["safety_codes"],
-                    )
+                    if (
+                        draw_selection.get("source_codes") == ["K"]
+                        and bool(self.config.get("kp_dynamic_enabled", True))
+                    ):
+                        selected = self._kp_dynamic_items(
+                            pool,
+                            draw_selection,
+                            count=1,
+                            options=draw_options,
+                            user_prompt=user_prompt,
+                            excluded_ids=excluded_ids,
+                        )[0]
+                        matched, used = [], False
+                    else:
+                        working_pool = dict(pool)
+                        working_pool["prompts"] = [
+                            item
+                            for item in pool.get("prompts", [])
+                            if str(item.get("id", "")) not in excluded_ids
+                        ]
+                        selected, matched, used = select_random_prompt(
+                            working_pool,
+                            user_prompt,
+                            source_codes=draw_selection["source_codes"],
+                            safety_codes=draw_selection["safety_codes"],
+                            custom_groups=draw_selection.get("custom_groups", []),
+                        )
                     excluded_ids.add(str(selected.get("id", "")))
                     matched_categories = matched
                     used_match = used_match or used
@@ -1221,19 +1695,46 @@ class ComfyWorkflowBridge(Star):
                     str(options.get("character", "")),
                     self.config.get("sexual_protected_characters", ""),
                 )
-                selected_items, matched_categories, used_match = select_random_prompts(
-                    pool,
-                    draw_count,
-                    user_prompt,
-                    source_codes=selection["source_codes"],
-                    safety_codes=selection["safety_codes"],
-                )
+                if (
+                    selection.get("source_codes") == ["K"]
+                    and bool(self.config.get("kp_dynamic_enabled", True))
+                ):
+                    selected_items = self._kp_dynamic_items(
+                        pool,
+                        selection,
+                        count=draw_count,
+                        options=options,
+                        user_prompt=user_prompt,
+                    )
+                    matched_categories, used_match = [], False
+                else:
+                    selected_items, matched_categories, used_match = select_random_prompts(
+                        pool,
+                        draw_count,
+                        user_prompt,
+                        source_codes=selection["source_codes"],
+                        safety_codes=selection["safety_codes"],
+                        custom_groups=selection.get("custom_groups", []),
+                    )
                 draw_plans = [(item, dict(options), selection) for item in selected_items]
         except WorkflowError as exc:
             await event.send(event.plain_result(f"抽取失败：{exc}"))
             return
 
-        if draw_count == 5:
+        dynamic_items = [
+            item for item, _, _ in draw_plans if bool(item.get("runtime_generated"))
+        ]
+        if dynamic_items:
+            try:
+                persist_dynamic_k_entries(
+                    self._kp_prompt_pool_path(),
+                    dynamic_items,
+                    history_limit=int(self.config.get("kp_dynamic_history_limit", 2000)),
+                )
+            except WorkflowError as exc:
+                logger.warning("KP dynamic history persistence failed: %s", exc)
+
+        if draw_count == 5 and chaos:
             self._start_five_draw_cooldown(event)
         selected_ids = [str(item.get("id", "?")) for item, _, _ in draw_plans]
         logger.info(
@@ -1265,28 +1766,132 @@ class ComfyWorkflowBridge(Star):
                 f"准备生成 {draw_count} 张{'混沌好图' if chaos else '好图'}。"
             )
         )
-        successes = 0
-        for index, (selected, draw_options, _) in enumerate(draw_plans, start=1):
-            final_prompt = compose_random_body(user_prompt, selected)
-            success = await self._deliver_generation(
-                event,
-                prompt=final_prompt,
-                options=draw_options,
-                extra_prefix=quality,
-                strict_no_style=True,
-                allow_character_text_fallback=True,
-                completion_prefix=(
-                    f"{'混沌好图' if chaos else '好图'} {index}/{draw_count} 完成｜"
-                    f"条目={selected.get('id', '?')}"
-                ),
-            )
-            successes += int(success)
+        successes = await self._deliver_random_draw_plans(
+            event,
+            draw_plans=draw_plans,
+            user_prompt=user_prompt,
+            quality=quality,
+            chaos=chaos,
+        )
         if draw_count > 1:
             await event.send(
                 event.plain_result(
                     f"{'混沌' if chaos else ''}五连抽结束：成功 {successes}/5。"
                 )
             )
+
+    async def _deliver_random_draw_plans(
+        self,
+        event: AstrMessageEvent,
+        *,
+        draw_plans: list[tuple[dict[str, Any], dict[str, Any], dict[str, Any]]],
+        user_prompt: str,
+        quality: str,
+        chaos: bool,
+    ) -> int:
+        draw_count = len(draw_plans)
+        batch_enabled = (
+            draw_count == 5
+            and not chaos
+            and bool(self.config.get("five_draw_batch_enabled", True))
+        )
+        micro_batch_size = max(
+            1, min(5, int(self.config.get("five_draw_micro_batch_size", 2)))
+        )
+        fallback_enabled = bool(
+            self.config.get("five_draw_batch_fallback_sequential", True)
+        )
+        if not batch_enabled or micro_batch_size == 1:
+            successes = 0
+            for index, (selected, draw_options, _) in enumerate(
+                draw_plans, start=1
+            ):
+                success = await self._deliver_generation(
+                    event,
+                    prompt=compose_random_body(user_prompt, selected),
+                    options=draw_options,
+                    extra_prefix=quality,
+                    strict_no_style=True,
+                    allow_character_text_fallback=True,
+                    completion_prefix=(
+                        f"{'混沌好图' if chaos else '好图'} "
+                        f"{index}/{draw_count} 完成｜条目={selected.get('id', '?')}"
+                    ),
+                )
+                successes += int(success)
+            return successes
+
+        successes = 0
+        for start in range(0, draw_count, micro_batch_size):
+            chunk = draw_plans[start : start + micro_batch_size]
+            chunk_prompts = [
+                compose_random_body(user_prompt, selected)
+                for selected, _, _ in chunk
+            ]
+            chunk_ids = [str(selected.get("id", "?")) for selected, _, _ in chunk]
+            end = start + len(chunk)
+            if len(chunk) == 1:
+                selected, draw_options, _ = chunk[0]
+                success = await self._deliver_generation(
+                    event,
+                    prompt=chunk_prompts[0],
+                    options=draw_options,
+                    extra_prefix=quality,
+                    strict_no_style=True,
+                    allow_character_text_fallback=True,
+                    completion_prefix=(
+                        f"好图 {start + 1}/{draw_count} 完成｜"
+                        f"条目={selected.get('id', '?')}"
+                    ),
+                )
+                successes += int(success)
+                continue
+            success = await self._deliver_generation(
+                event,
+                prompt=chunk_prompts[0],
+                batch_prompts=chunk_prompts,
+                options=chunk[0][1],
+                extra_prefix=quality,
+                strict_no_style=True,
+                allow_character_text_fallback=True,
+                completion_prefix=(
+                    f"好图微批 {start + 1}-{end}/{draw_count} 完成｜"
+                    f"条目={','.join(chunk_ids)}"
+                ),
+                send_errors=False,
+            )
+            if success:
+                successes += len(chunk)
+                continue
+            if not fallback_enabled:
+                await event.send(
+                    event.plain_result(
+                        f"好图微批 {start + 1}-{end}/5 失败，未启用逐张回退。"
+                    )
+                )
+                continue
+
+            await event.send(
+                event.plain_result(
+                    f"好图微批 {start + 1}-{end}/5 未完成，自动改为逐张生成。"
+                )
+            )
+            for offset, (selected, draw_options, _) in enumerate(chunk):
+                index = start + offset + 1
+                sequential_success = await self._deliver_generation(
+                    event,
+                    prompt=chunk_prompts[offset],
+                    options=draw_options,
+                    extra_prefix=quality,
+                    strict_no_style=True,
+                    allow_character_text_fallback=True,
+                    completion_prefix=(
+                        f"好图 {index}/{draw_count} 回退完成｜"
+                        f"条目={selected.get('id', '?')}"
+                    ),
+                )
+                successes += int(sequential_success)
+        return successes
 
     def _pending_key(self, event: AstrMessageEvent) -> tuple[str, str]:
         origin = str(
@@ -1361,8 +1966,11 @@ class ComfyWorkflowBridge(Star):
         except (json.JSONDecodeError, TypeError, AttributeError):
             compiled = {}
 
-        selected = reverse_categories or REVERSE_PRESET_CATEGORIES.get(
-            reverse_preset, ()
+        effective = reverse_result.get("effective_categories")
+        selected = (
+            tuple(str(value) for value in effective)
+            if isinstance(effective, (list, tuple)) and effective
+            else reverse_categories or REVERSE_PRESET_CATEGORIES.get(reverse_preset, ())
         )
         lines: list[str] = []
         if isinstance(compiled, dict) and reverse_preset != "raw":
@@ -1603,7 +2211,7 @@ class ComfyWorkflowBridge(Star):
             if unknown:
                 raise WorkflowError(
                     "未知反推分类：" + "、".join(unknown)
-                    + "；支持：场景/动作/角色/外观/服装/构图/其他/安全"
+                    + "；支持：场景/动作/角色/外观/特殊特征/服装/构图/其他/安全"
                 )
             if not normalized:
                 raise WorkflowError("分类= 后至少选择一项。")
@@ -1637,6 +2245,8 @@ class ComfyWorkflowBridge(Star):
                 f"默认反推模式无效：{selected}；请检查 reverse_default_preset。"
             )
         extra_prompt, options = parse_generation_directives(cleaned)
+        if not str(options.get("style", "")).strip():
+            options["style"] = "当前画风"
         return extra_prompt, options, selected, selected_categories, reverse_only
 
     @filter.event_message_type(EventMessageType.ALL, priority=sys.maxsize - 3)
@@ -1791,7 +2401,7 @@ class ComfyWorkflowBridge(Star):
         event.should_call_llm(False)
         event.stop_event()
         body = extract_command_body(event.message_str, content, "arefine")
-        profile = "light"
+        profile = "seedvr2"
         if body:
             first, *tail = body.split(maxsplit=1)
             aliases = {
@@ -1800,6 +2410,9 @@ class ComfyWorkflowBridge(Star):
                 "轻微": "light",
                 "medium": "medium",
                 "中度": "medium",
+                "seedvr2": "seedvr2",
+                "seed": "seedvr2",
+                "智能放大": "seedvr2",
             }
             selected = aliases.get(first.casefold())
             if selected:
@@ -1850,7 +2463,7 @@ class ComfyWorkflowBridge(Star):
                 raise WorkflowError(
                     "INVALID_INPUT：请在指令中附图、回复一张图，或填写 任务=job_xxx。"
                 )
-            if not prompt:
+            if not prompt and profile != "seedvr2":
                 raise WorkflowError(
                     "METADATA_NOT_FOUND：找不到原任务提示词。请补充提示词，"
                     "或使用新版生成结果的完整 任务=job_xxx。"
@@ -1864,7 +2477,9 @@ class ComfyWorkflowBridge(Star):
             event,
             prompt=prompt,
             options=options,
-            workflow_type="refine_existing_v1",
+            workflow_type=(
+                "seedvr2_refine_v1" if profile == "seedvr2" else "refine_existing_v1"
+            ),
             profile=profile,
             source_image_path=image_path,
             parent_job_id=parent_job_id or None,
@@ -1907,6 +2522,168 @@ class ComfyWorkflowBridge(Star):
             return
         await self._send_private_text(event, text)
 
+    @filter.llm_tool(name="anima_generate_image")
+    async def anima_generate_image(
+        self,
+        event: AstrMessageEvent,
+        prompt: str,
+        ratio: str = "",
+        character: str = "",
+        style: str = "",
+        quality: str = "",
+        sampler: str = "",
+        scheduler: str = "",
+        steps: float = 0,
+        cfg: float = 0,
+    ):
+        """使用 AstrAutoAnima 与 ComfyUI 生成一张图片并发送到当前聊天。
+
+        只在用户明确要求画图、生成图片或绘制场景时调用。普通聊天、知识问答、
+        解释问题时不要调用。同一请求只调用一次。prompt 应优先写成一行英文
+        Danbooru-style tags。角色和画风名称不确定时先调用 anima_list_presets。
+
+        Args:
+            prompt(string): 图片内容的一行英文 tags，包含主体、服装、动作、构图、环境和光影。
+            ratio(string): 可选比例；空值使用插件自主绘图默认值，支持 1:1、2:3、3:2、3:4、4:3、9:16、16:9。
+            character(string): 可选角色预设名；空值使用插件默认值，none 表示明确不使用角色预设。
+            style(string): 可选画风预设名；空值使用插件默认值，none 表示明确不使用画风预设。
+            quality(string): 可选质量预设；quick、hq_stable 或 hq_beauty，空值使用插件默认值。
+            sampler(string): 可选采样器预设；original、2m、2m_sde 或 2m_sde_gpu。
+            scheduler(string): 可选调度器；workflow 保留工作流/Profile 原值，空值使用插件自主绘图默认值。
+            steps(number): 可选步数；0 使用插件自主绘图默认值或采样器预设。
+            cfg(number): 可选 CFG；0 使用插件自主绘图默认值或采样器预设。
+        """
+
+        if not bool(self.config.get("agent_tools_enabled", False)) or not bool(
+            self.config.get("agent_generate_tool_enabled", True)
+        ):
+            yield event.plain_result("AstrAutoAnima 自主绘图工具当前已关闭。")
+            return
+        if not self._is_private_event(event) and not bool(
+            self.config.get("agent_tool_group_enabled", False)
+        ):
+            yield event.plain_result(
+                "自主绘图当前只允许在私聊使用；请私聊机器人，或由管理员开启群聊自主绘图。"
+            )
+            return
+
+        claimed, claim_result = await self._claim_agent_tool_generation(event)
+        if not claimed:
+            yield event.plain_result(claim_result)
+            return
+        sender_id = claim_result
+        success = False
+        try:
+            try:
+                prompt, options, workflow_type, profile = (
+                    build_agent_generation_request(
+                        self.config,
+                        prompt=prompt,
+                        ratio=ratio,
+                        character=character,
+                        style=style,
+                        quality=quality,
+                        sampler=sampler,
+                        scheduler=scheduler,
+                        steps=steps,
+                        cfg=cfg,
+                    )
+                )
+                presets = load_presets(self._preset_path())
+                character_name = str(options.get("character", ""))
+                style_name = str(options.get("style", ""))
+                if character_name and character_name not in presets.get("characters", {}):
+                    raise WorkflowError(f"找不到角色预设：{character_name}")
+                if style_name and style_name not in presets.get("styles", {}):
+                    raise WorkflowError(f"找不到画风预设：{style_name}")
+                if re.search(r"[\u3400-\u9fff]", prompt):
+                    if not bool(
+                        self.config.get("agent_tool_translate_chinese", False)
+                    ):
+                        raise WorkflowError(
+                            "自主绘图提示词仍包含中文；请先整理成英文 tags 后再次调用。"
+                        )
+                    prompt, provider_id = await translate_chinese_prompt(
+                        self.context,
+                        event,
+                        prompt,
+                        configured_provider_id=str(
+                            self.config.get("text_provider_id", "")
+                        ),
+                        max_tokens=self._llm_max_tokens(),
+                    )
+                    logger.info(
+                        "Agent image tool translated prompt provider=%s", provider_id
+                    )
+            except (WorkflowError, TypeError, ValueError) as exc:
+                yield event.plain_result(f"自主绘图参数错误：{exc}")
+                return
+
+            success = await self._deliver_generation(
+                event,
+                prompt=prompt,
+                options=options,
+                strict_no_style=True,
+                allow_character_text_fallback=False,
+                completion_prefix="自主绘图完成",
+                workflow_type=workflow_type,
+                profile=profile,
+                send_progress=bool(
+                    self.config.get("agent_tool_send_progress", True)
+                ),
+            )
+            if success:
+                yield event.plain_result(
+                    "图片已生成并发送到当前聊天。不要为同一请求重复调用绘图工具。"
+                )
+            else:
+                yield event.plain_result("图片生成失败；不要自动重复调用，请向用户说明失败。")
+        finally:
+            await self._release_agent_tool_generation(
+                event, sender_id, success=success
+            )
+
+    @filter.llm_tool(name="anima_list_presets")
+    async def anima_list_presets(
+        self,
+        event: AstrMessageEvent,
+        category: str = "all",
+        query: str = "",
+        limit: float = 20,
+    ):
+        """查询 AstrAutoAnima 可供自主绘图使用的角色和画风预设名称。
+
+        仅在需要确认角色或画风的准确预设名称时调用。不要猜测不存在的名称。
+
+        Args:
+            category(string): 查询类型；all、character 或 style。
+            query(string): 可选名称关键词；空值返回该分类的前若干项。
+            limit(number): 每类最多返回数量，范围 1 到 50。
+        """
+
+        if not bool(self.config.get("agent_tools_enabled", False)) or not bool(
+            self.config.get("agent_preset_tool_enabled", True)
+        ):
+            yield event.plain_result("AstrAutoAnima 预设查询工具当前已关闭。")
+            return
+        try:
+            result = list_agent_presets(
+                load_presets(self._preset_path()),
+                category=category,
+                query=query,
+                limit=int(limit),
+            )
+        except (WorkflowError, TypeError, ValueError) as exc:
+            yield event.plain_result(f"预设查询失败：{exc}")
+            return
+        lines = ["AstrAutoAnima 可用预设："]
+        if "characters" in result:
+            lines.append("角色：" + ("、".join(result["characters"]) or "无匹配项"))
+        if "styles" in result:
+            lines.append("画风：" + ("、".join(result["styles"]) or "无匹配项"))
+        lines.append("请只使用以上返回的准确名称；none 表示不使用对应预设。")
+        yield event.plain_result("\n".join(lines))
+
     @filter.command("aimg")
     async def aimg(self, event: AstrMessageEvent, prompt: str = ""):
         """原样提交配置的 ComfyUI API 工作流：/aimg <提示词>"""
@@ -1921,6 +2698,8 @@ class ComfyWorkflowBridge(Star):
             yield event.plain_result(
                 "用法：/aimg [角色=名称] [画风=名称] "
                 "[采样器=原有|2m|2m_sde|2m_sde_gpu] "
+                "[调度器=normal|karras|exponential|sgm_uniform|simple|"
+                "ddim_uniform|beta|linear_quadratic|kl_optimal] "
                 "[步数=30] [CFG=6] [角色权重=0.8] <提示词或 tags>"
             )
             return
@@ -1931,7 +2710,10 @@ class ComfyWorkflowBridge(Star):
         try:
             async with self._semaphore:
                 paths, seed, prompt_id, plan = await self._generate(
-                    prompt, options, event=event
+                    prompt,
+                    options,
+                    event=event,
+                    allow_character_text_fallback=True,
                 )
         except (WorkflowError, aiohttp.ClientError, asyncio.TimeoutError) as exc:
             logger.warning("Comfy bridge generation failed: %s", exc)
@@ -1979,6 +2761,8 @@ class ComfyWorkflowBridge(Star):
             characters = presets.get("characters", {})
             style_lines = []
             for name, preset in styles.items():
+                if isinstance(preset, dict) and preset.get("hidden"):
+                    continue
                 count = len(preset.get("loras", [])) if isinstance(preset, dict) else 0
                 style_lines.append(f"  - {name}（{count} 个 LoRA）")
             character_lines = [f"  - {name}" for name in characters]
@@ -1998,11 +2782,12 @@ class ComfyWorkflowBridge(Star):
         event.should_call_llm(False)
         body = extract_command_body(event.message_str, content, "aimg_pool_list")
         try:
-            sources, safety, page, keyword, selector = self._parse_pool_filter(body)
+            sources, safety, custom_groups, page, keyword, selector = self._parse_pool_filter(body)
             entries = filter_prompt_entries(
                 load_prompt_pool(self._prompt_pool_path()),
                 source_codes=sources,
                 safety_codes=safety,
+                custom_groups=custom_groups,
                 keyword=keyword,
             )
             page_size = 10
@@ -2047,11 +2832,12 @@ class ComfyWorkflowBridge(Star):
         event.should_call_llm(False)
         body = extract_command_body(event.message_str, content, "aimg_pool_export")
         try:
-            sources, safety, _, keyword, selector = self._parse_pool_filter(body)
+            sources, safety, custom_groups, _, keyword, selector = self._parse_pool_filter(body)
             entries = filter_prompt_entries(
                 load_prompt_pool(self._prompt_pool_path()),
                 source_codes=sources,
                 safety_codes=safety,
+                custom_groups=custom_groups,
                 keyword=keyword,
             )
             stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -2208,6 +2994,8 @@ class ComfyWorkflowBridge(Star):
             for key in categories:
                 lines.append(f"\n{'画风' if key == 'styles' else '角色'}：")
                 for name, preset in presets[key].items():
+                    if key == "styles" and isinstance(preset, dict) and preset.get("hidden"):
+                        continue
                     prompt = str(preset.get("prompt", "")).replace("\n", " ")
                     if len(prompt) > 90:
                         prompt = prompt[:87] + "..."
@@ -2224,28 +3012,34 @@ class ComfyWorkflowBridge(Star):
 
     @filter.command("aimg_manage_help")
     async def aimg_manage_help(self, event: AstrMessageEvent):
-        """私聊发送 0.2.10 提示词库与触发词管理速查。"""
+        """私聊发送当前提示词库与触发词管理速查。"""
         event.should_call_llm(False)
         text = (
-            "ComfyUI 桥接 0.2.10 管理速查\n\n"
+            "ComfyUI 桥接 0.3.4 Beta 管理速查\n\n"
             "查询（普通用户可用，结果私聊）：\n"
-            "/aimg_pool_list [B/N] [页码] [关键词]\n"
+            "/aimg_pool_list [B|G|D|C|R|P/级别] [@自定义分组] [页码] [关键词]\n"
             "/aimg_pool_show <ID>\n"
-            "/aimg_pool_export [B/N] [关键词]\n"
+            "/aimg_pool_export [B|G|D|C|R|P/级别] [关键词]\n"
             "/aimg_trigger_list [画风|角色]\n"
             "/aimg_trigger_show <画风|角色> <名称>\n\n"
             "提示词写操作（管理员）：\n"
-            "/aimg_pool_add B/N <提示词>\n"
-            "/aimg_pool_set <ID> [B/N] <提示词>\n"
+            "/aimg_pool_add P/N <提示词>\n"
+            "/aimg_pool_set <ID> [P/N] <提示词>\n"
             "/aimg_pool_enable <ID> <on|off>\n"
             "/aimg_pool_del <ID>\n"
-            "/aimg_pool_import <服务器 JSON 绝对路径>\n\n"
+            "/aimg_pool_import <服务器 JSON 绝对路径>\n"
+            "/aimg_cleanup（立即清理超过保留时间的插件图片）\n\n"
+            "KP 独立库：\n"
+            "K/N、K/H、K/S 分别动态拼装对应级别；可在配置中关闭动态模式。\n"
+            "动态失败默认回退原有 77 个 N/S 配对范例。\n"
+            "KP 不参与上述主库删改；App 点赞后会复制为主库 P 组。\n\n"
             "触发词写操作（管理员）：\n"
             "/aimg_trigger_set <画风|角色> <名称> <prompt|match> <内容>\n"
             "/aimg_trigger_del <画风|角色> <名称> <prompt|match|all>\n\n"
             "混沌时刻：\n"
             "来张好图混沌时刻 [分组] [补充提示词]\n"
-            "来张好图混沌五连抽 [分组] [补充提示词]"
+            "来张好图混沌五连抽 [分组] [补充提示词]\n\n"
+            "自定义分组：固定分组前后可加 @分组ID；多个写成 @组1+组2。"
         )
         await self._send_private_text(event, text)
 
@@ -2262,6 +3056,8 @@ class ComfyWorkflowBridge(Star):
             return
         try:
             preset = get_preset(load_presets(self._preset_path()), category, name.strip())
+            if isinstance(preset, dict) and preset.get("hidden"):
+                raise WorkflowError("找不到该公共预设")
             await self._send_private_text(
                 event, self._format_preset_detail(category, name.strip(), preset)
             )
@@ -2418,6 +3214,9 @@ class ComfyWorkflowBridge(Star):
             pool_stats = prompt_pool_stats(
                 load_prompt_pool(self._prompt_pool_path())
             )
+            kp_pool = load_prompt_pool(self._kp_prompt_pool_path())
+            kp_stats = prompt_pool_stats(kp_pool)
+            kp_dynamic_count = dynamic_k_history_count(kp_pool)
             protected_count = len(
                 parse_protected_characters(
                     self.config.get("sexual_protected_characters", "")
@@ -2484,10 +3283,20 @@ class ComfyWorkflowBridge(Star):
                 f"G={pool_stats['sources'].get('G', 0)}，"
                 f"D={pool_stats['sources'].get('D', 0)}，"
                 f"C={pool_stats['sources'].get('C', 0)}，"
-                f"R={pool_stats['sources'].get('R', 0)}\n"
+                f"R={pool_stats['sources'].get('R', 0)}，"
+                f"P={pool_stats['sources'].get('P', 0)}\n"
                 f"- 级别组记录：N={pool_stats['safety_codes'].get('N', 0)}，"
                 f"H={pool_stats['safety_codes'].get('H', 0)}，"
                 f"S={pool_stats['safety_codes'].get('S', 0)}\n"
+                f"- 自定义分组：{', '.join(f'{key}={value}' for key, value in pool_stats.get('custom_groups', {}).items()) or '无'}\n"
+                f"- KP 独立库：{kp_stats['enabled']} 个启用 / "
+                f"{kp_stats['total']} 个记录（"
+                f"N={kp_stats['safety_codes'].get('N', 0)}，"
+                f"H={kp_stats['safety_codes'].get('H', 0)}，"
+                f"S={kp_stats['safety_codes'].get('S', 0)}）\n"
+                f"- KP 动态拼装：{'开启' if bool(self.config.get('kp_dynamic_enabled', True)) else '关闭'}｜"
+                f"已保存动态记录={kp_dynamic_count}｜"
+                f"模块库={self._kp_dynamic_catalog_path()}\n"
                 f"- S 组保护角色：{protected_count} 个\n"
                 f"- 默认采样：{sampler_inputs.get('sampler_name', '未知')}｜"
                 f"steps={sampler_inputs.get('steps', '未知')}｜"
@@ -2508,7 +3317,10 @@ class ComfyWorkflowBridge(Star):
                 f"- 默认画布：{int(self.config.get('default_width', 1024))}x"
                 f"{int(self.config.get('default_height', 1536))}（节点 "
                 f"{str(self.config.get('latent_node_id', '28'))}）\n"
-                f"- 五连抽冷却：{self._five_draw_cooldown_seconds()} 秒（管理员豁免）\n"
+                f"- 普通五连抽：{'微批' if bool(self.config.get('five_draw_batch_enabled', True)) else '逐张'}｜"
+                f"batch={max(1, min(5, int(self.config.get('five_draw_micro_batch_size', 2))))}｜"
+                f"同用户单任务={'是' if bool(self.config.get('five_draw_single_active', True)) else '否'}\n"
+                f"- 混沌五连抽冷却：{self._five_draw_cooldown_seconds()} 秒（管理员豁免）\n"
                 f"- 专用反推：{'启用' if reverse_enabled else '关闭'}\n"
                 f"- 反推工作流：{reverse_path if reverse_path else '使用旧 Provider'}\n"
                 f"- 反推节点数：{reverse_nodes}\n"
@@ -2518,13 +3330,47 @@ class ComfyWorkflowBridge(Star):
                 f"- HQ 工作流：{hq_path}｜profiles=stable, beauty\n"
                 f"- 放大重修工作流：{refine_path}｜profiles=light, medium\n"
                 f"- Job 记录：{job_count} 个｜{job_store.root}\n"
+                f"- 插件图片清理：{'启用' if bool(self.config.get('output_cleanup_enabled', True)) else '关闭'}｜"
+                f"保留 {self._output_retention_hours():g} 小时｜"
+                f"每 {self._output_cleanup_interval_seconds() // 60} 分钟扫描｜"
+                f"{self._output_dir()}\n"
                 f"{lora_text}"
             )
         except Exception as exc:
             yield event.plain_result(f"状态检查失败：{type(exc).__name__}: {exc}")
 
+    @filter.permission_type(filter.PermissionType.ADMIN)
+    @filter.command("aimg_cleanup")
+    async def aimg_cleanup(self, event: AstrMessageEvent):
+        """Immediately remove expired images from the plugin output directory."""
+        event.should_call_llm(False)
+        try:
+            report = await self._cleanup_plugin_outputs()
+            mib = report.deleted_bytes / (1024 * 1024)
+            yield event.plain_result(
+                "插件图片清理完成：\n"
+                f"- 目录：{self._output_dir()}\n"
+                f"- 保留时间：{self._output_retention_hours():g} 小时\n"
+                f"- 扫描图片：{report.scanned} 张\n"
+                f"- 删除图片：{report.deleted} 张\n"
+                f"- 释放空间：{mib:.2f} MiB\n"
+                f"- 失败：{report.failed} 个\n"
+                "ComfyUI/output 未处理。"
+            )
+        except Exception as exc:
+            yield event.plain_result(
+                f"插件图片清理失败：{type(exc).__name__}: {exc}"
+            )
+
     async def terminate(self):
-        """Cancel pending /aip timeout tasks during reload or shutdown."""
+        """Cancel background tasks during reload or shutdown."""
+        if self._cleanup_task is not None:
+            self._cleanup_task.cancel()
+            try:
+                await self._cleanup_task
+            except asyncio.CancelledError:
+                pass
+            self._cleanup_task = None
         async with self._pending_lock:
             pending = list(self._pending_images.values())
             self._pending_images.clear()

@@ -19,6 +19,7 @@ SOURCE_NAMES = {
     "D": "discord",
     "C": "codex",
     "R": "reverse",
+    "P": "liked",
 }
 SAFETY_NAMES = {"N": "normal", "H": "nsfw", "S": "sexual"}
 

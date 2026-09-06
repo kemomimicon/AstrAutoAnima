@@ -28,6 +28,8 @@ from .schemas import (
     RemoteJobPage,
     RemoteJobResponse,
 )
+from .personal_styles import resolve_personal_style_key
+from .repositories import RepositoryError
 
 
 class RemoteJobError(RuntimeError):
@@ -37,7 +39,8 @@ class RemoteJobError(RuntimeError):
 _UMO_PATTERN = re.compile(
     r"^[A-Za-z0-9_.-]+:(?P<message_type>GroupMessage|FriendMessage):[A-Za-z0-9_.-]+$"
 )
-_POOL_PATTERN = re.compile(r"^[BGDCRNHS](?:[BGDCRNHS,/]*[BGDCRNHS])?$")
+_POOL_PATTERN = re.compile(r"^[BGDCRKPNHS](?:[BGDCRKPNHS,/]*[BGDCRKPNHS])?$")
+_PROMPT_ID_PATTERN = re.compile(r"\b(?:kp|liked|good|generate|discord|codex|reverse)-[A-Za-z0-9_.-]+\b")
 _MAX_MEDIA_BYTES = 64 * 1024 * 1024
 _MAX_SOURCE_IMAGE_BYTES = 20 * 1024 * 1024
 _SOURCE_IMAGE_MIME_TYPES = {
@@ -142,16 +145,38 @@ def _filter_safety(value: str) -> set[str]:
     return {char for char in value if char in {"N", "H", "S"}}
 
 
+def _filter_sources(value: str) -> set[str]:
+    return {char for char in value if char in {"B", "G", "D", "C", "R", "K", "P"}}
+
+
+def _prompt_ids_from_plain(messages: list[str]) -> list[str]:
+    found: list[str] = []
+    for message in messages:
+        for prompt_id in _PROMPT_ID_PATTERN.findall(message):
+            if prompt_id not in found:
+                found.append(prompt_id)
+    return found[:20]
+
+
 def build_remote_command(
     payload: RemoteJobCreateRequest, target: _TargetRecord
 ) -> tuple[str, str]:
     pool_filter = _normalize_pool_filter(payload.pool_filter)
     effective_safety = payload.safety_code
     selected_safety = _filter_safety(pool_filter)
+    selected_sources = _filter_sources(pool_filter)
+    if "K" in selected_sources and selected_sources != {"K"}:
+        raise RemoteJobError("K prompt pool must be selected on its own")
+    if selected_sources == {"K"} and selected_safety == {"H"}:
+        raise RemoteJobError("K prompt pool supports K/N or K/S, not K/H")
     if selected_safety:
         if len(selected_safety) != 1:
             raise RemoteJobError("remote delivery requires one explicit safety level")
         effective_safety = next(iter(selected_safety))
+    elif selected_sources == {"K"} and effective_safety == "H":
+        # K uses a binary nudity switch: K/N is the covered variant, K/S is
+        # the adult explicit variant.  H therefore falls back to the safe side.
+        effective_safety = "N"
 
     random_kind = payload.kind in {"random", "chaos"}
     if random_kind:
@@ -193,7 +218,7 @@ def build_remote_command(
     if payload.kind == "hq":
         parts.append(payload.profile or "stable")
     elif payload.kind == "refine":
-        parts.append(payload.profile or "light")
+        parts.append(payload.profile or "seedvr2")
     if payload.kind == "reverse":
         if payload.reverse_only:
             parts.append("仅反推")
@@ -204,6 +229,7 @@ def build_remote_command(
                 "action": "动作",
                 "character": "角色",
                 "appearance": "外观",
+                "special_features": "特殊特征",
                 "clothing": "服装",
                 "composition": "构图",
                 "other": "其他",
@@ -217,19 +243,27 @@ def build_remote_command(
     if payload.kind != "chaos":
         if payload.character.strip():
             parts.append(f"角色={payload.character.strip()}")
+            parts.append(
+                "角色模式="
+                + {"weak": "弱", "strong": "强", "off": "关闭"}[
+                    payload.character_tag_mode
+                ]
+            )
         if payload.style.strip():
             parts.append(f"画风={payload.style.strip()}")
         if payload.ratio:
             parts.append(f"比例={payload.ratio}")
     if payload.sampler:
         parts.append(f"采样器={payload.sampler}")
+    if payload.scheduler:
+        parts.append(f"调度器={payload.scheduler}")
     if payload.steps is not None:
         parts.append(f"步数={payload.steps}")
     if payload.cfg is not None:
         parts.append(f"CFG={payload.cfg:g}")
-    if payload.scale is not None:
+    if payload.scale is not None and payload.profile != "seedvr2":
         parts.append(f"放大={payload.scale:g}")
-    if payload.denoise is not None:
+    if payload.denoise is not None and payload.profile != "seedvr2":
         parts.append(f"重绘={payload.denoise:g}")
     if payload.parent_job_id.strip():
         if payload.kind != "refine":
@@ -253,6 +287,15 @@ def _decode_source_image(payload: RemoteJobCreateRequest) -> tuple[bytes, str, s
         if payload.kind == "refine" and payload.parent_job_id.strip():
             return None
         raise RemoteJobError(f"{payload.kind} generation requires a source image")
+    if (
+        payload.kind == "refine"
+        and payload.profile != "seedvr2"
+        and not payload.parent_job_id.strip()
+        and not payload.prompt.strip()
+    ):
+        raise RemoteJobError(
+            "上传外部图片精修时必须填写补充提示词，或填写历史任务 ID。"
+        )
     try:
         header, body = encoded.split(",", 1)
     except ValueError as exc:
@@ -419,6 +462,19 @@ class RemoteJobManager:
         payload: RemoteJobCreateRequest,
         principal: AuthPrincipal = SYSTEM_ADMIN,
     ) -> RemoteJobResponse:
+        personal_style_slot = payload.personal_style_slot
+        if payload.personal_style_slot is not None:
+            if payload.kind == "chaos":
+                raise RemoteJobError("personal style cannot be used for chaos jobs")
+            if payload.style.strip():
+                raise RemoteJobError("global style and personal style cannot be used together")
+            try:
+                personal_style = resolve_personal_style_key(
+                    self.settings, principal, payload.personal_style_slot
+                )
+            except RepositoryError as exc:
+                raise RemoteJobError(str(exc)) from exc
+            payload = payload.model_copy(update={"style": personal_style})
         targets = {
             record.public.id: record
             for record in visible_delivery_targets(self.settings, principal)
@@ -426,7 +482,15 @@ class RemoteJobManager:
         target = targets.get(payload.target_id)
         if target is None:
             raise RemoteJobError("unknown or disabled delivery target")
-        command, _ = build_remote_command(payload, target)
+        command, effective_safety = build_remote_command(payload, target)
+        command_preview = command
+        if personal_style_slot is not None:
+            command_preview = re.sub(
+                r"画风=\S+",
+                f"个人画风=槽位{personal_style_slot}",
+                command_preview,
+                count=1,
+            )
         source_image = _decode_source_image(payload)
         if not self.settings.astrbot_api_key:
             raise RemoteJobError("AAH_ASTRBOT_API_KEY is not configured")
@@ -435,11 +499,11 @@ class RemoteJobManager:
             id=uuid.uuid4().hex,
             status="queued",
             kind=payload.kind,
-            safety_code=payload.safety_code,
+            safety_code=effective_safety,
             profile=payload.profile,
             target_id=target.public.id,
             target_label=target.public.label,
-            command_preview=command,
+            command_preview=command_preview,
             message="任务已进入队列",
             created_at=now,
             updated_at=now,
@@ -525,6 +589,21 @@ class RemoteJobManager:
             return None
         return image, path
 
+    def mark_liked(
+        self,
+        job_id: str,
+        prompt_id: str,
+        principal: AuthPrincipal = SYSTEM_ADMIN,
+    ) -> RemoteJobResponse | None:
+        job = self.get(job_id, principal)
+        if job is None or prompt_id not in job.prompt_ids:
+            return None
+        liked = list(job.liked_prompt_ids)
+        if prompt_id not in liked:
+            liked.append(prompt_id)
+            self._update(job_id, liked_prompt_ids=liked)
+        return self._jobs[job_id]
+
     def _update(self, job_id: str, **changes: Any) -> None:
         current = self._jobs[job_id]
         self._jobs[job_id] = current.model_copy(
@@ -567,6 +646,7 @@ class RemoteJobManager:
                     status="succeeded",
                     message=f"已发送到 {target.public.label}",
                     images=images,
+                    prompt_ids=_prompt_ids_from_plain(plain),
                 )
             except Exception as exc:
                 self._update(job_id, status="failed", message=str(exc)[:500])
@@ -666,6 +746,8 @@ class RemoteJobManager:
         if plain and plain[-1].startswith("生成失败"):
             raise RemoteJobError(plain[-1])
         if not attachments and not (allow_text_only and plain):
+            if plain:
+                raise RemoteJobError(plain[-1])
             raise RemoteJobError(
                 "AstrBot 已处理任务但未返回可投递结果；请检查 SSE 事件格式"
             )

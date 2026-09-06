@@ -1,6 +1,6 @@
 # 本地管理工具
 
-两个 GUI 工具只使用 Python 标准库，不依赖 AstrBot、ComfyUI 或服务器。Windows 双击 `.bat`，
+三个 GUI 工具只使用 Python 标准库，不依赖 AstrBot、ComfyUI 或服务器。Windows 双击 `.bat`，
 Linux/macOS/终端直接运行 Python 文件。建议 Python 3.10+。
 
 ## 提示词库管理器
@@ -15,7 +15,8 @@ Windows: tools\start_prompt_pool_manager.bat
 主要能力：
 
 - 新建/打开 AstrAutoAnima 提示词池。
-- 按 ID、正文、B/G/D/C/R 来源组、N/H/S 安全级别筛选。
+- 按 ID、正文、B/G/D/C/R 来源组、N/H/S 安全级别和任意自定义分组筛选。
+- 新建、重命名、删除任意自定义分组；删除分组时同步移除所有条目的成员关系。
 - 添加、修改、启用/停用、删除单条记录。
 - 批量导入 JSON；可选择是否覆盖同 ID。
 - 导出全部或当前筛选结果为 JSON/CSV。
@@ -46,8 +47,19 @@ python tools/prompt_pool_manager.py --help
   "safety_code": "N",
   "source_group": "basic",
   "safety_level": "normal",
+  "custom_groups": ["rain", "night"],
   "enabled": true
 }
+```
+
+固定来源组与安全组用于兼容现有指令和安全路由，不妨碍你建立完全不同的业务分类。自定义
+分组 ID 长度为 1–64，不能包含空格或 `@ / + ,`。在 QQ 中以 `@rain` 或
+`@rain+night` 调用。图形界面点击“管理自定义分组”即可维护；命令行示例：
+
+```bash
+python tools/prompt_pool_manager.py group-add pool.json --id rain --name 雨景
+python tools/prompt_pool_manager.py add pool.json --id my-001 --groups rain,night --prompt "..."
+python tools/prompt_pool_manager.py group-list pool.json
 ```
 
 本仓库不附带真实库。内容分级和版权/隐私审核由库维护者负责。
@@ -85,6 +97,18 @@ python tools/hub_lite_user_manager.py --help
 ```
 
 工具不会从哈希恢复旧令牌。用户丢失令牌时必须“轮换”，旧令牌随即失效。
+
+## 一键部署助手
+
+```text
+Windows: 一键部署_AstrAutoAnima.bat
+Linux:   sh 一键部署_AstrAutoAnima.sh
+通用:    python tools/easy_installer.py
+```
+
+它负责预检、备份和复制本项目组件；不会安装 AstrBot、ComfyUI 或 NapCat。外部节点、模型和
+Python requirements 均默认关闭，逐项勾选才允许联网或修改 ComfyUI Python。详见
+[一键部署懒人包](EASY_INSTALL.md)。
 
 ## 只筛选/导出旧工具
 

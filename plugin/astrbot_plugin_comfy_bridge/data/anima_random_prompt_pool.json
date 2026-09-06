@@ -1,8 +1,8 @@
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "catalog_revision": 1,
-  "release_version": "public-empty",
-  "description": "Public empty prompt pool. Import your own reviewed prompts before using random drawing.",
+  "release_version": "public-empty-0.4.0",
+  "description": "Public empty prompt pool. Import only prompts you have reviewed and are allowed to use.",
   "replace_source_codes_on_upgrade": [],
   "source_groups": {
     "B": {"name": "basic", "default": true},
@@ -16,9 +16,8 @@
     "H": {"name": "nsfw", "default": true},
     "S": {"name": "sexual", "default": false}
   },
-  "quality_presets": {
-    "general": ""
-  },
+  "custom_group_definitions": [],
+  "quality_presets": {"general": ""},
   "prompts": [],
   "deleted_prompt_ids": []
 }

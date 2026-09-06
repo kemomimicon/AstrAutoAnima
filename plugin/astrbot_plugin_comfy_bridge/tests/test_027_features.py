@@ -14,7 +14,7 @@ from preset_runtime import (  # noqa: E402
     parse_text_character_definition,
     preset_prompt,
 )
-from prompt_pool_runtime import select_random_prompts  # noqa: E402
+from prompt_pool_runtime import load_prompt_pool, select_random_prompts  # noqa: E402
 from workflow_runtime import (  # noqa: E402
     WorkflowError,
     prepare_workflow,
@@ -126,14 +126,14 @@ class FiveDrawTests(unittest.TestCase):
         pool = {
             "prompts": [
                 {
-                    "id": f"discord-{index}",
-                    "prompt": f"public test prompt {index}",
+                    "id": f"sample-{index}",
+                    "prompt": f"harmless sample {index}",
+                    "enabled": True,
                     "source_code": "D",
                     "safety_code": "N",
                     "safety_level": "normal",
-                    "enabled": True,
                 }
-                for index in range(5)
+                for index in range(6)
             ]
         }
         items, _, _ = select_random_prompts(

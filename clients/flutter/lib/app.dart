@@ -2,29 +2,39 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import 'core/app_edition.dart';
+import 'core/character_use_request.dart';
 import 'core/hub_api.dart';
 import 'core/notification_service.dart';
 import 'core/server_online_tracker.dart';
 import 'core/session_store.dart';
 import 'features/connection/connection_page.dart';
+import 'features/characters/character_dictionary_page.dart';
+import 'features/cloud/compshare_instance_page.dart';
 import 'features/dashboard/dashboard_page.dart';
 import 'features/lite/lite_generate_page.dart';
 import 'features/lite/lite_job_history_page.dart';
 import 'features/lite/lite_prompt_library_page.dart';
+import 'features/lite/personal_presets_page.dart';
+import 'features/loras/lora_library_page.dart';
 import 'features/presets/presets_page.dart';
 import 'features/prompts/prompt_library_page.dart';
+import 'features/splash/service_splash.dart';
+import 'features/users/lite_users_page.dart';
 
 class AstrAutoAnimaApp extends StatefulWidget {
   const AstrAutoAnimaApp({
     required this.store,
     required this.notificationService,
     required this.initialSession,
+    this.edition = AppEdition.unified,
     super.key,
   });
 
   final SessionStore store;
   final NotificationService notificationService;
   final HubSession initialSession;
+  final AppEdition edition;
 
   @override
   State<AstrAutoAnimaApp> createState() => _AstrAutoAnimaAppState();
@@ -51,9 +61,36 @@ class _AstrAutoAnimaAppState extends State<AstrAutoAnimaApp> {
       seedColor: const Color(0xFF5B6CFF),
       brightness: Brightness.light,
     );
+    final requiredMode = switch (widget.edition) {
+      AppEdition.admin => HubAccessMode.admin,
+      AppEdition.service => HubAccessMode.lite,
+      AppEdition.unified => null,
+    };
+    final sessionAllowed = _session.isConfigured &&
+        (requiredMode == null || _session.mode == requiredMode);
+    final home = sessionAllowed
+        ? _session.isAdmin
+            ? HubShell(
+                session: _session,
+                store: widget.store,
+                notificationService: widget.notificationService,
+                onDisconnect: _disconnect,
+              )
+            : LiteShell(
+                session: _session,
+                store: widget.store,
+                notificationService: widget.notificationService,
+                onDisconnect: _disconnect,
+              )
+        : ConnectionPage(
+            onConnected: _connected,
+            fixedMode: requiredMode,
+            offlineTool:
+                widget.edition.isAdmin ? const CompShareInstancePage() : null,
+          );
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      title: 'AstrAutoAnima Hub',
+      title: widget.edition.title,
       theme: ThemeData(
         useMaterial3: true,
         colorScheme: colorScheme,
@@ -80,21 +117,7 @@ class _AstrAutoAnimaAppState extends State<AstrAutoAnimaApp> {
           brightness: Brightness.dark,
         ),
       ),
-      home: _session.isConfigured
-          ? _session.isAdmin
-              ? HubShell(
-                  session: _session,
-                  store: widget.store,
-                  notificationService: widget.notificationService,
-                  onDisconnect: _disconnect,
-                )
-              : LiteShell(
-                  session: _session,
-                  store: widget.store,
-                  notificationService: widget.notificationService,
-                  onDisconnect: _disconnect,
-                )
-          : ConnectionPage(onConnected: _connected),
+      home: widget.edition.isService ? ServiceSplash(child: home) : home,
     );
   }
 }
@@ -119,6 +142,9 @@ class LiteShell extends StatefulWidget {
 
 class _LiteShellState extends State<LiteShell> {
   int _index = 0;
+  int _characterRequestSequence = 0;
+  final ValueNotifier<CharacterUseRequest?> _characterRequest =
+      ValueNotifier(null);
   final ServerOnlineTracker _serverTracker = ServerOnlineTracker();
   Timer? _serverMonitorTimer;
   bool _serverOnlineReminderEnabled = false;
@@ -136,6 +162,7 @@ class _LiteShellState extends State<LiteShell> {
   @override
   void dispose() {
     _serverMonitorTimer?.cancel();
+    _characterRequest.dispose();
     super.dispose();
   }
 
@@ -228,12 +255,28 @@ class _LiteShellState extends State<LiteShell> {
     final pages = [
       LiteGeneratePage(
         api: _api,
+        characterRequest: _characterRequest,
         serverOnlineReminderEnabled: _serverOnlineReminderEnabled,
         serverReachable: _serverReachable,
         onServerOnlineReminderChanged: _setServerOnlineReminder,
       ),
       LiteJobHistoryPage(api: _api),
+      PersonalPresetsPage(api: _api),
       LitePromptLibraryPage(api: _api),
+      CharacterDictionaryPage(
+        api: _api,
+        onUseCharacter: (item, strong) {
+          _characterRequest.value = CharacterUseRequest(
+            tag: item.tag,
+            mode: strong ? 'strong' : 'weak',
+            sequence: ++_characterRequestSequence,
+          );
+          setState(() => _index = 0);
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('已把 ${item.tag} 添加到使用角色框')),
+          );
+        },
+      ),
     ];
     const destinations = [
       NavigationDestination(
@@ -247,9 +290,19 @@ class _LiteShellState extends State<LiteShell> {
         label: '记录',
       ),
       NavigationDestination(
+        icon: Icon(Icons.tune_outlined),
+        selectedIcon: Icon(Icons.tune),
+        label: '预设',
+      ),
+      NavigationDestination(
         icon: Icon(Icons.library_books_outlined),
         selectedIcon: Icon(Icons.library_books),
         label: '提示词',
+      ),
+      NavigationDestination(
+        icon: Icon(Icons.translate_outlined),
+        selectedIcon: Icon(Icons.translate),
+        label: '角色词典',
       ),
     ];
     return LayoutBuilder(
@@ -303,6 +356,8 @@ class _LiteShellState extends State<LiteShell> {
           bottomNavigationBar: wide
               ? null
               : NavigationBar(
+                  labelBehavior:
+                      NavigationDestinationLabelBehavior.onlyShowSelected,
                   selectedIndex: _index,
                   onDestinationSelected: (value) =>
                       setState(() => _index = value),
@@ -447,6 +502,7 @@ class _HubShellState extends State<HubShell> {
   @override
   Widget build(BuildContext context) {
     final pages = [
+      const CompShareInstancePage(),
       DashboardPage(
         api: _api,
         serverOnlineReminderEnabled: _serverOnlineReminderEnabled,
@@ -455,9 +511,17 @@ class _HubShellState extends State<HubShell> {
       ),
       PromptLibraryPage(api: _api),
       PresetsPage(api: _api),
+      LoraLibraryPage(api: _api),
+      LiteUsersPage(api: _api),
       LiteJobHistoryPage(api: _api),
+      CharacterDictionaryPage(api: _api, adminMode: true),
     ];
     final destinations = const [
+      NavigationDestination(
+        icon: Icon(Icons.cloud_outlined),
+        selectedIcon: Icon(Icons.cloud),
+        label: '实例',
+      ),
       NavigationDestination(
         icon: Icon(Icons.monitor_heart_outlined),
         selectedIcon: Icon(Icons.monitor_heart),
@@ -474,9 +538,24 @@ class _HubShellState extends State<HubShell> {
         label: '预设',
       ),
       NavigationDestination(
+        icon: Icon(Icons.extension_outlined),
+        selectedIcon: Icon(Icons.extension),
+        label: 'LoRA',
+      ),
+      NavigationDestination(
+        icon: Icon(Icons.manage_accounts_outlined),
+        selectedIcon: Icon(Icons.manage_accounts),
+        label: '用户',
+      ),
+      NavigationDestination(
         icon: Icon(Icons.photo_library_outlined),
         selectedIcon: Icon(Icons.photo_library),
         label: '记录',
+      ),
+      NavigationDestination(
+        icon: Icon(Icons.translate_outlined),
+        selectedIcon: Icon(Icons.translate),
+        label: '角色词典',
       ),
     ];
     return LayoutBuilder(
@@ -530,6 +609,8 @@ class _HubShellState extends State<HubShell> {
           bottomNavigationBar: wide
               ? null
               : NavigationBar(
+                  labelBehavior:
+                      NavigationDestinationLabelBehavior.onlyShowSelected,
                   selectedIndex: _index,
                   onDestinationSelected: (value) =>
                       setState(() => _index = value),

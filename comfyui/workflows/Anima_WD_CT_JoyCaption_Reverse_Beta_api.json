@@ -92,7 +92,7 @@
       "n_gpu_layers": -1,
       "n_ctx": 4096,
       "system_prompt": "You are the visual analysis branch of an Anima reverse-prompt compiler. Return one valid JSON object only. Do not use markdown. Use concise lowercase English Danbooru-style tags inside arrays. Do not invent artist names, copyright names, model names, quality tags, or hidden details. If uncertain, omit the item. Safety must follow the visible image, not assumptions.",
-      "user_query": "Analyze the image and return exactly this JSON shape: {\"scene\":[],\"action\":[],\"character\":[],\"appearance\":[],\"clothing\":[],\"composition\":[],\"other\":[],\"safety\":{\"level\":\"normal|nsfw|sexual|uncertain\",\"reasons\":[]}}. Scene covers environment, time, weather and lighting. Action covers pose, interaction and movement. Character covers recognized identity only when visually reliable. Appearance covers visible physical features. Clothing covers garments and accessories. Composition covers shot type, angle, viewpoint and depth of field. The safety policy is: normal includes ordinary content, underwear and non-explicit body exposure up to approximately R15; nsfw includes complete nudity without sexual activity; sexual includes sexual acts or emphasized genitals. Output JSON only.",
+      "user_query": "Analyze the image and return exactly this JSON shape: {\"scene\":[],\"action\":[],\"character\":[],\"appearance\":[],\"special_features\":[],\"clothing\":[],\"composition\":[],\"other\":[],\"safety\":{\"level\":\"normal|nsfw|sexual|uncertain\",\"reasons\":[]}}. Scene covers environment, time, weather and lighting. Action covers pose, interaction and movement. Character covers recognized identity only when visually reliable. Appearance covers ordinary physical traits such as hair, eyes, skin and body traits. Special_features covers non-human or supernatural anatomy and identity details such as animal ears, tails, wings, horns, halo, fangs, claws, scales, fins or tentacles. Clothing covers garments and accessories. Composition covers shot type, angle, viewpoint and depth of field. The safety policy is: normal includes ordinary content, underwear and non-explicit body exposure up to approximately R15; nsfw includes complete nudity without sexual activity; sexual includes sexual acts or emphasized genitals. Output JSON only.",
       "max_new_tokens": 768,
       "temperature": 0.2,
       "top_p": 0.9,
@@ -148,10 +148,11 @@
       "include_action": true,
       "include_character": true,
       "include_appearance": true,
-    "include_clothing": true,
-    "include_composition": true,
-    "include_other": true,
-    "include_safety": true
+      "include_special_features": true,
+      "include_clothing": true,
+      "include_composition": true,
+      "include_other": true,
+      "include_safety": true
     },
     "class_type": "AnimaReverseCompiler",
     "_meta": {
@@ -172,7 +173,7 @@
         "7",
         0
       ],
-      "storage_root": "astr_auto_anima/reverse_history",
+      "storage_root": "/workspace/astrbot-runtime/data/plugin_data/astrbot_plugin_comfy_bridge/reverse_history",
       "qq_user_id": "",
       "session_type": "unknown",
       "session_id": "",
