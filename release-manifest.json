@@ -5,7 +5,7 @@
     "astrbot_plugin_comfy_bridge": "0.4.0",
     "astr_auto_anima_hub_service": "0.4.0",
     "astr_auto_anima_hub_client": "0.4.0+24",
-    "workflow_pack": "0.5.0"
+    "workflow_pack": "0.5.0-beta.2"
   },
   "compatibility": {
     "astrbot": ">=4.17,<5",

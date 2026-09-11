@@ -97,6 +97,47 @@ def _preamble_offset(source: str) -> int:
     return sum(len(line) for line in lines[: body[index - 1].end_lineno])
 
 
+def _character_column(line: str, utf8_column: int) -> int:
+    """Translate CPython AST's UTF-8 byte column into a string offset."""
+    prefix = line.encode("utf-8")[:utf8_column]
+    return len(prefix.decode("utf-8"))
+
+
+def _insert_popen_env(source: str, call: ast.Call) -> str:
+    lines = source.splitlines(keepends=True)
+    closing_line = lines[call.end_lineno - 1]
+    closing_column = _character_column(closing_line, call.end_col_offset) - 1
+    if closing_column < 0 or closing_line[closing_column] != ")":
+        raise RuntimeError("could not locate the Popen closing parenthesis")
+
+    close_offset = sum(len(line) for line in lines[: call.end_lineno - 1]) + closing_column
+    before_close = source[:close_offset]
+    body_end = len(before_close.rstrip())
+    if body_end == 0:
+        raise RuntimeError("could not locate the final Popen argument")
+
+    if call.lineno == call.end_lineno:
+        separator = "" if before_close[body_end - 1] == "," else ","
+        insertion = separator + " env=build_single_gpu_train_env()"
+        return source[:body_end] + insertion + source[body_end:]
+
+    closing_indent = closing_line[:closing_column]
+    if closing_indent.strip():
+        raise RuntimeError("unexpected content before the Popen closing parenthesis")
+    newline = "\r\n" if "\r\n" in source else "\n"
+    separator = "" if before_close[body_end - 1] == "," else ","
+    argument_indent = closing_indent + "    "
+    insertion = (
+        separator
+        + newline
+        + argument_indent
+        + "env=build_single_gpu_train_env(),"
+        + newline
+        + closing_indent
+    )
+    return source[:body_end] + insertion + source[close_offset:]
+
+
 def patch_runner(path: Path) -> bool:
     source = path.read_text(encoding="utf-8")
     if "AAA_ACCELERATE_ENV_GUARD_V1" in source:
@@ -116,11 +157,7 @@ def patch_runner(path: Path) -> bool:
             f"expected exactly one unguarded subprocess.Popen in {path}, found {len(candidates)}"
         )
     call = candidates[0]
-    lines = source.splitlines(keepends=True)
-    end_offset = sum(len(line) for line in lines[: call.end_lineno - 1]) + call.end_col_offset
-    if source[end_offset - 1] != ")":
-        raise RuntimeError("could not locate the Popen closing parenthesis")
-    patched = source[: end_offset - 1] + ", env=build_single_gpu_train_env()" + source[end_offset - 1 :]
+    patched = _insert_popen_env(source, call)
     offset = _preamble_offset(patched)
     patched = patched[:offset] + RUNNER_IMPORT + patched[offset:]
     ast.parse(patched)

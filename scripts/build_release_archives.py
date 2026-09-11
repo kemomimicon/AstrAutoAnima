@@ -171,7 +171,9 @@ def main() -> int:
         print(f"BUILT {destination.name} ({destination.stat().st_size:,} bytes)")
 
     checksums = output / "SHA256SUMS.txt"
-    lines = [f"{sha256(path)}  {path.name}" for path in sorted(built)]
+    checksum_files = sorted(path for path in output.iterdir() if path.is_file()
+                            and (path.suffix in {".zip", ".apk"} or path.name == "README.md"))
+    lines = [f"{sha256(path)}  {path.name}" for path in checksum_files]
     checksums.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
     print(f"BUILT {checksums.name}")
     return 0
