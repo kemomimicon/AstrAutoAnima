@@ -9,6 +9,21 @@ from astr_auto_anima_hub import service_recovery
 
 
 class PublicBoundaryTests(unittest.TestCase):
+    def test_construct_app_does_not_write_to_configured_data_root(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / 'not-created'
+            with patch.object(Path, 'mkdir', side_effect=AssertionError('eager write')):
+                create_app(Settings(plugin_data_dir=root))
+            self.assertFalse(root.exists())
+
+    def test_defaults_do_not_require_server_root_permissions(self):
+        import os
+        with patch.dict(os.environ, {}, clear=True):
+            for settings in (Settings(), Settings.from_env()):
+                self.assertFalse(settings.plugin_dir.is_absolute())
+                self.assertFalse(settings.plugin_data_dir.is_absolute())
+                self.assertFalse(settings.comfyui_root.is_absolute())
+
     def test_no_training_extension_routes(self):
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)

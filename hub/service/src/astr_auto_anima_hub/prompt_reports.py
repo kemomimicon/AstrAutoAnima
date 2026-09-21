@@ -15,15 +15,16 @@ class PromptReports:
     def __init__(self, settings, jobs):
         self.settings, self.jobs = settings, jobs
         self.root = settings.hub_state_dir / 'prompt_reports'
-        self.root.mkdir(parents=True, exist_ok=True)
-        with self.connect() as db:
-            db.execute('CREATE TABLE IF NOT EXISTS reports(id TEXT PRIMARY KEY, owner TEXT, job TEXT, image TEXT, prompt_id TEXT, snapshot TEXT, status TEXT, created REAL, UNIQUE(owner,job,image))')
 
     @contextmanager
     def connect(self):
+        # Importing the ASGI app must not create files or require write access.
+        self.root.mkdir(parents=True, exist_ok=True)
         db = sqlite3.connect(self.root / 'reports.sqlite3', timeout=15)
         try:
-            with db: yield db
+            with db:
+                db.execute('CREATE TABLE IF NOT EXISTS reports(id TEXT PRIMARY KEY, owner TEXT, job TEXT, image TEXT, prompt_id TEXT, snapshot TEXT, status TEXT, created REAL, UNIQUE(owner,job,image))')
+                yield db
         finally:
             db.close()
 

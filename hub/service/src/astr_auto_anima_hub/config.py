@@ -38,12 +38,12 @@ class Settings:
     comfyui_url: str = "http://127.0.0.1:8188"
     request_timeout_seconds: float = 4.0
     plugin_dir: Path = Path(
-        "/workspace/astrbot-runtime/data/plugins/astrbot_plugin_comfy_bridge"
+        "astrbot-runtime/data/plugins/astrbot_plugin_comfy_bridge"
     )
     plugin_data_dir: Path = Path(
-        "/workspace/astrbot-runtime/data/plugin_data/astrbot_plugin_comfy_bridge"
+        "astrbot-runtime/data/plugin_data/astrbot_plugin_comfy_bridge"
     )
-    comfyui_root: Path = Path("/workspace/ComfyUI")
+    comfyui_root: Path = Path("ComfyUI")
     prompt_pool_override: Path | None = None
     kp_prompt_pool_override: Path | None = None
     preset_override: Path | None = None
@@ -79,17 +79,17 @@ class Settings:
             plugin_dir=Path(
                 os.getenv(
                     "AAH_PLUGIN_DIR",
-                    "/workspace/astrbot-runtime/data/plugins/astrbot_plugin_comfy_bridge",
+                    "astrbot-runtime/data/plugins/astrbot_plugin_comfy_bridge",
                 )
             ).expanduser(),
             plugin_data_dir=Path(
                 os.getenv(
                     "AAH_PLUGIN_DATA_DIR",
-                    "/workspace/astrbot-runtime/data/plugin_data/astrbot_plugin_comfy_bridge",
+                    "astrbot-runtime/data/plugin_data/astrbot_plugin_comfy_bridge",
                 )
             ).expanduser(),
             comfyui_root=Path(
-                os.getenv("AAH_COMFYUI_ROOT", "/workspace/ComfyUI")
+                os.getenv("AAH_COMFYUI_ROOT", "ComfyUI")
             ).expanduser(),
             prompt_pool_override=(
                 Path(os.environ["AAH_PROMPT_POOL_PATH"]).expanduser()
