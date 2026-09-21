@@ -89,6 +89,7 @@ def list_prompts(
     enabled: bool | None = None,
     page: int = 1,
     page_size: int = 20,
+    owner: str | None = None,
 ) -> PromptPage:
     data = read_json_object(path)
     prompts = data.get("prompts")
@@ -101,7 +102,11 @@ def list_prompts(
     for raw in prompts:
         if not isinstance(raw, dict):
             continue
+        if owner is not None and raw.get("liked_by") and raw["liked_by"] != owner:
+            continue
         item_source = _source_code(raw)
+        if owner is not None and item_source == "P" and raw.get("liked_by") != owner:
+            continue
         item_safety = _safety_code(raw)
         item_enabled = bool(raw.get("enabled", True))
         if source_set and item_source not in source_set:
@@ -194,6 +199,7 @@ def list_presets(path: Path) -> PresetListResponse:
                 prompt=str(raw.get("prompt", "")),
                 loras=[lora] if isinstance(lora, dict) else [],
                 text_only=not isinstance(lora, dict),
+                variants=raw.get("variants", []),
             )
         )
 

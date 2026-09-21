@@ -1,9 +1,12 @@
+import '../../core/courtyard_theme.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
 import '../../core/hub_api.dart';
 import '../../core/job_image_store.dart';
 import '../../core/models.dart';
+import '../settings/settings_drawer.dart';
+import 'remake_options_dialog.dart';
 
 class LiteJobHistoryPage extends StatefulWidget {
   const LiteJobHistoryPage({required this.api, super.key});
@@ -34,6 +37,8 @@ class _LiteJobHistoryPageState extends State<LiteJobHistoryPage> {
     'chaos': '混沌时刻',
     'hq': 'HQ 高清',
     'refine': '放大精修',
+    'remake': '重跑一张',
+    'multi': '裸模多人图',
   };
 
   static const _statusLabels = <String, String>{
@@ -181,6 +186,12 @@ class _LiteJobHistoryPageState extends State<LiteJobHistoryPage> {
     if (!_liking.add(key)) return;
     setState(() {});
     try {
+      if (job.likedPromptIds.contains(promptId)) {
+        await widget.api.unfavoritePrompt(promptId);
+        _notice('已取消收藏');
+        _refresh();
+        return;
+      }
       final result =
           await widget.api.likeJobPrompt(jobId: job.id, promptId: promptId);
       _notice(
@@ -239,7 +250,7 @@ class _LiteJobHistoryPageState extends State<LiteJobHistoryPage> {
                   onPressed: snapshot.connectionState == ConnectionState.waiting
                       ? null
                       : () => _refresh(),
-                  icon: const Icon(Icons.refresh),
+                  icon: const CourtyardIcon(Icons.refresh),
                 ),
               ],
             ),
@@ -293,7 +304,7 @@ class _LiteJobHistoryPageState extends State<LiteJobHistoryPage> {
                     if (_imageStore.supportsDirectorySelection)
                       OutlinedButton.icon(
                         onPressed: _chooseDirectory,
-                        icon: const Icon(Icons.folder_outlined),
+                        icon: const CourtyardIcon(Icons.folder_outlined),
                         label: Text(
                           _imageStore.usesPublicDownloads ? '更改保存目录' : '保存目录',
                         ),
@@ -357,7 +368,7 @@ class _LiteJobHistoryPageState extends State<LiteJobHistoryPage> {
                               _page -= 1;
                               _refresh();
                             },
-                      icon: const Icon(Icons.chevron_left),
+                      icon: const CourtyardIcon(Icons.chevron_left),
                     ),
                     Text('${data.page} / ${data.pages}'),
                     IconButton(
@@ -368,7 +379,7 @@ class _LiteJobHistoryPageState extends State<LiteJobHistoryPage> {
                               _page += 1;
                               _refresh();
                             },
-                      icon: const Icon(Icons.chevron_right),
+                      icon: const CourtyardIcon(Icons.chevron_right),
                     ),
                   ],
                 ),
@@ -410,32 +421,56 @@ class _LiteJobHistoryPageState extends State<LiteJobHistoryPage> {
             SelectableText(job.commandPreview),
             const SizedBox(height: 6),
             Text('${job.targetLabel} · ${job.message}'),
+            if (job.taskSuiteId.isNotEmpty) ...[
+              for (final row in job.taskSuiteRows)
+                Text(
+                    '${row['index']}. ${row['character']} / ${row['style']} · ${row['status']}'),
+              if (!job.isFinished)
+                TextButton.icon(
+                    icon: const Icon(Icons.stop_circle_outlined),
+                    label: const Text('取消套组未执行项'),
+                    onPressed: () async {
+                      final yes = await showDialog<bool>(
+                          context: context,
+                          builder: (context) => AlertDialog(
+                                  title: const Text('取消后续套组任务？'),
+                                  content:
+                                      const Text('正在生成的单项会完成，其余尚未提交的行不再执行。'),
+                                  actions: [
+                                    TextButton(
+                                        onPressed: () =>
+                                            Navigator.pop(context, false),
+                                        child: const Text('返回')),
+                                    FilledButton(
+                                        onPressed: () =>
+                                            Navigator.pop(context, true),
+                                        child: const Text('确认取消'))
+                                  ]));
+                      if (yes != true) return;
+                      try {
+                        await widget.api.cancelTaskSuite(job.id);
+                        if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text('已请求取消未执行项')));
+                        }
+                      } catch (e) {
+                        if (mounted) {
+                          ScaffoldMessenger.of(context)
+                              .showSnackBar(SnackBar(content: Text('$e')));
+                        }
+                      }
+                    }),
+            ],
             if (job.promptIds.isNotEmpty) ...[
               const SizedBox(height: 10),
               Wrap(
                 spacing: 8,
                 runSpacing: 8,
                 children: job.promptIds.map((promptId) {
-                  if (!promptId.startsWith('kp-')) {
-                    return Chip(
-                      avatar: const Icon(Icons.tag, size: 16),
-                      label: SelectableText(promptId),
-                    );
-                  }
                   final liked = job.likedPromptIds.contains(promptId);
-                  final busy = _liking.contains('${job.id}:$promptId');
-                  return FilledButton.tonalIcon(
-                    onPressed:
-                        liked || busy ? null : () => _like(job, promptId),
-                    icon: busy
-                        ? const SizedBox.square(
-                            dimension: 16,
-                            child: CircularProgressIndicator(strokeWidth: 2))
-                        : Icon(
-                            liked ? Icons.thumb_up : Icons.thumb_up_outlined),
-                    label:
-                        Text(liked ? '已收藏到 P · $promptId' : '点赞收藏 · $promptId'),
-                  );
+                  return Chip(
+                      label:
+                          SelectableText(liked ? '$promptId · 已收藏' : promptId));
                 }).toList(),
               ),
             ],
@@ -446,36 +481,118 @@ class _LiteJobHistoryPageState extends State<LiteJobHistoryPage> {
                 runSpacing: 10,
                 children: job.images
                     .map(
-                      (image) => InkWell(
-                        onTap: () => _previewImage(image),
-                        borderRadius: BorderRadius.circular(10),
-                        child: ClipRRect(
+                      (image) =>
+                          Column(mainAxisSize: MainAxisSize.min, children: [
+                        if (image.taskSuiteIndex > 0)
+                          Text('套组第 ${image.taskSuiteIndex} 项'),
+                        InkWell(
+                          onTap: () => _previewImage(image),
                           borderRadius: BorderRadius.circular(10),
-                          child: Image.network(
-                            widget.api.resolveUrl(image.downloadUrl),
-                            headers: widget.api.authorizationHeaders,
-                            width: 180,
-                            height: 180,
-                            fit: BoxFit.cover,
-                            errorBuilder: (_, __, ___) => Container(
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(10),
+                            child: Image.network(
+                              widget.api.resolveUrl(image.downloadUrl),
+                              headers: widget.api.authorizationHeaders,
                               width: 180,
                               height: 180,
-                              color: Theme.of(context)
-                                  .colorScheme
-                                  .surfaceContainerHighest,
-                              alignment: Alignment.center,
-                              child: const Icon(Icons.broken_image_outlined),
+                              fit: BoxFit.cover,
+                              errorBuilder: (_, __, ___) => Container(
+                                width: 180,
+                                height: 180,
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .surfaceContainerHighest,
+                                alignment: Alignment.center,
+                                child: const CourtyardIcon(
+                                    Icons.broken_image_outlined),
+                              ),
                             ),
                           ),
                         ),
-                      ),
+                        Row(mainAxisSize: MainAxisSize.min, children: [
+                          IconButton(
+                              icon: const CourtyardIcon(Icons.refresh),
+                              tooltip: '重跑一张',
+                              onPressed: () async {
+                                Map<String, dynamic> options = {};
+                                if (showRemakeOptions.value) {
+                                  final selected = await showDialog<
+                                          Map<String, dynamic>>(
+                                      context: context,
+                                      builder: (context) =>
+                                          RemakeOptionsDialog(api: widget.api));
+                                  if (selected == null) return;
+                                  options = selected;
+                                }
+                                try {
+                                  await widget.api.remakeImage(job.id, image.id,
+                                      options: options);
+                                  if (mounted) _refresh();
+                                } catch (error) {
+                                  if (mounted) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                        SnackBar(content: Text('$error')));
+                                  }
+                                }
+                              }),
+                          if (image.promptId.isNotEmpty)
+                            Text('词库编号：${image.promptId}'),
+                          if (image.promptId.isNotEmpty ||
+                              job.promptIds.length == 1)
+                            IconButton(
+                                tooltip: '点赞 / 取消收藏',
+                                icon: CourtyardIcon(job.likedPromptIds.contains(
+                                        image.promptId.isNotEmpty
+                                            ? image.promptId
+                                            : job.promptIds.first)
+                                    ? Icons.thumb_up
+                                    : Icons.thumb_up_outlined),
+                                onPressed: () => _like(
+                                    job,
+                                    image.promptId.isNotEmpty
+                                        ? image.promptId
+                                        : job.promptIds.first)),
+                          IconButton(
+                              tooltip: '举报图片',
+                              icon: const CourtyardIcon(
+                                  Icons.warning_amber_rounded),
+                              onPressed: () async {
+                                final yes = await showDialog<bool>(
+                                    context: context,
+                                    builder: (context) => AlertDialog(
+                                            title: const Text('举报这张图？'),
+                                            content: const Text(
+                                                '图片和关联提示词将发给管理员审核，不会自动删除词条。'),
+                                            actions: [
+                                              TextButton(
+                                                  onPressed: () =>
+                                                      Navigator.pop(
+                                                          context, false),
+                                                  child: const Text('取消')),
+                                              FilledButton(
+                                                  onPressed: () =>
+                                                      Navigator.pop(
+                                                          context, true),
+                                                  child: const Text('举报'))
+                                            ]));
+                                if (yes != true) return;
+                                try {
+                                  await widget.api
+                                      .reportImage(job.id, image.id);
+                                  _notice('举报已提交');
+                                } catch (error) {
+                                  _notice('$error', error: true);
+                                }
+                              }),
+                        ])
+                      ]),
                     )
                     .toList(),
               ),
               const SizedBox(height: 12),
               FilledButton.tonalIcon(
                 onPressed: _downloading ? null : () => _download(job),
-                icon: const Icon(Icons.download),
+                icon: const CourtyardIcon(Icons.download),
                 label: Text('下载 ${job.images.length} 张图片'),
               ),
             ],
@@ -516,7 +633,7 @@ class _LiteJobHistoryPageState extends State<LiteJobHistoryPage> {
               child: IconButton.filled(
                 tooltip: '关闭',
                 onPressed: () => Navigator.pop(context),
-                icon: const Icon(Icons.close),
+                icon: const CourtyardIcon(Icons.close),
               ),
             ),
           ],

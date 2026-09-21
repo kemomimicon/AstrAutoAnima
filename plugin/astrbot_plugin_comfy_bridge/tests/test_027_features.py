@@ -123,19 +123,7 @@ class DynamicLoraTests(unittest.TestCase):
 
 class FiveDrawTests(unittest.TestCase):
     def test_selects_five_distinct_records(self) -> None:
-        pool = {
-            "prompts": [
-                {
-                    "id": f"sample-{index}",
-                    "prompt": f"harmless sample {index}",
-                    "enabled": True,
-                    "source_code": "D",
-                    "safety_code": "N",
-                    "safety_level": "normal",
-                }
-                for index in range(6)
-            ]
-        }
+        pool = {"prompts": [{"id": f"sample-{i}", "prompt": f"tree {i}", "source_code": "D", "safety_code": "N", "enabled": True} for i in range(8)]}
         items, _, _ = select_random_prompts(
             pool, 5, source_codes=["D"], safety_codes=["N"]
         )

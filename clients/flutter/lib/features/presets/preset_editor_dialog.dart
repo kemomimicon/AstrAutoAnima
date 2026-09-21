@@ -1,20 +1,29 @@
 import 'package:flutter/material.dart';
 
 import '../../core/models.dart';
+import '../../core/hub_api.dart';
+import 'palette_dialog.dart';
+import 'character_variants_editor.dart';
 
 Future<Map<String, dynamic>?> showPresetEditor(
   BuildContext context, {
   required String kind,
   PresetSummary? initial,
+  HubApi? api,
+  Future<void> Function(Map<String, dynamic>)? onSave,
 }) {
   return showDialog<Map<String, dynamic>>(
     context: context,
-    builder: (context) => _PresetEditorDialog(kind: kind, initial: initial),
+    builder: (context) => _PresetEditorDialog(
+        kind: kind, initial: initial, api: api, onSave: onSave),
   );
 }
 
 class _PresetEditorDialog extends StatefulWidget {
-  const _PresetEditorDialog({required this.kind, this.initial});
+  const _PresetEditorDialog(
+      {required this.kind, this.initial, this.api, this.onSave});
+  final Future<void> Function(Map<String, dynamic>)? onSave;
+  final HubApi? api;
 
   final String kind;
   final PresetSummary? initial;
@@ -41,8 +50,94 @@ class _PresetEditorDialogState extends State<_PresetEditorDialog> {
         '',
   );
   String? _parseError;
+  bool _saving = false;
+  late List<Map<String, dynamic>> _variants = widget.initial?.variants
+          .map((e) => Map<String, dynamic>.from(e))
+          .toList() ??
+      [];
 
   bool get _isStyle => widget.kind == 'style';
+
+  Future<void> _selectLora() async {
+    try {
+      final catalog = await widget.api!.getLoraCatalog();
+      if (!mounted) return;
+      final candidates = catalog.items
+          .where((item) =>
+              item.present &&
+              item.enabled &&
+              item.category == (_isStyle ? 'style' : 'character'))
+          .toList()
+        ..sort((a, b) {
+          final category = _isStyle ? 'style' : 'character';
+          final order = (a.category == category ? 0 : 1)
+              .compareTo(b.category == category ? 0 : 1);
+          return order != 0 ? order : a.displayName.compareTo(b.displayName);
+        });
+      String query = '';
+      final picked = await showDialog<LoraCatalogItem>(
+          context: context,
+          builder: (context) => StatefulBuilder(
+                builder: (context, update) => AlertDialog(
+                  title: Text(_isStyle ? '从 LoRA 库添加画风' : '从 LoRA 库选择角色'),
+                  content: SizedBox(
+                      width: 620,
+                      height: 420,
+                      child: Column(children: [
+                        TextField(
+                            decoration:
+                                const InputDecoration(labelText: '搜索显示名或文件路径'),
+                            onChanged: (value) => update(
+                                () => query = value.trim().toLowerCase())),
+                        Expanded(
+                            child: ListView(children: [
+                          for (final item in candidates.where((item) =>
+                              '${item.displayName} ${item.path}'
+                                  .toLowerCase()
+                                  .contains(query)))
+                            ListTile(
+                                title: Text(item.displayName),
+                                subtitle:
+                                    Text('${item.category} · ${item.path}'),
+                                onTap: () => Navigator.pop(context, item)),
+                          if (candidates.isEmpty)
+                            const Text('没有可用 LoRA，请先扫描并检查文件。'),
+                        ])),
+                      ])),
+                  actions: [
+                    TextButton(
+                        onPressed: () => Navigator.pop(context),
+                        child: const Text('取消'))
+                  ],
+                ),
+              ));
+      if (picked == null || !mounted) return;
+      setState(() {
+        final line = '${picked.path}|1.0|1.0';
+        if (_isStyle) {
+          final loras = _loras.text.trim().isEmpty
+              ? <Map<String, dynamic>>[]
+              : _parseLoras();
+          if (!loras.any((item) => item['name'] == picked.path)) {
+            _loras.text = [_loras.text.trim(), line]
+                .where((s) => s.isNotEmpty)
+                .join('\n');
+          }
+        } else {
+          _loras.text = line;
+        }
+        if (_name.text.trim().isEmpty) _name.text = picked.displayName;
+        final tags = [
+          ..._prompt.text.split(','),
+          ...picked.recommendedPrompt.split(',')
+        ].map((s) => s.trim()).where((s) => s.isNotEmpty).toSet();
+        _prompt.text = tags.join(', ');
+        _parseError = null;
+      });
+    } catch (error) {
+      if (mounted) setState(() => _parseError = '读取 LoRA 库失败：$error');
+    }
+  }
 
   @override
   void dispose() {
@@ -94,11 +189,15 @@ class _PresetEditorDialogState extends State<_PresetEditorDialog> {
     return result;
   }
 
-  void _submit() {
+  Future<void> _submit() async {
+    if (_saving) return;
     if (!_formKey.currentState!.validate()) return;
     try {
       final loras = _parseLoras();
-      Navigator.pop(context, {
+      if (!_isStyle && _variants.isNotEmpty && loras.isEmpty) {
+        throw const FormatException('新增造型需要指定角色 LoRA');
+      }
+      final value = <String, dynamic>{
         'name': _name.text.trim(),
         'prompt': _prompt.text.trim(),
         'match': _isStyle
@@ -109,9 +208,18 @@ class _PresetEditorDialogState extends State<_PresetEditorDialog> {
                 .toList()
             : <String>[],
         'loras': loras,
+        if (!_isStyle) 'variants': _variants,
+      };
+      setState(() {
+        _saving = true;
+        _parseError = null;
       });
-    } on FormatException catch (error) {
-      setState(() => _parseError = error.message);
+      if (widget.onSave != null) await widget.onSave!(value);
+      if (mounted) Navigator.pop(context, value);
+    } catch (error) {
+      if (mounted) setState(() => _parseError = '保存未确认：$error。内容已保留，请核实后再操作。');
+    } finally {
+      if (mounted) setState(() => _saving = false);
     }
   }
 
@@ -147,9 +255,23 @@ class _PresetEditorDialogState extends State<_PresetEditorDialog> {
                     controller: _match,
                     decoration: const InputDecoration(
                       labelText: '自动匹配触发词',
-                      hintText: '@soft_style | soft_style',
+                      hintText: '@shiratama | shiratama',
+                      helperText: '正向提示词包含任一词时匹配画风（需开启插件自动匹配）；多个词以 | 分隔。',
+                      helperMaxLines: 3,
                     ),
                   ),
+                  TextButton(
+                      onPressed: () => setState(() {
+                            _match.text = {
+                              ..._match.text.split(RegExp(r'[|｜\n]')),
+                              ..._prompt.text.split(',')
+                            }
+                                .map((s) => s.trim())
+                                .where((s) => s.isNotEmpty)
+                                .toSet()
+                                .join(' | ');
+                          }),
+                      child: const Text('将固定提示词填入匹配词（可再编辑）')),
                 ],
                 const SizedBox(height: 12),
                 TextFormField(
@@ -161,6 +283,17 @@ class _PresetEditorDialogState extends State<_PresetEditorDialog> {
                     hintText: 'anima_lora/name/model.safetensors|0.8|0.8',
                   ),
                 ),
+                if (widget.api != null)
+                  TextButton.icon(
+                      onPressed: _selectLora,
+                      icon: const Icon(Icons.library_add),
+                      label: const Text('从 LoRA 库选择（自动填写路径）')),
+                if (!_isStyle)
+                  CharacterVariantsEditor(
+                    items: _variants,
+                    defaultPrompt: _prompt.text,
+                    onChanged: (items) => setState(() => _variants = items),
+                  ),
                 if (_parseError != null) ...[
                   const SizedBox(height: 10),
                   Align(
@@ -178,9 +311,42 @@ class _PresetEditorDialogState extends State<_PresetEditorDialog> {
         ),
       ),
       actions: [
+        if (_isStyle && widget.api != null)
+          TextButton(
+              onPressed: () async {
+                try {
+                  final loras = _parseLoras();
+                  if (loras.isEmpty) throw const FormatException('请先添加LoRA');
+                  final result = await showPalette(context, widget.api!, {
+                    'name': _name.text.trim(),
+                    'prompt': _prompt.text.trim(),
+                    'loras': loras
+                        .map((e) => {
+                              'path': e['name'],
+                              'strength': e['strength_model'],
+                              'strength_clip': e['strength_clip']
+                            })
+                        .toList()
+                  });
+                  if (result != null && mounted) {
+                    setState(() {
+                      _loras.text = (result['loras'] as List)
+                          .map((e) =>
+                              '${e['path']}|${e['strength']}|${e['strength_clip'] ?? e['strength']}')
+                          .join('\n');
+                    });
+                  }
+                } on FormatException catch (error) {
+                  if (mounted) setState(() => _parseError = error.message);
+                }
+              },
+              child: const Text('调配（试跑后保存为全服预设）')),
         TextButton(
-            onPressed: () => Navigator.pop(context), child: const Text('取消')),
-        FilledButton(onPressed: _submit, child: const Text('保存')),
+            onPressed: _saving ? null : () => Navigator.pop(context),
+            child: const Text('取消')),
+        FilledButton(
+            onPressed: _saving ? null : _submit,
+            child: Text(_saving ? '正在保存并核对…' : '保存')),
       ],
     );
   }

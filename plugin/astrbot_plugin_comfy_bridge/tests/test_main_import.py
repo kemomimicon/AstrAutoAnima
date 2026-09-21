@@ -192,7 +192,7 @@ class PendingImageTests(unittest.IsolatedAsyncioTestCase):
             )
             event = FakeEvent()
             await plugin._begin_pending_image(
-                event, {"style": "example_style"}, "extra tags"
+                event, {"style": "staryfs"}, "extra tags"
             )
             self.assertEqual(len(plugin._pending_images), 1)
             plugin._image_resolver = FakeImageResolver()
@@ -214,7 +214,7 @@ class PendingImageTests(unittest.IsolatedAsyncioTestCase):
                 [
                     (
                         "/tmp/input.png",
-                        {"style": "example_style"},
+                        {"style": "staryfs"},
                         "extra tags",
                         "full",
                         (),
@@ -234,20 +234,20 @@ class PendingImageTests(unittest.IsolatedAsyncioTestCase):
                 },
             )
             extra, options, preset, categories, reverse_only = plugin._parse_reverse_body(
-                "模式=场景 角色=example_character 画风=example_style rainy night"
+                "模式=场景 角色=6ctmika 画风=staryfs rainy night"
             )
             self.assertEqual(preset, "scene")
-            self.assertEqual(options["character"], "example_character")
-            self.assertEqual(options["style"], "example_style")
+            self.assertEqual(options["character"], "6ctmika")
+            self.assertEqual(options["style"], "staryfs")
             self.assertEqual(extra, "rainy night")
             self.assertEqual(categories, ())
             self.assertFalse(reverse_only)
 
             extra, options, preset, categories, reverse_only = plugin._parse_reverse_body(
-                "角色=example_character 模式=完整"
+                "角色=6ctmika 模式=完整"
             )
             self.assertEqual(options["style"], "当前画风")
-            self.assertEqual(options["character"], "example_character")
+            self.assertEqual(options["character"], "6ctmika")
 
 
 class AgentToolTests(unittest.IsolatedAsyncioTestCase):

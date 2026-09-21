@@ -31,13 +31,11 @@ def ensure_kp_pool(settings: Settings) -> Path:
 
 
 def _kp_entry(path: Path, prompt_id: str) -> dict[str, Any]:
-    if not prompt_id.startswith("kp-"):
-        raise RepositoryError("only K prompt records can be liked")
     data = read_json_object(path)
     for item in data.get("prompts", []):
         if isinstance(item, dict) and str(item.get("id", "")) == prompt_id:
             return item
-    raise RepositoryError(f"K prompt not found: {prompt_id}")
+    raise RepositoryError(f"prompt not found: {prompt_id}")
 
 
 def _saved_id(principal: AuthPrincipal, prompt_id: str) -> str:
@@ -53,7 +51,11 @@ def promote_k_prompt(
 ) -> PromptLikeResponse:
     if principal.role == "legacy_lite":
         raise RepositoryError("共享用户令牌无法保存点赞，请使用绑定 QQ 的个人令牌")
-    source = _kp_entry(ensure_kp_pool(settings), prompt_id)
+    source = _kp_entry(ensure_kp_pool(settings) if prompt_id.startswith("kp-") else settings.prompt_pool_path, prompt_id)
+    if not source.get("enabled", True):
+        raise RepositoryError("已停用的条目不能新增收藏")
+    if source.get("liked_by") and source["liked_by"] != principal.subject:
+        raise RepositoryError("无权收藏其他用户的个人条目")
     saved_id = _saved_id(principal, prompt_id)
     already_liked = False
 
@@ -79,7 +81,6 @@ def promote_k_prompt(
                     dict.fromkeys(
                         [
                             "liked",
-                            "kprompt",
                             *[str(value) for value in source.get("categories", [])],
                         ]
                     )
@@ -117,3 +118,15 @@ def promote_k_prompt(
                 raise
             already_liked = False
     raise RepositoryError("cannot save liked prompt")
+
+
+def remove_prompt_favorite(settings: Settings, prompt_id: str, principal: AuthPrincipal):
+    def apply(data):
+        data["prompts"] = [row for row in data.get("prompts", [])
+            if not (isinstance(row, dict) and row.get("liked_by") == principal.subject
+                    and (row.get("id") == prompt_id or row.get("liked_from") == prompt_id))]
+    mutate_json(path=settings.prompt_pool_path, resource="prompts",
+        expected_revision=file_revision(settings.prompt_pool_path, "prompts").revision,
+        backup_root=settings.backup_dir, audit_path=settings.audit_log_path,
+        actor=f"{principal.role}:{principal.subject}", action="unfavorite", target=prompt_id, mutate=apply)
+    return {"removed": True}

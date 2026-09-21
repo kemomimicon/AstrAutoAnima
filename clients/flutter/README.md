@@ -1,6 +1,6 @@
-# AstrAutoAnima Hub Client 0.4.0
+# AstrAutoAnima Hub Client 0.5.0-beta.1
 
-`0.4.0` 正式版整合了此前 0.3.17 开发线的 Web/Windows/Android 功能，并移除公开构建中的
+`0.5.0-beta.1` 公开测试版整合了此前 0.3.17 开发线的 Web/Windows/Android 功能，并移除公开构建中的
 私人启动图素材。历史版本记录保留在下文。
 
 Web/Windows/Android 管理与用户子客户端。

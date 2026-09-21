@@ -21,6 +21,15 @@ from astr_auto_anima_hub.schemas import (
 
 
 class ApiTests(unittest.TestCase):
+    def test_recovery_requires_admin_and_confirmation(self):
+        with patch('astr_auto_anima_hub.service_recovery.submit', return_value={'state': 'submitted'}) as submit:
+            for headers in ({}, self.user_headers, self.lite_headers):
+                self.assertIn(self.client.post('/api/v1/admin/services/restart?confirmed=true', headers=headers).status_code, (401, 403))
+            self.assertEqual(self.client.post('/api/v1/admin/services/restart', headers=self.headers).status_code, 422)
+            submit.assert_not_called()
+            self.assertEqual(self.client.post('/api/v1/admin/services/restart?confirmed=true', headers=self.headers).status_code, 200)
+            submit.assert_called_once()
+
     def setUp(self) -> None:
         self.temp = tempfile.TemporaryDirectory()
         root = Path(self.temp.name)
@@ -137,6 +146,39 @@ class ApiTests(unittest.TestCase):
         response = self.client.get("/api/v1/health")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["status"], "ok")
+
+    def test_image_storage_is_admin_only(self):
+        self.assertEqual(self.client.get('/api/v1/admin/storage', headers=self.lite_headers).status_code, 401)
+        data = self.client.get('/api/v1/admin/storage', headers=self.headers).json()
+        self.assertTrue(next(x for x in data['areas'] if x['id'] == 'random_style')['path'].endswith('AAA-RandomStyle'))
+        response = self.client.post('/api/v1/admin/storage/config', headers=self.headers, json={'grouping': 'character'})
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue((self.settings.plugin_data_dir / 'image_storage.json').exists())
+        invalid = self.client.post('/api/v1/admin/storage/config', headers=self.headers, json={'watermark_folder': '../models'})
+        self.assertEqual(invalid.status_code, 422)
+
+    def test_signature_upload_requires_transparency(self):
+        import base64
+        import io
+        from PIL import Image
+        stream = io.BytesIO()
+        Image.new('RGBA', (10, 10), (1, 2, 3, 120)).save(stream, format='PNG')
+        response = self.client.post('/api/v1/admin/storage/signature', headers=self.headers, json={'data': base64.b64encode(stream.getvalue()).decode()})
+        self.assertEqual(response.status_code, 200)
+        response = self.client.post('/api/v1/admin/storage/config', headers=self.headers, json={'watermark': True})
+        self.assertEqual(response.status_code, 200)
+
+    def test_sensitive_admin_endpoints(self):
+        for path, method in [("/api/v1/admin/civitai/downloads", "get"), ("/api/v1/admin/napcat/accounts", "post")]:
+            for headers in ({}, self.lite_headers, self.user_headers):
+                kwargs = {"headers": headers}
+                if method == "post":
+                    kwargs["json"] = {}
+                self.assertEqual(getattr(self.client, method)(path, **kwargs).status_code, 401)
+
+    def test_remake_requires_existing_owned_image(self):
+        response = self.client.post("/api/v1/lite/jobs/missing/images/missing/remake", json={}, headers=self.user_headers)
+        self.assertEqual(response.status_code, 422)
 
     def test_serves_web_app_without_shadowing_api(self) -> None:
         web_root = Path(self.temp.name) / "web"
@@ -541,6 +583,65 @@ class ApiTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["count"], 2)
+
+    def test_character_variants_preserved_for_legacy_updates(self) -> None:
+        self.settings.lora_root.mkdir(parents=True, exist_ok=True)
+        (self.settings.lora_root / "a.safetensors").write_bytes(b"test fixture")
+        def current():
+            return self.client.get("/api/v1/presets", headers=self.headers).json()
+        payload = {"name": "A", "prompt": "identity, uniform", "loras": [{"name": "a.safetensors"}],
+                   "variants": [{"id": "hanfu", "category": "clothing", "name": "汉服", "prompt": "identity, hanfu"}]}
+        response = self.client.post("/api/v1/presets/character", headers=self.revision_headers(current()["revision"]), json=payload)
+        self.assertEqual(response.status_code, 200, response.text)
+        del payload["variants"]
+        payload["prompt"] = "identity, new default"
+        response = self.client.put("/api/v1/presets/character/A", headers=self.revision_headers(current()["revision"]), json=payload)
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(current()["characters"][0]["variants"][0]["id"], "hanfu")
+        payload["variants"] = []
+        response = self.client.put("/api/v1/presets/character/A", headers=self.revision_headers(current()["revision"]), json=payload)
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(current()["characters"][0]["variants"], [])
+
+    def test_character_missing_lora_rejected_before_save(self):
+        revision = self.client.get('/api/v1/presets', headers=self.headers).json()['revision']
+        response = self.client.post('/api/v1/presets/character', headers=self.revision_headers(revision),
+                                    json={'name': 'Missing', 'loras': [{'name': 'missing.safetensors'}]})
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(self.client.get('/api/v1/presets', headers=self.headers).json()['revision'], revision)
+
+    def test_visual_catalog_available_and_authenticated(self):
+        self.assertIn(self.client.get('/api/v1/visual-presets').status_code, (401, 403))
+        self.assertFalse(self.client.get('/api/v1/visual-presets', headers=self.user_headers).json()['available'])
+        directory = self.settings.plugin_dir / 'data'
+        directory.mkdir(exist_ok=True)
+        source = Path(__file__).resolve().parents[3] / 'plugin/astrbot_plugin_comfy_bridge/data/aaa_anima_lighting_material_presets_v1.json'
+        (directory / source.name).write_bytes(source.read_bytes())
+        response = self.client.get('/api/v1/visual-presets', headers=self.user_headers)
+        self.assertTrue(response.json()['available'])
+        self.assertTrue(response.json()['lighting'])
+
+    def test_gallery_permissions_and_empty_prompts(self) -> None:
+        self.assertIn(self.client.get('/api/v1/gallery').status_code, (401, 403))
+        response = self.client.get('/api/v1/gallery', headers=self.user_headers)
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn('prompts', response.json()['config'])
+        data = self.client.get('/api/v1/gallery', headers=self.headers).json()
+        from astr_auto_anima_hub.gallery_defaults import PROMPTS
+        self.assertEqual(data['config']['prompts'], PROMPTS)
+        body = {'revision': data['revision'], 'config': data['config']}
+        self.assertIn(self.client.post('/api/v1/admin/gallery/config', headers=self.user_headers, json=body).status_code, (401, 403))
+        self.assertEqual(self.client.post('/api/v1/admin/gallery/config', headers=self.headers, json=body).status_code, 200)
+        self.assertEqual(self.client.post('/api/v1/admin/gallery/generate', headers=self.headers, json={'revision': data['revision']}).status_code, 422)
+        self.assertEqual(self.client.get('/api/v1/gallery/images/' + 'a'*32, headers=self.user_headers).status_code, 404)
+
+    def test_admin_can_add_prompt_only_character(self) -> None:
+        revision = self.client.get("/api/v1/presets", headers=self.headers).json()["revision"]
+        response = self.client.post("/api/v1/presets/character", headers=self.revision_headers(revision),
+                                    json={"name": "测试角色", "prompt": "example_character", "match": [], "loras": []})
+        self.assertEqual(response.status_code, 200, response.text)
+        data = self.client.get("/api/v1/presets", headers=self.headers).json()
+        self.assertIn("测试角色", [item["name"] for item in data["characters"]])
 
     def test_preset_create_rename_and_delete(self) -> None:
         revision = self.client.get(

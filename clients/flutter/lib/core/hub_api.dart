@@ -1,5 +1,5 @@
 import 'dart:convert';
-import 'dart:typed_data';
+import 'package:flutter/foundation.dart';
 
 import 'package:http/http.dart' as http;
 
@@ -16,11 +16,85 @@ class HubApiException implements Exception {
 }
 
 class HubApi {
+  final ValueNotifier<int> catalogChanges = ValueNotifier(0);
   HubApi({required String baseUrl, required this.token})
       : baseUrl = baseUrl.replaceAll(RegExp(r'/+$'), '');
 
   final String baseUrl;
   final String token;
+  Future<Map<String, dynamic>> imageStorage() => _get('/api/v1/admin/storage');
+  Future<Map<String, dynamic>> storageAction(
+          String action, Map<String, dynamic> value) =>
+      _post('/api/v1/admin/storage/$action', body: value);
+  Future<Map<String, dynamic>> gallery() => _get('/api/v1/gallery');
+  Future<Map<String, dynamic>> saveGallery(Map<String, dynamic> value) =>
+      _post('/api/v1/admin/gallery/config', body: value);
+  Future<Map<String, dynamic>> generateGallery(
+          String revision, List<String> styles,
+          {int? slotIndex}) =>
+      _post('/api/v1/admin/gallery/generate', body: {
+        'revision': revision,
+        'styles': styles,
+        if (slotIndex != null) 'slot_index': slotIndex
+      });
+  Future<Uint8List> galleryImage(String id) async {
+    final response = await http
+        .get(Uri.parse('$baseUrl/api/v1/gallery/images/$id'), headers: _headers)
+        .timeout(const Duration(seconds: 30));
+    if (response.statusCode != 200) throw const HubApiException('预览不可用或审核未通过');
+    return response.bodyBytes;
+  }
+
+  Future<Map<String, dynamic>> favoritePrompt(String id) =>
+      _post('/api/v1/lite/prompt-favorites/${Uri.encodeComponent(id)}',
+          body: {});
+  Future<Map<String, dynamic>> unfavoritePrompt(String id) => _write(
+      'DELETE', '/api/v1/lite/prompt-favorites/${Uri.encodeComponent(id)}',
+      revision: '*');
+  Future<Map<String, dynamic>> reportImage(String job, String image) =>
+      _post('/api/v1/lite/jobs/$job/images/$image/report', body: {});
+  Future<Map<String, dynamic>> promptReports() =>
+      _get('/api/v1/admin/prompt-reports');
+  Future<Map<String, dynamic>> resolvePromptReport(String id, String action) =>
+      _post('/api/v1/admin/prompt-reports/$id/$action?confirmed=true',
+          body: {});
+  Future<Map<String, dynamic>> resumeCivitai(String id) =>
+      _post('/api/v1/admin/civitai/downloads/$id/resume', body: {});
+  Future<Map<String, dynamic>> napcatAccounts(String code) =>
+      _post('/api/v1/admin/napcat/accounts', body: {'totp_code': code});
+  Future<Map<String, dynamic>> napcatStatus() =>
+      _get('/api/v1/admin/napcat/status');
+  Future<Map<String, dynamic>> napcatQr(String code) =>
+      _post('/api/v1/admin/napcat/qrcode', body: {'totp_code': code});
+  Future<Map<String, dynamic>> serviceRecovery() =>
+      _get('/api/v1/admin/services/recovery');
+  Future<Map<String, dynamic>> restartServices() =>
+      _post('/api/v1/admin/services/restart?confirmed=true', body: {});
+  Future<Map<String, dynamic>> napcatLogin(String uin, String code) =>
+      _post('/api/v1/admin/napcat/login',
+          body: {'uin': uin, 'totp_code': code});
+
+  Future<Map<String, dynamic>> previewCivitai(int versionId) =>
+      _get('/api/v1/admin/civitai/versions/$versionId');
+  Future<Map<String, dynamic>> civitaiVersions(int modelId) =>
+      _get('/api/v1/admin/civitai/models/$modelId');
+  Future<Map<String, dynamic>> civitaiDownloads() =>
+      _get('/api/v1/admin/civitai/downloads');
+  Future<Map<String, dynamic>> downloadCivitai(
+          int versionId, int fileId, String sha256,
+          {String directory = 'anima_lora',
+          bool createDirectory = false,
+          List<String>? words}) =>
+      _post('/api/v1/admin/civitai/downloads', body: {
+        'version_id': versionId,
+        'file_id': fileId,
+        'expected_sha256': sha256,
+        'subdirectory': directory,
+        'create_directory': createDirectory,
+        if (words != null) 'trained_words': words,
+      });
+  Future<Map<String, dynamic>> cancelCivitai(String id) =>
+      _post('/api/v1/admin/civitai/downloads/$id/cancel', body: {});
 
   Map<String, String> get authorizationHeaders => Map.unmodifiable(_headers);
 
@@ -109,6 +183,11 @@ class HubApi {
         message ?? '请求失败（HTTP ${response.statusCode}）',
         statusCode: response.statusCode,
       );
+    }
+    if (path.contains('/presets') ||
+        path.contains('/personal-styles') ||
+        path.contains('/character-favorites')) {
+      catalogChanges.value++;
     }
     return Map<String, dynamic>.from(payload as Map);
   }
@@ -411,6 +490,12 @@ class HubApi {
     );
   }
 
+  Future<RemoteJobResult> remakeImage(String jobId, String imageId,
+          {Map<String, dynamic> options = const {}}) async =>
+      RemoteJobResult.fromJson(await _post(
+          '/api/v1/lite/jobs/$jobId/images/$imageId/remake',
+          body: options));
+
   Future<RemoteJobPageResult> getRemoteJobs({
     String kind = '',
     String status = '',
@@ -446,6 +531,9 @@ class HubApi {
     return LoraCatalogResult.fromJson(await _get('/api/v1/admin/loras'));
   }
 
+  Future<Map<String, dynamic>> getVisualPresets() =>
+      _get('/api/v1/visual-presets');
+
   Future<LoraCatalogResult> getStyleLoras() async {
     return LoraCatalogResult.fromJson(await _get('/api/v1/lite/style-loras'));
   }
@@ -471,6 +559,18 @@ class HubApi {
       await _get('/api/v1/lite/personal-styles'),
     );
   }
+
+  Future<Map<String, dynamic>> getTaskSuites() =>
+      _get('/api/v1/lite/task-suites');
+  Future<Map<String, dynamic>> cancelTaskSuite(String id) =>
+      _write('POST', '/api/v1/lite/jobs/$id/cancel-suite', revision: '');
+  Future<Map<String, dynamic>> saveTaskSuite(
+          Map<String, dynamic> value, String revision, {String? id}) =>
+      _write(id == null ? 'POST' : 'PUT',
+          '/api/v1/lite/task-suites${id == null ? '' : '/$id'}',
+          revision: revision, body: value);
+  Future<Map<String, dynamic>> deleteTaskSuite(String id, String revision) =>
+      _write('DELETE', '/api/v1/lite/task-suites/$id', revision: revision);
 
   Future<PersonalStyleListResult> savePersonalStyle({
     required int slot,

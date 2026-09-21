@@ -10,6 +10,7 @@ from typing import Any
 
 
 REPLACEMENTS = {
+    "seedvr2_ema_3b_fp16.safetensors": "YOUR_SEEDVR2_MODEL.safetensors",
     "anima_baseV10.safetensors": "YOUR_ANIMA_UNET.safetensors",
     "anima-base-v1.0.safetensors": "YOUR_ANIMA_UNET.safetensors",
     "qwen_3_06b_base.safetensors": "YOUR_ANIMA_CLIP.safetensors",

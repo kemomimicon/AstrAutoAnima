@@ -154,7 +154,7 @@ void main() {
     final issued = LiteUserIssueResult.fromJson({
       'action': 'created',
       'revision': 'rev-2',
-      'token': 'aah_u_example_one_time_token_1234567890',
+      'token': 'aah_u_example',
       'user': {
         'id': 'qq-123456789',
         'qq': '123456789',
@@ -222,8 +222,8 @@ void main() {
     expect(
       buildImageCommand(
         kind: ImageCommandKind.direct,
-        character: 'example_character',
-        style: 'example_style',
+        character: '6ctmika',
+        style: 'staryfs',
         ratio: '2:3',
         sampler: '2m',
         scheduler: 'karras',
@@ -231,16 +231,16 @@ void main() {
         cfg: 5.5,
         prompt: 'rainy street',
       ),
-      '/aimg 角色=example_character 角色模式=弱 画风=example_style 比例=2:3 采样器=2m 调度器=karras 步数=36 CFG=5.5 rainy street',
+      '/aimg 角色=6ctmika 角色模式=弱 画风=staryfs 比例=2:3 采样器=2m 调度器=karras 步数=36 CFG=5.5 rainy street',
     );
     expect(
       buildImageCommand(
         kind: ImageCommandKind.random,
         fiveDraw: true,
         poolFilter: 'C/H',
-        style: 'soft_style',
+        style: 'shiratama',
       ),
-      '来张好图五连抽 C/H 画风=soft_style',
+      '来张好图五连抽 C/H 画风=shiratama',
     );
   });
 
@@ -265,21 +265,21 @@ void main() {
     expect(
       buildImageCommand(
         kind: ImageCommandKind.chinese,
-        character: 'example_character',
-        style: 'example_style',
+        character: '6ctmika',
+        style: 'staryfs',
         prompt: '雨夜里撑伞',
       ),
-      '/aicn 角色=example_character 角色模式=弱 画风=example_style 雨夜里撑伞',
+      '/aicn 角色=6ctmika 角色模式=弱 画风=staryfs 雨夜里撑伞',
     );
     expect(
       buildImageCommand(
         kind: ImageCommandKind.reverse,
         reversePreset: 'scene',
-        character: 'second_character',
-        style: 'soft_style',
+        character: 'edlf_itsuwari',
+        style: 'shiratama',
         prompt: 'transparent umbrella',
       ),
-      '/aip 模式=scene 角色=second_character 角色模式=弱 画风=soft_style transparent umbrella',
+      '/aip 模式=scene 角色=edlf_itsuwari 角色模式=弱 画风=shiratama transparent umbrella',
     );
     expect(
       buildImageCommand(
@@ -296,8 +296,8 @@ void main() {
       buildImageCommand(
         kind: ImageCommandKind.hq,
         profile: 'beauty',
-        character: 'example_character',
-        style: 'example_style',
+        character: '6ctmika',
+        style: 'staryfs',
         ratio: '2:3',
         sampler: '2m_sde_gpu',
         steps: 38,
@@ -306,7 +306,7 @@ void main() {
         denoise: 0.3,
         prompt: 'rainy street',
       ),
-      '/ahq beauty 角色=example_character 角色模式=弱 画风=example_style 比例=2:3 '
+      '/ahq beauty 修手=关闭 修脚=关闭 修脸=关闭 修复后放大=关闭 角色=6ctmika 角色模式=弱 画风=staryfs 比例=2:3 '
       '采样器=2m_sde_gpu 步数=38 CFG=4.5 放大=1.5 重绘=0.3 rainy street',
     );
     expect(

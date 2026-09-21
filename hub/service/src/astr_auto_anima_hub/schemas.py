@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class HealthResponse(BaseModel):
@@ -143,6 +143,21 @@ class PromptPage(BaseModel):
     revision: str
 
 
+class CharacterVariant(BaseModel):
+    id: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")
+    category: Literal["clothing", "appearance", "other"]
+    name: str = Field(min_length=1, max_length=80)
+    description: str = Field(default="", max_length=2000)
+    prompt: str = Field(min_length=1, max_length=10000)
+
+    @field_validator("id")
+    @classmethod
+    def reject_reserved_id(cls, value: str) -> str:
+        if value == "default":
+            raise ValueError("default 是保留的默认造型 ID")
+        return value
+
+
 class PresetSummary(BaseModel):
     name: str
     kind: Literal["style", "character"]
@@ -150,6 +165,7 @@ class PresetSummary(BaseModel):
     match: list[str] = Field(default_factory=list)
     loras: list[dict[str, Any]] = Field(default_factory=list)
     text_only: bool = False
+    variants: list[CharacterVariant] = Field(default_factory=list)
 
 
 class PresetListResponse(BaseModel):
@@ -168,17 +184,48 @@ class DeliveryTargetListResponse(BaseModel):
     targets: list[DeliveryTarget]
 
 
+class RemakeOptions(BaseModel):
+    task_suite_id: str = Field(default='', max_length=32, pattern=r'^(?:|[0-9a-f]{32})$')
+    character: str = Field(default='', max_length=120)
+    style: str = Field(default='', max_length=120)
+    ratio: str = Field(default='', max_length=30, pattern=r'^(?:|[1-9][0-9]*:[1-9][0-9]*)$')
+    fixed_seed: bool = False
+    adjustment: str = Field(default='', max_length=4000)
+
+
 class RemoteJobCreateRequest(BaseModel):
+    task_suite_id: str = Field(default='', max_length=32, pattern=r'^(?:|[0-9a-f]{32})$')
+    remake_fixed_seed: bool = False
+    remake_adjustment: str = Field(default='', max_length=4000)
+    lighting_key: str = Field(default="", max_length=100, pattern=r"^[A-Za-z0-9_-]*$")
+    lighting_effect: str = Field(default="", max_length=100, pattern=r"^[A-Za-z0-9_-]*$")
+    material_primary: str = Field(default="", max_length=100, pattern=r"^[A-Za-z0-9_-]*$")
+    material_details: list[str] = Field(default_factory=list, max_length=2)
+    material_surface: str = Field(default="", max_length=100, pattern=r"^[A-Za-z0-9_-]*$")
+    camera_distance: Literal["", "extreme_close", "close", "portrait", "upper_body", "cowboy", "full_body", "wide", "very_wide"] = ""
+    camera_yaw: Literal["", "front", "three_quarter", "side", "rear_three_quarter", "back"] = ""
+    camera_pitch: Literal["", "eye", "slight_low", "low", "extreme_low", "slight_high", "high", "extreme_high"] = ""
+    camera_lens: Literal["", "normal", "wide", "ultra_wide", "telephoto", "fisheye"] = ""
+    camera_roll: Literal["", "level", "dutch"] = ""
+    camera_extreme_lora: bool = False
+    detail_upscale: bool = False
+    detail_hands: bool = False
+    detail_feet: bool = False
+    detail_face: bool = False
+    deliver_to_im: bool = True
     target_id: str = Field(min_length=1, max_length=80)
-    kind: Literal["direct", "chinese", "reverse", "random", "chaos", "hq", "refine"]
+    kind: Literal["direct", "chinese", "reverse", "random", "chaos", "hq", "refine", "remake", "multi"]
     five_draw: bool = False
     pool_filter: str = Field(default="", max_length=32)
     character: str = Field(default="", max_length=200)
     character_tag_mode: Literal["weak", "strong", "off"] = "weak"
+    character_variant: str = Field(default="", max_length=64, pattern=r"^[A-Za-z0-9_-]*$")
     style: str = Field(default="", max_length=200)
     personal_style_slot: int | None = Field(default=None, ge=1, le=3)
+    trial_style: PersonalStyleWriteRequest | None = None
+    character_strength: float | None = Field(default=None, ge=-5, le=5, allow_inf_nan=False)
     ratio: Literal["", "1:1", "2:3", "3:2", "3:4", "4:3", "9:16", "16:9"] = ""
-    sampler: Literal["", "2m", "2m_sde", "2m_sde_gpu"] = ""
+    sampler: Literal["", "original", "er_sde", "euler", "euler_ancestral", "heun", "dpm_2", "dpm_2_ancestral", "2m", "2m_sde", "2m_sde_gpu", "dpmpp_sde", "dpmpp_3m_sde", "dpmpp_3m_sde_gpu", "lms", "ddim", "uni_pc"] = ""
     scheduler: Literal[
         "",
         "normal",
@@ -219,6 +266,8 @@ class RemoteJobCreateRequest(BaseModel):
 
 
 class RemoteJobImage(BaseModel):
+    task_suite_index: int = Field(default=0, ge=0, le=20)
+    prompt_id: str = Field(default="", max_length=300)
     id: str = Field(min_length=1, max_length=80, pattern=r"^[A-Za-z0-9_.-]+$")
     filename: str = Field(min_length=1, max_length=255)
     content_type: str = Field(default="image/png", max_length=120)
@@ -228,9 +277,14 @@ class RemoteJobImage(BaseModel):
 
 
 class RemoteJobResponse(BaseModel):
+    task_suite_id: str = ''
+    task_suite_name: str = ''
+    task_suite_rows: list[dict[str, Any]] = Field(default_factory=list)
+    deliver_to_im: bool = True
     id: str
     status: Literal["queued", "running", "succeeded", "failed"]
-    kind: Literal["direct", "chinese", "reverse", "random", "chaos", "hq", "refine"] = "direct"
+    kind: Literal["direct", "chinese", "reverse", "random", "chaos", "hq", "refine", "remake", "multi"] = "direct"
+    bridge_job_ids: list[str] = Field(default_factory=list, max_length=20)
     safety_code: Literal["N", "H", "S"] = "N"
     profile: str = Field(default="", max_length=40)
     target_id: str
@@ -286,6 +340,7 @@ class PresetWriteRequest(BaseModel):
     prompt: str = Field(default="", max_length=100_000)
     match: list[str] = Field(default_factory=list, max_length=128)
     loras: list[LoraSpec] = Field(default_factory=list, max_length=16)
+    variants: list[CharacterVariant] | None = Field(default=None, max_length=64)
 
 
 class LiteUserSummary(BaseModel):
@@ -339,6 +394,7 @@ class PromptLikeResponse(BaseModel):
 
 
 class LoraCatalogItem(BaseModel):
+    source_url: str = ""
     path: str = Field(min_length=1, max_length=1000)
     display_name: str = Field(min_length=1, max_length=200)
     category: Literal["unclassified", "style", "character", "other"] = "unclassified"
@@ -356,6 +412,16 @@ class LoraCatalogResponse(BaseModel):
 
 
 class LoraCatalogUpdateRequest(BaseModel):
+    source_url: str | None = Field(default=None, max_length=8192)
+
+    @field_validator("source_url")
+    @classmethod
+    def validate_source_url(cls, value):
+        if value is None:
+            raise ValueError("来源链接不能为 null；清空请填写空字符串")
+        from .lora_sharing import validate_public_source_url
+        return validate_public_source_url(value)
+
     display_name: str | None = Field(default=None, min_length=1, max_length=200)
     category: Literal["unclassified", "style", "character", "other"] | None = None
     recommended_prompt: str | None = Field(default=None, max_length=20_000)
@@ -365,6 +431,7 @@ class LoraCatalogUpdateRequest(BaseModel):
 class PersonalStyleLora(BaseModel):
     path: str = Field(min_length=1, max_length=1000)
     strength: float = Field(default=1.0, ge=-5.0, le=5.0)
+    strength_clip: float | None = Field(default=None, ge=-5.0, le=5.0)
 
 
 class PersonalStyleWriteRequest(BaseModel):

@@ -1,0 +1,53 @@
+{
+  "version": "20260910.2",
+  "rules": [
+    {
+      "id": "AAA-01",
+      "pattern": "(?<![a-z0-9])(?:penis(?:es)?|penile|phallus|phalli|testicles?|testes|scrotum|foreskin|glans|penile erection|erect penis)(?![a-z0-9])"
+    },
+    {
+      "id": "AAA-02",
+      "pattern": "(?<![a-z0-9])(?:vagina(?:s|l)?|vulva(?:s)?|pussy|pussies|clitoris|clitoral|clit(?:s)?|labia(?:l)?|vaginal opening|cameltoe|camel toe)(?![a-z0-9])"
+    },
+    {
+      "id": "AAA-03",
+      "pattern": "(?<![a-z0-9])(?:nipples?|areolas?|areolae|puffy nipples?|inverted nipples?|nipple (?:slip|piercing|stimulation|torture|sucking))(?![a-z0-9])"
+    },
+    {
+      "id": "AAA-04",
+      "pattern": "(?<![a-z0-9])(?:anus|anuses|anal|anally|asshole(?:s)?|butthole(?:s)?|anilingus|rimjob|rimming)(?![a-z0-9])"
+    },
+    {
+      "id": "AAA-05",
+      "pattern": "(?<![a-z0-9])(?:semen|seminal fluid|sperm(?:s)?|cum|cumming|ejaculat(?:e|es|ed|ing|ion|ions)|pre ?cum|precum|pussy (?:juice|juices)|vaginal (?:fluid|fluids|secretion|secretions)|love juice|female ejaculation|condoms?|used condoms?|dildos?|sex vibrators?|clitoral vibrators?|butt plugs?|fleshlights?|onaholes?|masturbators?|sex toys?|sexual lubricants?|personal lubricants?)(?![a-z0-9])"
+    },
+    {
+      "id": "AAA-06",
+      "pattern": "(?<![a-z0-9])(?:sex|sexual intercourse|intercourse|coitus|copulation|sexual activity|sexual act(?:s)?|fucking|fuck(?:ed|s)?|masturbat(?:e|es|ed|ing|ion|ory)|orgasm(?:s|ic)?|fellatio|cunnilingus|blow ?jobs?|hand ?jobs?|foot ?jobs?|tit ?jobs?|paizuri|boob sex|thigh sex|intercrural sex|vaginal fingering|anal fingering|finger fuck(?:ing)?|fisting|double penetration|vaginal penetration|anal penetration|oral penetration|deep ?throat(?:ing)?|irrumatio|tribadism|tribbing|sexual scissoring|dry humping|humping|grinding genitals|genital rubbing|genital stimulation|nipple stimulation|cervix|cervical penetration)(?![a-z0-9])"
+    },
+    {
+      "id": "AAA-07",
+      "pattern": "(?<![a-z0-9])(?:creampie|cumshot|bukkake|facial ejaculation|money shot|gangbang|orgy|orgies|reverse cowgirl|cowgirl position|missionary position|doggy ?style|mating press|standing sex|prone bone|sixty nine|spread pussy|spread anus|spread labia|exposed genitals|genital exposure|genitals?|genitalia|tentacle sex|tentacle rape|rape|raping|bestiality|zoophilia)(?![a-z0-9])"
+    },
+    {
+      "id": "AAA-08",
+      "pattern": "阴茎|陰莖|龟头|龜頭|睾丸|阴囊|陰囊|包皮|生殖器|性器官|勃起|阳具|陽具|肉棒"
+    },
+    {
+      "id": "AAA-09",
+      "pattern": "阴道|陰道|外阴|外陰|阴唇|陰唇|阴蒂|陰蒂|阴户|陰戶|阴穴|陰穴|蜜穴|肛门|肛門|菊穴|乳头|乳頭|奶头|奶頭|乳晕|乳暈"
+    },
+    {
+      "id": "AAA-10",
+      "pattern": "精液|精子|前列腺液|淫水|爱液|愛液|阴道分泌物|陰道分泌物|射精|潮吹|颜射|顏射|内射|內射|中出|体外射精|體外射精|避孕套|安全套|保险套|保險套|阴茎套|陰莖套|自慰棒|按摩棒|跳蛋|震动棒|震動棒|振动棒|振動棒|肛塞|飞机杯|飛機杯|仿真阳具|仿真陽具|性玩具|情趣玩具|润滑液|潤滑液"
+    },
+    {
+      "id": "AAA-11",
+      "pattern": "性交|性爱|性愛|性行为|性行為|做爱|做愛|交媾|自慰|手淫|口交|肛交|乳交|足交|腿交|指交|拳交|舔阴|舔陰|舔肛|吸吮乳头|吸吮乳頭|玩弄乳头|玩弄乳頭|玩弄性器|性高潮|骑乘位|騎乘位|传教士位|傳教士位|后入式|後入式|双重插入|雙重插入|阴道插入|陰道插入|肛门插入|肛門插入|轮奸|輪姦|强奸|強姦|兽交|獸交|群交|乱交|亂交"
+    },
+    {
+      "id": "AAA-12",
+      "pattern": "(?<![a-z0-9])(?:nude|nsfw|naked|nudity)(?![a-z0-9])"
+    }
+  ]
+}

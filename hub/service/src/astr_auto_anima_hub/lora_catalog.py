@@ -24,7 +24,10 @@ def _scan_files(root: Path) -> dict[str, dict[str, Any]]:
     if not root.is_dir():
         raise RepositoryError(f"LoRA directory does not exist: {root}")
     found: dict[str, dict[str, Any]] = {}
-    for current, directories, filenames in os.walk(root, followlinks=False):
+    def scan_error(error):
+        raise RepositoryError("LoRA 扫描不完整，保留原目录记录，请检查目录权限") from error
+
+    for current, directories, filenames in os.walk(root, followlinks=False, onerror=scan_error):
         current_path = Path(current)
         directories[:] = [
             name for name in directories if not (current_path / name).is_symlink()
@@ -38,8 +41,8 @@ def _scan_files(root: Path) -> dict[str, dict[str, Any]]:
             try:
                 stat = path.stat()
                 relative = path.relative_to(root).as_posix()
-            except (OSError, ValueError):
-                continue
+            except (OSError, ValueError) as exc:
+                raise RepositoryError("LoRA 文件状态读取失败，保留原目录记录，请重试扫描") from exc
             found[relative] = {
                 "path": relative,
                 "size_bytes": stat.st_size,
@@ -60,6 +63,9 @@ def _items(data: dict[str, Any], *, only_styles: bool = False) -> list[LoraCatal
         try:
             item = LoraCatalogItem.model_validate(payload)
         except ValueError:
+            continue
+        # Retain tombstones for restoring metadata, never return stale UI slots.
+        if not item.present:
             continue
         if only_styles and not (
             item.category == "style" and item.enabled and item.present

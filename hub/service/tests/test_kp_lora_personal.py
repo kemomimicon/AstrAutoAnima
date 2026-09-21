@@ -93,7 +93,7 @@ class KpLoraPersonalTests(unittest.TestCase):
             RemoteJobCreateRequest(target_id="private", kind="random", pool_filter="K/S"),
             target,
         )
-        self.assertEqual(command, "来张好图抄一抄 K/S")
+        self.assertEqual(command, "来张好图抽一抽 K/S")
         self.assertEqual(safety, "S")
         with self.assertRaisesRegex(RemoteJobError, "on its own"):
             build_remote_command(
@@ -180,6 +180,56 @@ class KpLoraPersonalTests(unittest.TestCase):
         current = list_personal_styles(self.settings, self.user)
         self.assertEqual(current.items, [])
         self.assertGreater(current.revision, saved.revision)
+
+    def test_missing_hidden_but_metadata_restored(self):
+        result = scan_loras(self.settings, "admin:test")
+        update_lora(self.settings, "artist/ink.safetensors", LoraCatalogUpdateRequest(
+            display_name="Custom", category="style", recommended_prompt="ink",
+            source_url="https://civitai.com/models/123?modelVersionId=456"), result.revision, "admin:test")
+        path = self.settings.lora_root / "artist/ink.safetensors"
+        path.unlink()
+        self.assertEqual(scan_loras(self.settings, "admin:test").items, [])
+        self.assertEqual(list_style_loras(self.settings).items, [])
+        path.write_bytes(b"restored")
+        restored = scan_loras(self.settings, "admin:test").items[0]
+        self.assertEqual(restored.display_name, "Custom")
+        self.assertEqual(restored.source_url, "https://civitai.com/models/123?modelVersionId=456")
+
+    def test_incomplete_scan_does_not_mutate_catalog(self):
+        from unittest.mock import patch
+        scan_loras(self.settings, "admin:test")
+        before = self.settings.lora_catalog_path.read_bytes()
+        def failed_walk(*args, **kwargs):
+            kwargs["onerror"](PermissionError("denied"))
+            yield
+        with patch("astr_auto_anima_hub.lora_catalog.os.walk", failed_walk):
+            with self.assertRaisesRegex(Exception, "扫描不完整"):
+                scan_loras(self.settings, "admin:test")
+        self.assertEqual(before, self.settings.lora_catalog_path.read_bytes())
+
+    def test_civitai_registration_preserves_manual_edits(self):
+        from astr_auto_anima_hub.civitai_downloads import CivitaiDownloads
+        manager = CivitaiDownloads(self.settings)
+        target = self.settings.lora_root / "artist/ink.safetensors"
+        item = {"source_url": "https://civitai.com/models/1?modelVersionId=2", "trained_words": ["ink", "ink", "lines"]}
+        manager._register_download({}, item, target)
+        result = scan_loras(self.settings, "admin:test")
+        self.assertEqual(result.items[0].recommended_prompt, "ink, lines")
+        self.assertEqual(result.items[0].source_url, item["source_url"])
+        update_lora(self.settings, "artist/ink.safetensors", LoraCatalogUpdateRequest(
+            recommended_prompt="custom", source_url="https://example.com/author"), result.revision, "admin:test")
+        manager._register_download({}, item, target)
+        restored = scan_loras(self.settings, "admin:test").items[0]
+        self.assertEqual(restored.recommended_prompt, "custom")
+        self.assertEqual(restored.source_url, "https://example.com/author")
+
+    def test_source_url_rejects_secrets_and_non_public_schemes(self):
+        for value in ["javascript:alert(1)", "https://token@civitai.com/models/1",
+                      "https://civitai.com/api/download/models/1",
+                      "https://example.com/?token=secret", "https://example.com/#secret"]:
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                LoraCatalogUpdateRequest(source_url=value)
+        self.assertEqual(LoraCatalogUpdateRequest(source_url="").source_url, "")
 
 
 if __name__ == "__main__":

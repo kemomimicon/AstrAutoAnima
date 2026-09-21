@@ -1,3 +1,4 @@
+import '../../core/courtyard_theme.dart';
 import 'package:flutter/material.dart';
 
 import '../../core/hub_api.dart';
@@ -32,6 +33,22 @@ class _LitePromptLibraryPageState extends State<LitePromptLibraryPage> {
       _page = page ?? 1;
       _future = _load();
     });
+  }
+
+  Future<void> _favorite(PromptRecord item) async {
+    try {
+      if (item.sourceCode == 'P') {
+        await widget.api.unfavoritePrompt(item.id);
+      } else {
+        await widget.api.favoritePrompt(item.id);
+      }
+      if (mounted) _refresh(page: _page);
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('$error')));
+      }
+    }
   }
 
   @override
@@ -75,7 +92,11 @@ class _LitePromptLibraryPageState extends State<LitePromptLibraryPage> {
                       items: ['', 'B', 'G', 'D', 'C', 'R', 'P']
                           .map((value) => DropdownMenuItem(
                               value: value,
-                              child: Text(value.isEmpty ? '全部' : value)))
+                              child: Text(value.isEmpty
+                                  ? '全部'
+                                  : value == 'P'
+                                      ? '个人收藏'
+                                      : value)))
                           .toList(),
                       onChanged: (value) {
                         _source = value ?? '';
@@ -101,7 +122,7 @@ class _LitePromptLibraryPageState extends State<LitePromptLibraryPage> {
                   ),
                   FilledButton.tonalIcon(
                       onPressed: _refresh,
-                      icon: const Icon(Icons.search),
+                      icon: const CourtyardIcon(Icons.search),
                       label: const Text('查询')),
                 ],
               ),
@@ -136,9 +157,15 @@ class _LitePromptLibraryPageState extends State<LitePromptLibraryPage> {
                     children: [
                       Chip(
                           label: Text('${item.sourceCode}/${item.safetyCode}')),
+                      IconButton(
+                          tooltip: item.sourceCode == 'P' ? '取消收藏' : '点赞收藏',
+                          onPressed: () => _favorite(item),
+                          icon: CourtyardIcon(item.sourceCode == 'P'
+                              ? Icons.thumb_up
+                              : Icons.thumb_up_outlined)),
                       const Tooltip(
                         message: '查看完整提示词',
-                        child: Icon(Icons.open_in_new),
+                        child: CourtyardIcon(Icons.open_in_new),
                       ),
                     ],
                   ),
@@ -153,7 +180,7 @@ class _LitePromptLibraryPageState extends State<LitePromptLibraryPage> {
                   onPressed: data.page > 1
                       ? () => _refresh(page: data.page - 1)
                       : null,
-                  icon: const Icon(Icons.chevron_left),
+                  icon: const CourtyardIcon(Icons.chevron_left),
                 ),
                 const SizedBox(width: 16),
                 Text('${data.page} / ${data.pages}'),
@@ -162,7 +189,7 @@ class _LitePromptLibraryPageState extends State<LitePromptLibraryPage> {
                   onPressed: data.page < data.pages
                       ? () => _refresh(page: data.page + 1)
                       : null,
-                  icon: const Icon(Icons.chevron_right),
+                  icon: const CourtyardIcon(Icons.chevron_right),
                 ),
               ],
             ),

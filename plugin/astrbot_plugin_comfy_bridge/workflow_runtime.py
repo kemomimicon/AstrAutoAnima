@@ -30,7 +30,16 @@ def extract_command_body(
 
     raw = str(message or "").strip()
     candidate = ""
-    command_names = (f"/{command}", command)
+    aliases = {'aremake': ('重跑一张',), 'aecho': ('看看串',), 'astyle': ('查看画风',),
+               'acopy': ('抄一抄',), 'awatermark': ('打上水印',),
+               'apalette': ('随机画风调色盘', '随机画风'),
+               'ahelp': ('跑图帮助', '跑图指令', '跑图格式'), 'amulti': ('多人图',),
+               'aimg_random': ('抽一抽',), 'aimg_random5': ('五连抽',),
+               'aimg_chaos': ('混沌时刻',), 'aimg_chaos5': ('混沌五连',),
+               'afavorite': ('收藏提示词', '收藏'), 'aunfavorite': ('取消收藏',),
+               'areport': ('举报图片', '举报'), 'agallery': ('查看画廊', '画风画廊', '画廊')}
+    names = (command, *aliases.get(command, ()))
+    command_names = tuple(value for name in names for value in (f'/{name}', name))
 
     for command_name in command_names:
         if raw == command_name:
@@ -412,6 +421,123 @@ def configure_refine_workflow(
     }
 
 
+def configure_detail_repair_workflow(
+    workflow: dict[str, Any],
+    *,
+    image_name: str,
+    image_node_id: str,
+    output_node_id: str,
+    positive_node_id: str,
+    negative_node_id: str,
+    face_node_id: str,
+    hand_node_id: str,
+    foot_node_id: str,
+    profile: dict[str, Any],
+    seed: int,
+    repair_face: bool,
+    repair_hands: bool,
+    repair_feet: bool,
+    face_detector_name: str = "bbox/face_yolov8n.pt",
+    hand_detector_name: str = "bbox/hand_yolov8s.pt",
+    foot_detector_name: str = "bbox/foot_yolov8x.pt",
+) -> dict[str, Any]:
+    """Configure a sequential Impact-Pack repair pass over an uploaded image."""
+
+    normalized_image = str(image_name or "").strip()
+    if not normalized_image:
+        raise WorkflowError("INVALID_INPUT：局部修复输入图片不能为空。")
+    _require_input(workflow, image_node_id, "image")["image"] = normalized_image
+
+    requested = {
+        "face": bool(repair_face),
+        "hands": bool(repair_hands),
+        "feet": bool(repair_feet),
+    }
+    if not any(requested.values()):
+        raise WorkflowError("局部修复至少需要启用脸、手或脚中的一项。")
+
+    node_ids = {
+        "face": str(face_node_id),
+        "hands": str(hand_node_id),
+        "feet": str(foot_node_id),
+    }
+    detector_ids = {"face": "50", "hands": "60", "feet": "70"}
+    detector_names = {
+        "face": str(face_detector_name).strip(),
+        "hands": str(hand_detector_name).strip(),
+        "feet": str(foot_detector_name).strip(),
+    }
+    detailer_profile = profile.get("detailer", {})
+    if not isinstance(detailer_profile, dict):
+        raise WorkflowError("局部修复 profile.detailer 必须是对象。")
+
+    positive_ref = [str(positive_node_id), 0]
+    negative_ref = [str(negative_node_id), 0]
+    # apply_lora_plan rewires the first detailer's model and the prompt encoders'
+    # CLIP.  Capture those references, then synchronize every enabled pass.
+    anchor = _require_input(workflow, face_node_id, "model")
+    model_ref = copy.deepcopy(anchor["model"])
+    clip_ref = copy.deepcopy(
+        _require_input(workflow, positive_node_id, "clip")["clip"]
+    )
+    vae_ref = copy.deepcopy(anchor.get("vae"))
+    if not isinstance(model_ref, list) or not isinstance(clip_ref, list):
+        raise WorkflowError("局部修复无法定位 MODEL/CLIP 接入点。")
+
+    source: list[Any] = [str(image_node_id), 0]
+    applied: list[dict[str, Any]] = []
+    for offset, part in enumerate(("face", "hands", "feet")):
+        node_id = node_ids[part]
+        if not requested[part]:
+            workflow.pop(node_id, None)
+            continue
+        detector = _require_input(workflow, detector_ids[part], "model_name")
+        if not detector_names[part]:
+            raise WorkflowError(f"{part} 检测模型文件名不能为空。")
+        detector["model_name"] = detector_names[part]
+        inputs = _require_input(workflow, node_id, "image")
+        inputs["image"] = copy.deepcopy(source)
+        inputs["model"] = copy.deepcopy(model_ref)
+        inputs["clip"] = copy.deepcopy(clip_ref)
+        if vae_ref is not None:
+            inputs["vae"] = copy.deepcopy(vae_ref)
+        inputs["positive"] = copy.deepcopy(positive_ref)
+        inputs["negative"] = copy.deepcopy(negative_ref)
+        inputs["bbox_detector"] = [detector_ids[part], 0]
+        inputs["seed"] = (int(seed) + offset) % (2**32)
+        overrides = detailer_profile.get(part, {})
+        if not isinstance(overrides, dict):
+            raise WorkflowError(f"局部修复 {part} 参数必须是对象。")
+        for key in (
+            "guide_size",
+            "max_size",
+            "steps",
+            "cfg",
+            "sampler_name",
+            "scheduler",
+            "denoise",
+            "bbox_threshold",
+            "bbox_dilation",
+            "bbox_crop_factor",
+            "wildcard",
+        ):
+            if key in overrides:
+                inputs[key] = copy.deepcopy(overrides[key])
+        source = [node_id, 0]
+        applied.append(
+            {
+                "part": part,
+                "node_id": node_id,
+                "detector": detector_names[part],
+                "denoise": inputs.get("denoise"),
+                "steps": inputs.get("steps"),
+            }
+        )
+
+    _require_input(workflow, output_node_id, "images")["images"] = source
+    return {"detailer": applied, "output": source, "seed": int(seed) % (2**32)}
+
+
 def configure_seedvr2_workflow(
     workflow: dict[str, Any],
     *,
@@ -421,13 +547,39 @@ def configure_seedvr2_workflow(
     profile: dict[str, Any],
     seed: int,
 ) -> dict[str, Any]:
-    """Inject a source image and a bounded SeedVR2 tiling profile."""
+    """Inject a bounded native or legacy tiled SeedVR2 profile."""
 
     normalized_image = str(image_name or "").strip()
     if not normalized_image:
         raise WorkflowError("INVALID_INPUT：SeedVR2 输入图片不能为空。")
     image_inputs = _require_input(workflow, image_node_id, "image")
     image_inputs["image"] = normalized_image
+    if workflow.get(str(upscaler_node_id), {}).get("class_type") == "SeedVR2VideoUpscaler":
+        inputs = _require_input(workflow, upscaler_node_id, "resolution")
+        required = {"seed", "max_resolution", "batch_size", "uniform_batch_size", "color_correction"}
+        missing = sorted(required - set(inputs))
+        if missing:
+            raise WorkflowError(f"SeedVR2 原生节点缺少 inputs：{', '.join(missing)}")
+        enhance = profile.get("enhance", {})
+        if not isinstance(enhance, dict):
+            raise WorkflowError("SeedVR2 profile.enhance 必须是对象。")
+        target = int(enhance.get("target_resolution", inputs.get("max_resolution") or inputs["resolution"]))
+        if not 512 <= target <= 8192 or target % 16:
+            raise WorkflowError("SeedVR2 目标边必须是 512-8192 之间且能被 16 整除。")
+        if enhance.get("resolution_target", "longest") != "longest":
+            raise WorkflowError("SeedVR2 原生模式当前仅支持最长边目标。")
+        color = str(enhance.get("color_correction", inputs["color_correction"]))
+        if color not in {"lab", "wavelet", "wavelet_adaptive", "hsv", "adain", "none"}:
+            raise WorkflowError("SeedVR2 color_correction 无效。")
+        # Native resolution is the shortest-edge request; the same maximum
+        # then caps BOTH dimensions proportionally to the requested longest edge.
+        inputs.update(resolution=target, max_resolution=target,
+                      seed=int(seed) % (2**32), batch_size=1,
+                      uniform_batch_size=False, color_correction=color)
+        return {"target_resolution": target, "seed": inputs["seed"],
+                "mode": "native", "tile": False,
+                "resolution": target, "max_resolution": target,
+                "color_correction": color}
     inputs = _require_input(workflow, upscaler_node_id, "new_resolution")
     required = {
         "seed",

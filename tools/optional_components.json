@@ -2,6 +2,20 @@
   "schema_version": 1,
   "components": [
     {
+      "id": "impact_pack",
+      "name": "Impact-Pack 局部修复节点（不含模型）",
+      "kind": "git",
+      "url": "https://github.com/ltdrdata/ComfyUI-Impact-Pack.git",
+      "target": "custom_nodes/ComfyUI-Impact-Pack"
+    },
+    {
+      "id": "impact_subpack",
+      "name": "Impact-Subpack 检测节点（不含模型）",
+      "kind": "git",
+      "url": "https://github.com/ltdrdata/ComfyUI-Impact-Subpack.git",
+      "target": "custom_nodes/ComfyUI-Impact-Subpack"
+    },
+    {
       "id": "booru_tagger_node",
       "name": "ComfyUI-Booru-Tagger 节点",
       "kind": "git",

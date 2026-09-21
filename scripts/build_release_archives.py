@@ -12,9 +12,9 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION = "0.4.0"
-WORKFLOW_VERSION = "0.5.0"
-ZIP_TIME = (2026, 9, 6, 0, 0, 0)
+VERSION = "0.5.0-beta.1"
+WORKFLOW_VERSION = "0.8.0-beta.1-public"
+ZIP_TIME = (2026, 9, 21, 0, 0, 0)
 LF_SUFFIXES = {".sh", ".py", ".json", ".yaml", ".yml", ".toml", ".md"}
 CRLF_SUFFIXES = {".bat", ".ps1"}
 
@@ -26,6 +26,7 @@ def public_files() -> list[Path]:
             "-C",
             str(ROOT),
             "ls-files",
+            "-z",
             "--cached",
             "--others",
             "--exclude-standard",
@@ -35,7 +36,7 @@ def public_files() -> list[Path]:
         text=True,
         encoding="utf-8",
     )
-    paths = [ROOT / line for line in result.stdout.splitlines() if line]
+    paths = [ROOT / line for line in result.stdout.split('\0') if line]
     return sorted(path for path in paths if path.is_file())
 
 
@@ -91,6 +92,7 @@ def sha256(path: Path) -> str:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, default=ROOT / "dist")
+    parser.add_argument("--web-archive", type=Path, help="Optional separately built public Web ZIP to include in lazy bundle")
     args = parser.parse_args()
     output = args.output.resolve()
 
@@ -140,6 +142,7 @@ def main() -> int:
     archives[f"AstrAutoAnima-{VERSION}-source.zip"] = source_entries
     lazy_roots = {"plugin", "hub", "comfyui", "tools", "examples", "docs"}
     lazy_root_files = {
+        ".astr_auto_anima_public_root",
         ".gitattributes",
         "LICENSE",
         "README.md",
@@ -167,6 +170,17 @@ def main() -> int:
             raise RuntimeError(f"Archive would be empty: {filename}")
         destination = output / filename
         write_zip(destination, entries)
+        if 'lazy-bundle' in filename and args.web_archive:
+            with zipfile.ZipFile(args.web_archive) as web, zipfile.ZipFile(destination, 'a', compression=zipfile.ZIP_DEFLATED) as bundle:
+                if 'index.html' not in web.namelist():
+                    raise ValueError('Web archive must have index.html at root')
+                for member in web.infolist():
+                    name = member.filename.replace('\\', '/')
+                    if member.is_dir():
+                        continue
+                    if name.startswith('/') or ':' in name or '..' in Path(name).parts or name.endswith(('.env', '.map')):
+                        raise ValueError('Unsafe Web archive entry')
+                    bundle.writestr(f'{source_prefix}/hub/service/web/{name}', web.read(member))
         built.append(destination)
         print(f"BUILT {destination.name} ({destination.stat().st_size:,} bytes)")
 

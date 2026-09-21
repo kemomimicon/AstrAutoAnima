@@ -245,6 +245,8 @@ def _preset_value(kind: str, payload: PresetWriteRequest) -> dict[str, Any]:
     prompt = payload.prompt.strip(" ,\n\t")
     loras = [item.model_dump() for item in payload.loras]
     if kind == "style":
+        if payload.variants:
+            raise RepositoryError("画风预设不能包含角色造型")
         if not loras:
             raise RepositoryError("a style preset requires at least one LoRA")
         return {
@@ -257,7 +259,14 @@ def _preset_value(kind: str, payload: PresetWriteRequest) -> dict[str, Any]:
             raise RepositoryError("a character preset supports at most one LoRA")
         if not loras and not prompt:
             raise RepositoryError("a text-only character requires a prompt")
-        return {"lora": loras[0] if loras else None, "prompt": prompt}
+        variants = [item.model_dump() for item in (payload.variants or [])]
+        if variants and not loras:
+            raise RepositoryError("角色造型需要角色 LoRA")
+        if len({item["id"] for item in variants}) != len(variants):
+            raise RepositoryError("角色造型 ID 不能重复")
+        if any(not item["name"].strip() or not item["prompt"].strip(" ,\n\t") for item in variants):
+            raise RepositoryError("造型名称和触发词不能为空")
+        return {"lora": loras[0] if loras else None, "prompt": prompt, "variants": variants}
     raise ResourceNotFound(f"unsupported preset kind: {kind}")
 
 
@@ -272,6 +281,18 @@ def write_preset(
 ) -> MutationResponse:
     key = _preset_key(kind)
     value = _preset_value(kind, payload)
+    # Do not accept a display name or an absolute path as a ComfyUI LoRA filename.
+    if kind == "character" and value.get("lora"):
+        from pathlib import PurePosixPath
+        raw = value["lora"]["name"].strip().replace("\\", "/")
+        relative = PurePosixPath(raw)
+        if relative.is_absolute() or ".." in relative.parts or ":" in raw:
+            raise RepositoryError("角色 LoRA 必须从库中选择或填写相对文件路径")
+        root = settings.lora_root.resolve()
+        candidate = settings.lora_root / raw
+        if not candidate.is_file() or candidate.is_symlink() or not candidate.resolve().is_relative_to(root):
+            raise RepositoryError("角色 LoRA 文件不存在，请重新扫描并从 LoRA 库选择")
+        value["lora"]["name"] = raw
     action: Literal["created", "updated"] = "created" if previous_name is None else "updated"
 
     def initialize() -> dict[str, Any]:
@@ -293,6 +314,12 @@ def write_preset(
                 raise ResourceNotFound(f"preset not found: {previous_name}")
             if name != previous_name and name in collection:
                 raise DuplicateResource(f"preset already exists: {name}")
+            if kind == "character" and payload.variants is None:
+                # Old clients omit the new field: preserve variants on ordinary edits.
+                existing_variants = collection[previous_name].get("variants", [])
+                if existing_variants and not value.get("lora"):
+                    raise RepositoryError("请先显式清空造型再改为文本角色")
+                value["variants"] = existing_variants
             del collection[previous_name]
         collection[name] = value
 

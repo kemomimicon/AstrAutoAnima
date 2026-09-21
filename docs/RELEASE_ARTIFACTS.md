@@ -1,27 +1,22 @@
-# 发布包说明
+# 0.5.0-beta.1 发布附件
 
-正式版使用统一版本号 `0.4.0`，工作流包已于 2026-09-11 修订为 `0.5.0-beta.2`，附件名保持不变。
-源码附件包含 main 上的发布修复；v0.4.0 标签保留最初发布快照。
+本次使用新的 Git 标签，不覆盖 v0.4.0 或已有提示词独立发布。所有附件以同页 SHA256SUMS.txt 校验。
 
 | 文件 | 用途 |
-|---|---|
-| `astrbot_plugin_comfy_bridge-0.4.0.zip` | 在 AstrBot 插件目录安装或升级桥接插件 |
-| `astr_auto_anima_hub_service-0.4.0.zip` | 部署 Hub 后台服务 |
-| `Anima_Workflow_Pack-0.5.0.zip` | 安装自定义节点和 ComfyUI 工作流模板 |
-| `AstrAutoAnima-tools-0.4.0.zip` | 独立使用提示词库编辑、导入导出和令牌管理工具 |
-| `AstrAutoAnima-lazy-bundle-0.4.0.zip` | 面向新手的一键部署包；外部下载默认全部关闭 |
-| `AstrAutoAnima-0.4.0-source.zip` | 与发布标签对应的完整公开源码 |
-| `AstrAutoAnima-admin-0.4.0-windows-x64.zip` | Windows 管理客户端 |
-| `AstrAutoAnima-web-0.4.0.zip` | 可由 Hub 或静态 Web 服务托管的用户客户端 |
-| `AstrAutoAnima-admin-0.4.0-android.apk` | Android 管理端 |
-| `AstrAutoAnima-service-0.4.0-android.apk` | Android 用户端 |
+| --- | --- |
+| `AstrAutoAnima-lazy-bundle-0.5.0-beta.1.zip` | 新手优先：部署向导、插件、Hub、节点、模板、编辑工具和文档 |
+| `astrbot_plugin_comfy_bridge-0.5.0-beta.1.zip` | 单独更新 AstrBot 插件 |
+| `astr_auto_anima_hub_service-0.5.0-beta.1.zip` | 单独部署 Hub 服务 |
+| `Anima_Workflow_Pack-0.8.0-beta.1-public.zip` | 脱敏工作流与节点包 |
+| `AstrAutoAnima-tools-0.5.0-beta.1.zip` | 离线词库编辑 / 批量导入导出 / 令牌管理；完整部署请使用懒人包 |
+| `AstrAutoAnima-0.5.0-beta.1-source.zip` | 完整公开源码和测试 |
+| `AstrAutoAnima-Windows-Admin-0.5.0-beta.1.zip` | Windows 管理端，需完整解压后运行 |
+| `AstrAutoAnima-Windows-Service-0.5.0-beta.1.zip` | Windows 普通用户端 |
+| `AstrAutoAnima-Android-Admin-0.5.0-beta.1.apk` | Android 管理端 |
+| `AstrAutoAnima-Android-Service-0.5.0-beta.1.apk` | Android 普通用户端 |
+| `AstrAutoAnima-Web-0.5.0-beta.1.zip` | 普通用户 Web App；解压后设置 AAH_WEB_ROOT |
 
-下载后应使用同目录的 `SHA256SUMS.txt` 核对文件完整性。Android APK 使用社区测试签名，适合
-侧载验证；应用商店分发者必须使用自己的 release keystore 重建。所有公开包均不包含真实令牌、
-服务器地址、私人提示词库、模型、LoRA、图片、QQ/NapCat 数据或本地日志。
+Android 使用社区测试签名，不含签名私钥。不保证可覆盖安装不同签名的旧包；先备份客户端设置。
+Python / GPU / 第三方模型不随包内置：按向导显式勾选，或使用已有环境。所有客户端首次连接都由使用者填写地址和令牌。
 
-维护者可在仓库根目录执行以下命令，重新生成经过隐私检查的源码包：
-
-```bash
-python scripts/build_release_archives.py
-```
+维护者使用 `python scripts/build_release_archives.py --output <仓库外输出目录>` 打包。源包和懒人包不含本地构建缓存、凭据、真实词库或用户运行记录。

@@ -30,7 +30,7 @@ _SEXUAL_RE = re.compile(
     r"masturbat\w*|fingering|penetrat\w*|intercourse|oral sex|blowjob|handjob|"
     r"deepthroat|cunnilingus|fellatio|anal|vaginal|sex\w*|orgasm\w*|"
     r"cum\w*|semen|ejaculat\w*|creampie|cream pie|fuck\w*|suck\w*|facial|shaft|"
-    r"hand job|doggy style|missionary|cowgirl|insertion|thrust\w*|sex toy|dildo|vibrator)\b",
+    r"hand job|doggy style|missionary|cowgirl|insertion|thrust\w*|sex toys?|dildos?|vibrators?|urina\w*|pee|peeing|peed|pissing|watersports)\b",
     re.IGNORECASE,
 )
 _NSFW_RE = re.compile(
@@ -140,6 +140,7 @@ def _tokens(prompt: str) -> list[str]:
 
 
 def _safety_for_text(text: str) -> str:
+    text = str(text).replace("_", " ")
     if _SEXUAL_RE.search(text):
         return "S"
     if _NSFW_RE.search(text):
@@ -183,7 +184,7 @@ def _base_entries(pool: dict[str, Any], safety_code: str) -> list[dict[str, Any]
             continue
         item_safety = str(item.get("safety_code", "N")).upper()
         if safety_code == "N":
-            if item_safety == "N":
+            if item_safety == "N" and _safety_for_text(str(item.get("prompt", ""))) == "N":
                 result.append(item)
             continue
         if item_safety != "S":
@@ -428,6 +429,8 @@ def assemble_dynamic_k_prompts(
 ) -> list[dict[str, Any]]:
     requested = max(1, int(count))
     excluded = set(excluded_ids or ())
+    excluded.update(str(item.get("id", "")) for item in pool.get("trash", []) if isinstance(item, dict))
+    excluded.update(str(item.get("id", "")) for item in pool.get("prompts", []) if isinstance(item, dict) and item.get("trashed"))
     result: list[dict[str, Any]] = []
     for _ in range(requested):
         for _attempt in range(40):

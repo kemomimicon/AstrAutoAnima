@@ -11,6 +11,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import __version__
+from .task_suites import SuiteWrite, list_suites, write_suite, delete_suite
 from .auth import AuthPrincipal, require_admin, require_reader
 from .character_catalog import search_character_dictionary
 from .character_management import disable_character, update_character
@@ -39,12 +40,15 @@ from .lite_user_management import (
 from .probes import collect_workstation_status
 from .system_metrics import collect_system_metrics
 from .lora_catalog import list_style_loras, scan_loras, update_lora
+from .civitai_downloads import CivitaiDownloads, DownloadRequest
+from .napcat_login import napcat_request, NapcatLoginRequest
+from . import service_recovery
 from .personal_styles import (
     delete_personal_style,
     list_personal_styles,
     write_personal_style,
 )
-from .prompt_likes import promote_k_prompt
+from .prompt_likes import promote_k_prompt, remove_prompt_favorite
 from .repositories import (
     RepositoryError,
     file_revision,
@@ -52,6 +56,10 @@ from .repositories import (
     list_prompts,
 )
 from .remote_jobs import RemoteJobError, RemoteJobManager
+from .prompt_reports import PromptReports
+from .style_gallery import StyleGallery, GalleryUpdate, GalleryGenerate
+from .image_storage import ImageStorage, router as image_storage_router
+from .idle_guard import admission
 from .schemas import (
     HealthResponse,
     DeliveryTargetListResponse,
@@ -72,6 +80,7 @@ from .schemas import (
     PromptPage,
     PromptUpdateRequest,
     RemoteJobCreateRequest,
+    RemakeOptions,
     RemoteJobPage,
     RemoteJobResponse,
     SyncRevisionsResponse,
@@ -125,8 +134,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(application: FastAPI):
+        storage_task = asyncio.create_task(application.state.image_storage.scheduler())
         yield
+        storage_task.cancel()
+        await asyncio.gather(storage_task, return_exceptions=True)
+        await application.state.style_gallery.shutdown()
         await application.state.remote_jobs.shutdown()
+        await application.state.civitai_downloads.shutdown()
 
     app = FastAPI(
         title="AstrAutoAnima Hub",
@@ -136,12 +150,178 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     app.state.settings = resolved
     app.state.remote_jobs = RemoteJobManager(resolved)
+    app.state.prompt_reports = PromptReports(resolved, app.state.remote_jobs)
+    app.state.civitai_downloads = CivitaiDownloads(resolved)
+    app.state.style_gallery = StyleGallery(resolved, app.state.remote_jobs)
+    app.state.image_storage = ImageStorage(resolved, app.state.remote_jobs)
+    app.include_router(image_storage_router)
+
+    @app.middleware('http')
+    async def idle_admission(request, call_next):
+        if request.method in {'GET', 'HEAD', 'OPTIONS'} or request.url.path == '/api/v1/admin/auto-sleep':
+            return await call_next(request)
+        try:
+            lease = admission(resolved.plugin_data_dir)
+        except Exception:
+            from fastapi.responses import JSONResponse
+            return JSONResponse({'detail': '实例正在准备休眠，暂不接受新任务或写入'}, status_code=503)
+        try:
+            return await call_next(request)
+        finally:
+            if lease:
+                lease.close()
+
+    @app.get("/api/v1/visual-presets", dependencies=[Depends(require_reader)])
+    async def visual_presets():
+        import json
+        path = resolved.plugin_dir / "data/aaa_anima_lighting_material_presets_v1.json"
+        try:
+            data = json.loads(path.read_text(encoding="utf-8-sig"))
+            return {"available": True, "lighting": data["lighting_presets"], "material": data["material_presets"]}
+        except (OSError, ValueError, KeyError, TypeError):
+            return {"available": False, "lighting": [], "material": [], "message": "光影材质库未安装或损坏"}
+
+    @app.get("/api/v1/gallery", tags=["gallery"])
+    async def gallery(principal: AuthPrincipal = Depends(require_reader)):
+        try:
+            return app.state.style_gallery.view(principal.is_admin)
+        except (RepositoryError, OSError, ValueError) as exc:
+            raise HTTPException(422, "画廊配置不可读取，请管理员检查专用目录") from exc
+
+    @app.post("/api/v1/admin/gallery/config", tags=["gallery"])
+    async def gallery_config(payload: GalleryUpdate, principal: AuthPrincipal = Depends(require_admin)):
+        try:
+            return await app.state.style_gallery.update(payload)
+        except RepositoryError as exc:
+            raise HTTPException(422, str(exc)) from exc
+
+    @app.post("/api/v1/admin/gallery/generate", tags=["gallery"])
+    async def gallery_generate(payload: GalleryGenerate, principal: AuthPrincipal = Depends(require_admin)):
+        try:
+            return await app.state.style_gallery.generate(payload, principal)
+        except (RepositoryError, RemoteJobError) as exc:
+            raise HTTPException(422, str(exc)) from exc
+
+    @app.get("/api/v1/gallery/images/{image_id}", tags=["gallery"], dependencies=[Depends(require_reader)])
+    async def gallery_image(image_id: str):
+        try:
+            path, content_type = app.state.style_gallery.image(image_id)
+            return FileResponse(path, media_type=content_type, headers={"Cache-Control": "no-store"})
+        except (RepositoryError, RemoteJobError, OSError) as exc:
+            raise HTTPException(404, "图片不可用、已过期或未通过安全审核") from exc
+
+    @app.get('/api/v1/admin/services/recovery', dependencies=[Depends(require_admin)])
+    def recovery_status():
+        return {**service_recovery.recovery_config(), 'operation': service_recovery.read_status(resolved.hub_state_dir)}
+
+    @app.post('/api/v1/admin/services/restart')
+    def restart_services(principal: Annotated[AuthPrincipal, Depends(require_admin)], confirmed: bool = False):
+        if not confirmed:
+            raise HTTPException(422, '必须确认：生图、QQ连接及Hub会中断，请先停止任务；训练不会被本操作主动结束')
+        try:
+            return service_recovery.submit(resolved.hub_state_dir, f'{principal.role}:{principal.subject}')
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from exc
+
+    @app.get('/api/v1/admin/napcat/status', dependencies=[Depends(require_admin)])
+    async def napcat_status():
+        try:
+            return await napcat_request(NapcatLoginRequest(), status_only=True)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        except Exception:
+            raise HTTPException(502, '暂时无法查询 NapCat 状态；这不等于 QQ 已掉线')
+
+    @app.post("/api/v1/admin/napcat/accounts", dependencies=[Depends(require_admin)])
+    async def napcat_accounts(payload: NapcatLoginRequest):
+        try:
+            return await napcat_request(payload)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        except Exception:
+            raise HTTPException(502, "无法连接本机NapCat；请检查服务和配置文件")
+
+    @app.post('/api/v1/admin/napcat/qrcode', dependencies=[Depends(require_admin)])
+    async def napcat_qrcode(payload: NapcatLoginRequest):
+        try:
+            return await napcat_request(payload, refresh_qr=True)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        except Exception:
+            raise HTTPException(502, '无法读取本机 NapCat 二维码，请检查服务状态')
+
+    @app.post("/api/v1/admin/napcat/login", dependencies=[Depends(require_admin)])
+    async def napcat_login(payload: NapcatLoginRequest):
+        try:
+            return await napcat_request(payload, login=True)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        except Exception:
+            raise HTTPException(502, "NapCat 登录请求失败，请到WebUI检查；未修改登录配置")
+
+    @app.get("/api/v1/admin/civitai/models/{model_id}", dependencies=[Depends(require_admin)])
+    async def civitai_model(model_id: int):
+        try:
+            return await app.state.civitai_downloads.versions(model_id)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+
+    @app.get("/api/v1/admin/civitai/versions/{version_id}", dependencies=[Depends(require_admin)])
+    async def civitai_version(version_id: int):
+        if version_id <= 0:
+            raise HTTPException(422, "版本ID必须为正整数")
+        try:
+            data = await app.state.civitai_downloads.preview(version_id)
+            # Do not relay arbitrary HTML, images or signed download URLs to clients.
+            return {"id": data.get("id"), "name": data.get("name"), "base_model": data.get("baseModel"),
+                    "trained_words": data.get("trainedWords", []), "model": data.get("model", {}),
+                    "files": [{k: item.get(k) for k in ("id", "name", "sizeKB", "hashes", "metadata", "type", "virusScanResult", "pickleScanResult")} for item in data.get("files", [])]}
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        except Exception:
+            raise HTTPException(502, "Civitai 元数据服务暂不可用")
+
+    @app.get("/api/v1/admin/civitai/downloads", dependencies=[Depends(require_admin)])
+    async def civitai_jobs():
+        return {"enabled": app.state.civitai_downloads.enabled, "jobs": app.state.civitai_downloads.list_jobs()}
+
+    @app.post("/api/v1/admin/civitai/downloads", dependencies=[Depends(require_admin)], status_code=202)
+    async def civitai_download(payload: DownloadRequest):
+        try:
+            return await app.state.civitai_downloads.submit(payload)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        except Exception:
+            raise HTTPException(502, "无法创建下载任务")
+
+    @app.post("/api/v1/admin/civitai/downloads/{job_id}/cancel", dependencies=[Depends(require_admin)])
+    async def civitai_cancel(job_id: str):
+        try:
+            return await app.state.civitai_downloads.cancel(job_id)
+        except ValueError as exc:
+            raise HTTPException(404, str(exc)) from exc
+
+    @app.post("/api/v1/admin/civitai/downloads/{job_id}/resume", dependencies=[Depends(require_admin)])
+    async def civitai_resume(job_id: str):
+        try:
+            return await app.state.civitai_downloads.resume(job_id)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        except Exception:
+            raise HTTPException(502, "续传任务创建失败，请检查网络")
 
     @app.get("/api/v1/health", response_model=HealthResponse, tags=["system"])
     async def health() -> HealthResponse:
         return HealthResponse(
             version=__version__, timestamp=datetime.now().astimezone()
         )
+
+    @app.post("/api/v1/lite/jobs/{job_id}/images/{image_id}/remake", response_model=RemoteJobResponse, status_code=202)
+    async def remake_image(job_id: str, image_id: str, principal: Annotated[AuthPrincipal, Depends(require_reader)], payload: RemakeOptions | None = None):
+        try:
+            return app.state.remote_jobs.remake_image(job_id, image_id, principal, payload)
+        except RemoteJobError as exc:
+            raise HTTPException(422, str(exc)) from exc
 
     @app.get(
         "/api/v1/lite/prompts",
@@ -150,6 +330,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         dependencies=[Depends(require_reader)],
     )
     async def lite_prompts(
+        principal: Annotated[AuthPrincipal, Depends(require_reader)],
         source: str = Query(default="", max_length=16),
         safety: str = Query(default="", max_length=8),
         query: str = Query(default="", max_length=500),
@@ -161,6 +342,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         try:
             result = list_prompts(
                 resolved.prompt_pool_path,
+                owner=principal.subject,
                 source=source,
                 safety=safety,
                 query=query,
@@ -173,6 +355,59 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if page > result.pages:
             raise HTTPException(status_code=404, detail="page out of range")
         return result
+
+    @app.post("/api/v1/lite/jobs/{job_id}/images/{image_id}/report")
+    def report_prompt(job_id: str, image_id: str, principal: Annotated[AuthPrincipal, Depends(require_reader)]):
+        try:
+            return app.state.prompt_reports.submit(job_id, image_id, principal)
+        except (RepositoryError, RemoteJobError) as exc:
+            raise HTTPException(422, str(exc)) from exc
+
+    @app.post('/api/v1/internal/qq-image-actions/{ticket_id}', include_in_schema=False)
+    def qq_image_action(ticket_id: str):
+        # Possession of a one-use capability created on the shared local disk is
+        # the authorization. No QQ number/job/path is accepted in HTTP payloads.
+        from .qq_image_actions import handle_qq_action
+        try:
+            return handle_qq_action(resolved, app.state.prompt_reports, app.state.remote_jobs, ticket_id)
+        except (RepositoryError, OSError, ValueError) as exc:
+            raise HTTPException(422, str(exc)) from exc
+
+    @app.get("/api/v1/admin/prompt-reports", dependencies=[Depends(require_admin)])
+    def prompt_reports():
+        return app.state.prompt_reports.list()
+
+    @app.get("/api/v1/admin/prompt-reports/{report_id}/image", dependencies=[Depends(require_admin)])
+    def report_image(report_id: str):
+        try:
+            path, mime = app.state.prompt_reports.image(report_id)
+            return FileResponse(path, media_type=mime)
+        except (RepositoryError, RemoteJobError) as exc:
+            raise HTTPException(404, str(exc)) from exc
+
+    @app.post("/api/v1/admin/prompt-reports/{report_id}/{action}")
+    def resolve_report(report_id: str, action: str, principal: Annotated[AuthPrincipal, Depends(require_admin)], confirmed: bool = False):
+        if not confirmed: raise HTTPException(409, '需要二次确认')
+        try:
+            return app.state.prompt_reports.resolve(report_id, action, principal)
+        except RepositoryError as exc:
+            _raise_management_error(exc)
+
+    @app.post("/api/v1/lite/prompt-favorites/{prompt_id}", response_model=PromptLikeResponse)
+    def favorite_prompt(prompt_id: str, principal: Annotated[AuthPrincipal, Depends(require_reader)]):
+        try:
+            return promote_k_prompt(resolved, prompt_id, principal)
+        except RepositoryError as exc:
+            _raise_management_error(exc)
+
+    @app.delete("/api/v1/lite/prompt-favorites/{prompt_id}")
+    def unfavorite_prompt(prompt_id: str, principal: Annotated[AuthPrincipal, Depends(require_reader)]):
+        try:
+            result = remove_prompt_favorite(resolved, prompt_id, principal)
+            app.state.remote_jobs.unmark_liked(prompt_id, principal)
+            return result
+        except RepositoryError as exc:
+            _raise_management_error(exc)
 
     @app.get(
         "/api/v1/lite/presets",
@@ -268,6 +503,47 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return list_style_loras(resolved)
         except RepositoryError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    @app.post('/api/v1/lite/jobs/{job_id}/cancel-suite')
+    def cancel_task_suite(job_id: str, principal: Annotated[AuthPrincipal, Depends(require_reader)]):
+        try:
+            return app.state.remote_jobs.cancel_suite(job_id, principal)
+        except RemoteJobError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.get('/api/v1/lite/task-suites')
+    def task_suites_list(principal: Annotated[AuthPrincipal, Depends(require_reader)]):
+        try:
+            return list_suites(resolved, principal)
+        except RepositoryError as exc:
+            _raise_management_error(exc)
+
+    @app.post('/api/v1/lite/task-suites')
+    def task_suites_create(payload: SuiteWrite, principal: Annotated[AuthPrincipal, Depends(require_reader)],
+                           if_match: Annotated[str | None, Header(alias='If-Match')] = None):
+        try:
+            return write_suite(resolved, principal, payload, _expected_revision(if_match))
+        except RepositoryError as exc:
+            _raise_management_error(exc)
+
+    @app.put('/api/v1/lite/task-suites/{identifier}')
+    def task_suites_edit(identifier: str, payload: SuiteWrite, principal: Annotated[AuthPrincipal, Depends(require_reader)],
+                         if_match: Annotated[str | None, Header(alias='If-Match')] = None):
+        try:
+            visible = list_suites(resolved, principal)['items']
+            if not any(i['id'] == identifier and i['editable'] for i in visible):
+                raise ResourceNotFound('套组不存在或无权修改')
+            return write_suite(resolved, principal, payload, _expected_revision(if_match), identifier)
+        except RepositoryError as exc:
+            _raise_management_error(exc)
+
+    @app.delete('/api/v1/lite/task-suites/{identifier}')
+    def task_suites_delete(identifier: str, principal: Annotated[AuthPrincipal, Depends(require_reader)],
+                           if_match: Annotated[str | None, Header(alias='If-Match')] = None):
+        try:
+            return delete_suite(resolved, principal, identifier, _expected_revision(if_match))
+        except RepositoryError as exc:
+            _raise_management_error(exc)
 
     @app.get(
         "/api/v1/lite/personal-styles",

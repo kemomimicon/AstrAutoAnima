@@ -1,11 +1,11 @@
 {
-  "release": "0.4.0",
-  "status": "stable",
+  "release": "0.5.0-beta.1",
+  "status": "prerelease",
   "components": {
-    "astrbot_plugin_comfy_bridge": "0.4.0",
-    "astr_auto_anima_hub_service": "0.4.0",
-    "astr_auto_anima_hub_client": "0.4.0+24",
-    "workflow_pack": "0.5.0-beta.2"
+    "astrbot_plugin_comfy_bridge": "0.5.0-beta.1",
+    "astr_auto_anima_hub_service": "0.5.0b1",
+    "astr_auto_anima_hub_client": "0.5.0-beta.1+35",
+    "workflow_pack": "0.8.0-beta.1-public"
   },
   "compatibility": {
     "astrbot": ">=4.17,<5",
@@ -14,6 +14,8 @@
     "python": ">=3.10"
   },
   "private_data_included": false,
+  "training_studio_connector_included": false,
+  "automatic_cloud_shutdown_included": false,
   "bundled_prompt_count": 0,
   "models_included": false,
   "external_downloads_default_enabled": false,

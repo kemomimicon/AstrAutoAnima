@@ -7,17 +7,22 @@ on:
 jobs:
   python-validation:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ["3.11", "3.12"]
+    env:
+      PYTHONDONTWRITEBYTECODE: "1"
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
         with:
-          python-version: "3.11"
+          python-version: ${{ matrix.python }}
       - name: Validate release and privacy boundary
         run: |
           python scripts/validate_release.py .
           python scripts/privacy_scan.py .
       - name: Test local managers
-        run: python -m unittest discover -s tools/tests -v
+        run: python scripts/run_public_tests.py tools
       - name: Test training environment guard
         run: |
           python -m pip install "pytest>=8,<10"
@@ -25,8 +30,13 @@ jobs:
       - name: Test AstrBot plugin runtime
         env:
           PYTHONPATH: ${{ github.workspace }}/plugin
-        run: python -m unittest discover -s plugin/astrbot_plugin_comfy_bridge/tests -v
+        run: |
+          python -m pip install -r plugin/astrbot_plugin_comfy_bridge/requirements.txt
+          python scripts/run_public_tests.py plugin --pytest
       - name: Install and test Hub
         run: |
-          python -m pip install -e hub/service
-          PYTHONPATH=hub/service/src python -m unittest discover -s hub/service/tests -v
+          cp -R hub/service "$RUNNER_TEMP/aaa-hub-test-src"
+          python -m pip install -e "$RUNNER_TEMP/aaa-hub-test-src"
+          python scripts/run_public_tests.py hub --pytest
+      - name: Recheck no runtime artifacts were produced in release tree
+        run: python scripts/privacy_scan.py .

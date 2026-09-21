@@ -1,0 +1,48 @@
+{
+  "1": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "audit.png"
+    }
+  },
+  "2": {
+    "class_type": "Load Booru Tagger",
+    "inputs": {
+      "model_name": "cl-tagger-v2-v2_00",
+      "replace_underscore": true
+    }
+  },
+  "3": {
+    "class_type": "Booru Tagger",
+    "inputs": {
+      "tagger_model": [
+        "2",
+        0
+      ],
+      "tagger_info": [
+        "2",
+        1
+      ],
+      "image": [
+        "1",
+        0
+      ],
+      "threshold": 0.35,
+      "character_threshold": 0.35,
+      "use_best_threshold": false,
+      "trailing_comma": false,
+      "sort_tags": false,
+      "exclude_tags": ""
+    }
+  },
+  "4": {
+    "class_type": "AnimaSafetyAuditResult",
+    "inputs": {
+      "tags": [
+        "3",
+        0
+      ],
+      "nonce": "REPLACED_PER_AUDIT"
+    }
+  }
+}

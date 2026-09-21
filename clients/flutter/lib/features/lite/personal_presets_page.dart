@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 
 import '../../core/hub_api.dart';
 import '../../core/models.dart';
+import '../presets/palette_dialog.dart';
+import '../loras/lora_share_dialog.dart';
 
 class PersonalPresetsPage extends StatefulWidget {
   const PersonalPresetsPage({required this.api, super.key});
@@ -36,8 +38,8 @@ class _PersonalPresetsPageState extends State<PersonalPresetsPage> {
   ) async {
     final value = await showDialog<Map<String, dynamic>>(
       context: context,
-      builder: (context) =>
-          _PersonalStyleEditor(initial: initial, catalog: catalog.items),
+      builder: (context) => _PersonalStyleEditor(
+          api: widget.api, initial: initial, catalog: catalog.items),
     );
     if (value == null) return;
     try {
@@ -202,7 +204,9 @@ class _PersonalPresetsPageState extends State<PersonalPresetsPage> {
 }
 
 class _PersonalStyleEditor extends StatefulWidget {
-  const _PersonalStyleEditor({required this.catalog, this.initial});
+  const _PersonalStyleEditor(
+      {required this.api, required this.catalog, this.initial});
+  final HubApi api;
   final List<LoraCatalogItem> catalog;
   final PersonalStyle? initial;
 
@@ -335,6 +339,27 @@ class _PersonalStyleEditorState extends State<_PersonalStyleEditor> {
       actions: [
         TextButton(
             onPressed: () => Navigator.pop(context), child: const Text('取消')),
+        TextButton(
+            onPressed: _loras.isEmpty
+                ? null
+                : () async {
+                    final result = await showPalette(context, widget.api, {
+                      'name': _name.text.trim(),
+                      'prompt': _prompt.text.trim(),
+                      'loras': _loras.map((e) => e.toJson()).toList()
+                    });
+                    if (result != null && mounted) {
+                      setState(() {
+                        _loras.clear();
+                        for (final item in result['loras'] as List) {
+                          _loras.add(PersonalStyleLora(
+                              path: item['path'] as String,
+                              strength: (item['strength'] as num).toDouble()));
+                        }
+                      });
+                    }
+                  },
+            child: const Text('调配')),
         FilledButton(
           onPressed: () {
             if (_name.text.trim().isEmpty || _loras.isEmpty) {
@@ -447,6 +472,13 @@ class _LoraPickerState extends State<_LoraPicker> {
                     : '该 LoRA 未配置推荐触发词',
                 maxLines: 3,
                 overflow: TextOverflow.ellipsis),
+          ),
+          TextButton.icon(
+            onPressed: _selected == null
+                ? null
+                : () => showLoraShareDialog(context, _selected!),
+            icon: const Icon(Icons.share_outlined),
+            label: const Text('分享所选 LoRA 链接和触发词'),
           ),
         ]),
       ),

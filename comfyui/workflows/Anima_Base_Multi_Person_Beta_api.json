@@ -1,0 +1,101 @@
+{
+  "8": {
+    "class_type": "VAEDecode",
+    "inputs": {
+      "samples": [
+        "19",
+        0
+      ],
+      "vae": [
+        "15",
+        0
+      ]
+    }
+  },
+  "9": {
+    "class_type": "SaveImage",
+    "inputs": {
+      "filename_prefix": "astrbot/multi_base",
+      "images": [
+        "8",
+        0
+      ]
+    }
+  },
+  "11": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "clip": [
+        "45",
+        0
+      ],
+      "text": "best quality, 1girl, 1boy. Exactly two adults in one coherent scene. Character A: Alice, a woman with red hair and green eyes, wearing a blue jacket, standing on the left. Character B: Bob, a man with short black hair and blue eyes, wearing a white shirt, sitting on the right. Scene: a sunny park. Interaction: Character A waves to Character B."
+    }
+  },
+  "12": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "clip": [
+        "45",
+        0
+      ],
+      "text": "worst quality, low quality, blurry, malformed hands, extra fingers, watermark, signature"
+    }
+  },
+  "15": {
+    "class_type": "VAELoader",
+    "inputs": {
+      "vae_name": "YOUR_ANIMA_VAE.safetensors"
+    }
+  },
+  "19": {
+    "class_type": "KSampler",
+    "inputs": {
+      "seed": 12345,
+      "steps": 34,
+      "cfg": 4.5,
+      "sampler_name": "er_sde",
+      "scheduler": "normal",
+      "denoise": 1.0,
+      "model": [
+        "44",
+        0
+      ],
+      "positive": [
+        "11",
+        0
+      ],
+      "negative": [
+        "12",
+        0
+      ],
+      "latent_image": [
+        "28",
+        0
+      ]
+    }
+  },
+  "28": {
+    "class_type": "EmptyLatentImage",
+    "inputs": {
+      "width": 1536,
+      "height": 1024,
+      "batch_size": 1
+    }
+  },
+  "44": {
+    "class_type": "UNETLoader",
+    "inputs": {
+      "unet_name": "YOUR_ANIMA_UNET.safetensors",
+      "weight_dtype": "default"
+    }
+  },
+  "45": {
+    "class_type": "CLIPLoader",
+    "inputs": {
+      "clip_name": "YOUR_ANIMA_CLIP.safetensors",
+      "type": "stable_diffusion",
+      "device": "default"
+    }
+  }
+}

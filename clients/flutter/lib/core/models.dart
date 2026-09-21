@@ -364,6 +364,7 @@ class PresetSummary {
     required this.match,
     required this.loras,
     required this.textOnly,
+    this.variants = const [],
   });
 
   factory PresetSummary.fromJson(Map<String, dynamic> json) {
@@ -377,6 +378,10 @@ class PresetSummary {
           .map((e) => Map<String, dynamic>.from(e))
           .toList(),
       textOnly: json['text_only'] as bool? ?? false,
+      variants: (json['variants'] as List? ?? const [])
+          .whereType<Map>()
+          .map((e) => Map<String, dynamic>.from(e))
+          .toList(),
     );
   }
 
@@ -386,6 +391,7 @@ class PresetSummary {
   final List<String> match;
   final List<Map<String, dynamic>> loras;
   final bool textOnly;
+  final List<Map<String, dynamic>> variants;
 }
 
 class PresetListResult {
@@ -553,6 +559,8 @@ class DeliveryTargetListResult {
 
 class RemoteJobImage {
   const RemoteJobImage({
+    this.taskSuiteIndex = 0,
+    this.promptId = '',
     required this.id,
     required this.filename,
     required this.contentType,
@@ -563,6 +571,8 @@ class RemoteJobImage {
 
   factory RemoteJobImage.fromJson(Map<String, dynamic> json) {
     return RemoteJobImage(
+      taskSuiteIndex: json['task_suite_index'] as int? ?? 0,
+      promptId: json['prompt_id'] as String? ?? '',
       id: json['id'] as String? ?? '',
       filename: json['filename'] as String? ?? 'generated-image.png',
       contentType: json['content_type'] as String? ?? 'image/png',
@@ -578,10 +588,14 @@ class RemoteJobImage {
   final int sizeBytes;
   final String sha256;
   final String downloadUrl;
+  final String promptId;
+  final int taskSuiteIndex;
 }
 
 class RemoteJobResult {
   const RemoteJobResult({
+    this.taskSuiteId = '',
+    this.taskSuiteRows = const [],
     required this.id,
     required this.status,
     required this.kind,
@@ -600,6 +614,10 @@ class RemoteJobResult {
 
   factory RemoteJobResult.fromJson(Map<String, dynamic> json) {
     return RemoteJobResult(
+      taskSuiteId: json['task_suite_id'] as String? ?? '',
+      taskSuiteRows: (json['task_suite_rows'] as List? ?? [])
+          .map((e) => Map<String, dynamic>.from(e))
+          .toList(),
       id: json['id'] as String? ?? '',
       status: json['status'] as String? ?? 'failed',
       kind: json['kind'] as String? ?? 'direct',
@@ -643,6 +661,8 @@ class RemoteJobResult {
   final DateTime updatedAt;
 
   bool get isFinished => status == 'succeeded' || status == 'failed';
+  final String taskSuiteId;
+  final List<Map<String, dynamic>> taskSuiteRows;
 }
 
 class PromptLikeResult {
@@ -674,6 +694,7 @@ class LoraCatalogItem {
     required this.enabled,
     required this.present,
     required this.sizeBytes,
+    this.sourceUrl = '',
   });
 
   factory LoraCatalogItem.fromJson(Map<String, dynamic> json) {
@@ -685,6 +706,7 @@ class LoraCatalogItem {
       enabled: json['enabled'] as bool? ?? true,
       present: json['present'] as bool? ?? true,
       sizeBytes: json['size_bytes'] as int? ?? 0,
+      sourceUrl: json['source_url'] as String? ?? '',
     );
   }
 
@@ -695,6 +717,10 @@ class LoraCatalogItem {
   final bool enabled;
   final bool present;
   final int sizeBytes;
+  final String sourceUrl;
+
+  String get shareText =>
+      'LoRA：$displayName\n来源：$sourceUrl\n触发词：${recommendedPrompt.isEmpty ? '未提供，请查看作者说明' : recommendedPrompt}';
 }
 
 class LoraCatalogResult {

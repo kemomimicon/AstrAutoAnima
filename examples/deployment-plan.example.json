@@ -1,0 +1,17 @@
+{
+  "destination": "/opt/astr-auto-anima-install",
+  "install_dependencies": false,
+  "install_astrbot": false,
+  "install_comfyui": false,
+  "astrbot": "/opt/astrbot",
+  "comfyui": "/opt/ComfyUI",
+  "astrbot_python": "/opt/astrbot/.venv/bin/python",
+  "comfy_python": "/opt/ComfyUI/.venv/bin/python",
+  "gpu": true,
+  "unet": "",
+  "clip": "",
+  "vae": "",
+  "bot_id": "",
+  "api_key": "",
+  "external": ""
+}

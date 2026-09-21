@@ -88,11 +88,11 @@ class RemoteJobTests(unittest.TestCase):
             RemoteJobCreateRequest(
                 target_id="main-group",
                 kind="random",
-                character="example_character",
+                character="6ctmika",
             ),
             target,
         )
-        self.assertEqual(command, "来张好图抄一抄 N 角色=example_character 角色模式=弱")
+        self.assertEqual(command, "来张好图抽一抽 N 角色=6ctmika 角色模式=弱")
         self.assertEqual(safety, "N")
 
     def test_sampler_preset_is_forwarded_before_prompt(self) -> None:
@@ -134,8 +134,8 @@ class RemoteJobTests(unittest.TestCase):
             RemoteJobCreateRequest(
                 target_id="main-group",
                 kind="chinese",
-                character="example_character",
-                style="example_style",
+                character="6ctmika",
+                style="staryfs",
                 ratio="2:3",
                 prompt="雨夜里撑伞",
             ),
@@ -143,22 +143,22 @@ class RemoteJobTests(unittest.TestCase):
         )
         self.assertEqual(
             chinese,
-            "/aicn 角色=example_character 角色模式=弱 画风=example_style 比例=2:3 雨夜里撑伞",
+            "/aicn 角色=6ctmika 角色模式=弱 画风=staryfs 比例=2:3 雨夜里撑伞",
         )
         reverse, _ = build_remote_command(
             RemoteJobCreateRequest(
                 target_id="owner-private",
                 kind="reverse",
                 reverse_preset="scene",
-                character="second_character",
-                style="soft_style",
+                character="edlf_itsuwari",
+                style="shiratama",
                 prompt="transparent umbrella",
             ),
             private,
         )
         self.assertEqual(
             reverse,
-            "/aip 模式=scene 角色=second_character 角色模式=弱 画风=soft_style transparent umbrella",
+            "/aip 模式=scene 角色=edlf_itsuwari 角色模式=弱 画风=shiratama transparent umbrella",
         )
 
         reverse_multi, _ = build_remote_command(
@@ -196,7 +196,7 @@ class RemoteJobTests(unittest.TestCase):
             ),
             group,
         )
-        self.assertEqual(group_command, "来张好图抄一抄 D/H")
+        self.assertEqual(group_command, "来张好图抽一抽 D/H")
         self.assertEqual(group_safety, "H")
         with self.assertRaisesRegex(RemoteJobError, "does not allow"):
             build_remote_command(
@@ -236,22 +236,28 @@ class RemoteJobTests(unittest.TestCase):
                 target_id="owner-private",
                 kind="hq",
                 profile="beauty",
-                character="example_character",
-                style="example_style",
+                character="6ctmika",
+                style="staryfs",
                 ratio="2:3",
                 sampler="2m_sde_gpu",
                 steps=38,
                 cfg=4.5,
                 scale=1.5,
                 denoise=0.3,
+                camera_pitch="extreme_low",
+                camera_lens="wide",
+                detail_hands=True,
+                detail_feet=True,
+                detail_face=False,
                 prompt="rainy street",
             ),
             target,
         )
         self.assertEqual(
             hq,
-            "/ahq beauty 角色=example_character 角色模式=弱 画风=example_style 比例=2:3 "
-            "采样器=2m_sde_gpu 步数=38 CFG=4.5 放大=1.5 重绘=0.3 rainy street",
+            "/ahq beauty 修手=开启 修脚=开启 修脸=关闭 修复后放大=关闭 极限辅助=关闭 角色=6ctmika 角色模式=弱 "
+            "画风=staryfs 比例=2:3 采样器=2m_sde_gpu 步数=38 CFG=4.5 "
+            "放大=1.5 重绘=0.3 俯仰机位=extreme_low 镜头效果=wide rainy street",
         )
 
         refine, _ = build_remote_command(
@@ -277,7 +283,7 @@ class RemoteJobTests(unittest.TestCase):
                 profile="seedvr2",
                 parent_job_id="job_20260821_test",
                 scale=1.75,
-                denoise=0.4,
+                denoise=None,
             ),
             target,
         )
@@ -285,6 +291,8 @@ class RemoteJobTests(unittest.TestCase):
             seedvr2,
             "/arefine seedvr2 任务=job_20260821_test",
         )
+        with self.assertRaises(RemoteJobError):
+            build_remote_command(RemoteJobCreateRequest(target_id="owner-private", kind="refine", profile="seedvr2", denoise=0.4), target)
 
     def test_five_prompt_ids_are_all_captured(self) -> None:
         self.assertEqual(
@@ -364,6 +372,7 @@ class RemoteJobManagerTests(unittest.IsolatedAsyncioTestCase):
         )
         self.sent_payload: dict = {}
         self.chat_payload: dict = {}
+        self.stream_override = None
 
         def handler(request: httpx.Request) -> httpx.Response:
             if request.url.path == "/api/v1/chat":
@@ -397,6 +406,8 @@ class RemoteJobManagerTests(unittest.IsolatedAsyncioTestCase):
                         + "\n\n"
                         + 'data: {"type":"end","data":""}\n\n'
                     )
+                if self.stream_override is not None:
+                    body = self.stream_override
                 return httpx.Response(
                     200,
                     text=body,
@@ -442,6 +453,49 @@ class RemoteJobManagerTests(unittest.IsolatedAsyncioTestCase):
         await self.manager.shutdown()
         self.temp.cleanup()
 
+    async def test_random_styles_ticket_only_contains_current_owner(self):
+        from unittest.mock import AsyncMock
+        from astr_auto_anima_hub.auth import AuthPrincipal
+        from astr_auto_anima_hub.personal_styles import _style_key_for_subject
+        owner = AuthPrincipal(role='admin', subject='owner-a', label='A', qq='123456')
+        path = self.settings.personal_styles_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({'users': {
+            'owner-a': {'1': {'name': 'mine', 'prompt': 'art', 'loras': []}},
+            'owner-b': {'2': {'name': 'other', 'prompt': 'art', 'loras': []}},
+        }}))
+        self.manager._run = AsyncMock()
+        job = self.manager.create(RemoteJobCreateRequest(
+            target_id='private', kind='random', five_draw=True, style='随机模式'), owner)
+        ticket = next((self.settings.hub_state_dir / 'random_styles').glob('*.json'))
+        content = json.loads(ticket.read_text())
+        self.assertEqual(content['personal_keys'], [_style_key_for_subject('owner-a', 1)])
+        self.assertIn('随机模式', job.command_preview)
+        self.assertNotIn('__hub_random_', job.command_preview)
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        self.assertFalse(ticket.exists())
+
+    async def test_source_mapping_survives_partial_failure(self):
+        import hashlib
+        content = b"\x89PNG\r\n\x1a\nfake-png"
+        events = [
+            {'type': 'plain', 'data': 'AAA_IMAGE_SOURCE=' + json.dumps({'sha256': hashlib.sha256(content).hexdigest(), 'prompt_id': 'G260910_0123'})},
+            {'type': 'attachment_saved', 'data': {'id': 'existing-attachment', 'type': 'image'}},
+            {'type': 'error', 'data': 'later draw failed'},
+        ]
+        self.stream_override = ''.join('data: ' + json.dumps(event) + '\n\n' for event in events)
+        job = self.manager.create(RemoteJobCreateRequest(target_id='private', kind='random', five_draw=True, deliver_to_im=False))
+        for _ in range(80):
+            current = self.manager.get(job.id)
+            if current.status in {'failed', 'succeeded'}:
+                break
+            await asyncio.sleep(.01)
+        self.assertEqual(current.status, 'failed')
+        self.assertEqual(len(current.images), 1)
+        self.assertEqual(current.images[0].prompt_id, 'G260910_0123')
+        self.assertIn('G260910_0123', current.prompt_ids)
+
     async def test_chat_image_is_uploaded_and_sent_to_target(self) -> None:
         job = self.manager.create(
             RemoteJobCreateRequest(
@@ -469,6 +523,19 @@ class RemoteJobManagerTests(unittest.IsolatedAsyncioTestCase):
         stored = self.manager.get_image(job.id, current.images[0].id)
         self.assertIsNotNone(stored)
         self.assertEqual(stored[1].read_bytes(), b"\x89PNG\r\n\x1a\nfake-png")
+
+    async def test_queue_only_keeps_image_without_qq(self) -> None:
+        job = self.manager.create(RemoteJobCreateRequest(target_id="private", kind="direct", prompt="garden", deliver_to_im=False))
+        for _ in range(50):
+            current = self.manager.get(job.id)
+            if current.status in {"succeeded", "failed"}:
+                break
+            await asyncio.sleep(.01)
+        self.assertEqual(current.status, "succeeded")
+        self.assertEqual(self.sent_payload, {})
+        self.assertEqual(len(current.images), 1)
+        self.assertFalse(current.deliver_to_im)
+        self.assertIsNotNone(self.manager.get_image(job.id, current.images[0].id))
 
     async def test_plain_only_plugin_failure_is_preserved(self) -> None:
         job = self.manager.create(
@@ -555,8 +622,8 @@ class RemoteJobManagerTests(unittest.IsolatedAsyncioTestCase):
                 target_id="private",
                 kind="reverse",
                 reverse_preset="raw",
-                character="example_character",
-                style="example_style",
+                character="6ctmika",
+                style="staryfs",
                 source_image_name="source.png",
                 source_image_data=(
                     "data:image/png;base64," + base64.b64encode(source).decode("ascii")
@@ -576,7 +643,7 @@ class RemoteJobManagerTests(unittest.IsolatedAsyncioTestCase):
             [
                 {
                     "type": "plain",
-                    "text": "/aip 模式=raw 角色=example_character 角色模式=弱 画风=example_style",
+                    "text": "/aip 模式=raw 角色=6ctmika 角色模式=弱 画风=staryfs",
                 },
                 {"type": "image", "attachment_id": "attachment-1"},
             ],

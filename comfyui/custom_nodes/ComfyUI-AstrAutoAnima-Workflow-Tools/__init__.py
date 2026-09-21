@@ -1,4 +1,5 @@
 from .nodes import (
+    AnimaSafetyAuditResult,
     AnimaCaptionBatchGuard,
     AnimaDatasetTypeResolver,
     AnimaImageBatchChunker,
@@ -9,6 +10,9 @@ from .nodes import (
     AnimaTrainingTagFusion,
     install_anima_batch_conditioning_compat,
 )
+from .idle_admission import install_idle_admission
+
+install_idle_admission()
 
 
 if install_anima_batch_conditioning_compat():
@@ -18,6 +22,7 @@ else:
 
 
 NODE_CLASS_MAPPINGS = {
+    "AnimaSafetyAuditResult": AnimaSafetyAuditResult,
     "AnimaCaptionBatchGuard": AnimaCaptionBatchGuard,
     "AnimaImageBatchChunker": AnimaImageBatchChunker,
     "AnimaPromptBatchEncode": AnimaPromptBatchEncode,

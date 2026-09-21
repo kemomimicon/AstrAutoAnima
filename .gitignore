@@ -7,6 +7,14 @@
 *token*.csv
 lite_users.json
 delivery_targets.json
+runtime-env.json
+last-plan.json
+services.json
+.deploy.lock
+.aaa-managed-install
+*.sqlite3
+*.sqlite
+*.db
 
 # Private runtime data
 presets.json

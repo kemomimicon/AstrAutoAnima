@@ -31,6 +31,9 @@ REQUIRED = (
     "tools/prompt_pool_manager.py",
     "tools/hub_lite_user_manager.py",
     "tools/easy_installer.py",
+    "tools/deploy_project.py",
+    "tools/bootstrap_windows.ps1",
+    "docs/WORKFLOWS.md",
     "tools/optional_components.json",
     "examples/prompt_pool.custom-groups.example.json",
     "一键部署_AstrAutoAnima.bat",
@@ -77,15 +80,15 @@ def main() -> int:
     seedvr = root / "comfyui/workflows/Anima_SeedVR2_Refine_Beta_api.json"
     if seedvr.is_file():
         text = seedvr.read_text(encoding="utf-8-sig")
-        for placeholder in ("YOUR_SEEDVR2_MODEL.gguf", "YOUR_SEEDVR2_VAE.safetensors"):
+        for placeholder in ("YOUR_SEEDVR2_MODEL", "YOUR_SEEDVR2_VAE.safetensors"):
             if placeholder not in text:
                 errors.append(f"sanitized placeholder {placeholder} missing from SeedVR2 workflow")
 
     manifest = root / "release-manifest.json"
     if manifest.is_file():
         payload = json.loads(manifest.read_text(encoding="utf-8-sig"))
-        if payload.get("release") != "0.4.0" or payload.get("status") != "stable":
-            errors.append("release manifest does not describe stable 0.4.0")
+        if payload.get("release") != "0.5.0-beta.1" or payload.get("status") != "prerelease":
+            errors.append("release manifest does not describe 0.5.0-beta.1 prerelease")
 
     if errors:
         print("Release validation FAILED:")

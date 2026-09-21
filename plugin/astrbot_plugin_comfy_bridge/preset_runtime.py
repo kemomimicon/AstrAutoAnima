@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import json
 import re
 from pathlib import Path
@@ -18,8 +19,36 @@ EMPTY_PRESETS: dict[str, Any] = {
 }
 
 DIRECTIVE_NAMES = {
+    "套组": "task_suite",
+    "主光": "lighting_key",
+    "效果光": "lighting_effect",
+    "主材质": "material_primary",
+    "细节材质": "material_details",
+    "表面效果": "material_surface",
+    "镜头距离": "camera_distance",
+    "camera_distance": "camera_distance",
+    "水平机位": "camera_yaw",
+    "camera_yaw": "camera_yaw",
+    "俯仰机位": "camera_pitch",
+    "camera_pitch": "camera_pitch",
+    "镜头效果": "camera_lens",
+    "camera_lens": "camera_lens",
+    "画面倾斜": "camera_roll",
+    "camera_roll": "camera_roll",
+    "极限辅助": "camera_extreme_lora",
+    "camera_extreme_lora": "camera_extreme_lora",
+    "修复后放大": "detail_upscale",
+    "detail_upscale": "detail_upscale",
+    "修手": "detail_hands",
+    "detail_hands": "detail_hands",
+    "修脚": "detail_feet",
+    "detail_feet": "detail_feet",
+    "修脸": "detail_face",
+    "detail_face": "detail_face",
     "角色": "character",
     "role": "character",
+    "造型": "character_variant",
+    "character_variant": "character_variant",
     "角色模式": "character_tag_mode",
     "角色标签": "character_tag_mode",
     "character_mode": "character_tag_mode",
@@ -259,15 +288,27 @@ def parse_generation_directives(text: str) -> tuple[str, dict[str, Any]]:
     remaining = str(text or "").lstrip()
     options: dict[str, Any] = {}
     names = "|".join(sorted((re.escape(name) for name in DIRECTIVE_NAMES), key=len, reverse=True))
-    pattern = re.compile(rf"^(?:({names})=([^\s]*))(?:\s+|$)", re.IGNORECASE)
+    pattern = re.compile(rf'''^(?:({names})=("(?:\\.|[^"\\])*"|'[^']*'|[^\s]*))(?:\s+|$)''', re.IGNORECASE)
 
     while remaining:
+        fixed = re.match(r'^固定种子(?:\s+|$)', remaining)
+        if fixed:
+            options['fixed_seed'] = True
+            remaining = remaining[fixed.end():].lstrip()
+            continue
         match = pattern.match(remaining)
         if not match:
             break
         original_name, value = match.groups()
+        if value.startswith('"') and value.endswith('"'):
+            try:
+                value = json.loads(value)
+            except ValueError as exc:
+                raise WorkflowError('参数引号格式无效') from exc
+        elif value.startswith("'") and value.endswith("'"):
+            value = value[1:-1]
         key = DIRECTIVE_NAMES[original_name.lower()]
-        if value and value != "默认":
+        if value and (value != "默认" or key == "character_variant"):
             if key in {
                 "character_strength",
                 "character_model",
@@ -282,11 +323,53 @@ def parse_generation_directives(text: str) -> tuple[str, dict[str, Any]]:
                     options[key] = int(value)
                 except ValueError as exc:
                     raise WorkflowError(f"{original_name}必须是整数。") from exc
+            elif key in {"detail_hands", "detail_feet", "detail_face", "camera_extreme_lora", "detail_upscale"}:
+                normalized = str(value).strip().casefold()
+                states = {
+                    "1": True,
+                    "true": True,
+                    "on": True,
+                    "开启": True,
+                    "是": True,
+                    "0": False,
+                    "false": False,
+                    "off": False,
+                    "关闭": False,
+                    "否": False,
+                }
+                if normalized not in states:
+                    raise WorkflowError(f"{original_name}只能填写 开启 或 关闭。")
+                options[key] = states[normalized]
             else:
                 options[key] = value
         remaining = remaining[match.end() :].lstrip()
 
     return remaining.strip(), options
+
+
+def select_character_variant(character: dict[str, Any] | None, variant_id: str) -> dict[str, Any] | None:
+    """Resolve a stable variant ID without changing the stored preset or LoRA."""
+    variant_id = str(variant_id or "default").strip()
+    if not isinstance(character, dict):
+        if variant_id not in {"default", "默认"}:
+            raise WorkflowError("造型必须与已有角色预设一起使用，不能用于词典或自由文本角色。")
+        return character
+    result = copy.deepcopy(character)
+    default_prompt = result.get("_default_prompt", result.get("prompt", ""))
+    if variant_id in {"default", "默认"}:
+        result["prompt"] = default_prompt
+        result.pop("selected_variant", None)
+        return result
+    if not isinstance(result.get("lora"), dict):
+        raise WorkflowError("角色造型仅适用于角色 LoRA 预设。")
+    variants = result.get("variants", [])
+    matches = [row for row in variants if isinstance(row, dict) and row.get("id") == variant_id] if isinstance(variants, list) else []
+    if len(matches) != 1 or not isinstance(matches[0].get("prompt"), str) or not matches[0]["prompt"].strip():
+        raise WorkflowError(f"角色造型不存在、重复或触发词为空：{variant_id}")
+    result["_default_prompt"] = default_prompt
+    result["prompt"] = matches[0]["prompt"].strip(" ,\n\t")
+    result["selected_variant"] = copy.deepcopy(matches[0])
+    return result
 
 
 def resolve_presets(
@@ -327,6 +410,7 @@ def resolve_presets(
         and not allow_character_text_fallback
     ):
         raise WorkflowError(f"找不到角色预设：{character_name}")
+    character = select_character_variant(character, options.get("character_variant", "default"))
     return style, character, style_name, character_name
 
 

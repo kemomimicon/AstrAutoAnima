@@ -16,6 +16,33 @@ class PresetsPage extends StatefulWidget {
 class _PresetsPageState extends State<PresetsPage> {
   late Future<PresetListResult> _future = widget.api.getPresets();
   int _segment = 0;
+  String _search = '';
+  final _searchController = TextEditingController();
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _verifySaved(String kind, Map<String, dynamic> value) async {
+    final data = await widget.api.getPresets();
+    final items = kind == 'style' ? data.styles : data.characters;
+    if (!items.any((p) =>
+        p.name == value['name'] &&
+        p.prompt ==
+            (value['prompt'] as String)
+                .trim()
+                .replaceAll(RegExp(r'^[,\s]+|[,\s]+$'), ''))) {
+      throw const FormatException('服务器回读未找到刚保存的预设，请检查写入/读取路径或并发修改');
+    }
+    if (mounted) {
+      setState(() {
+        _future = Future.value(data);
+        _search = '';
+        _searchController.clear();
+      });
+    }
+  }
 
   void _refresh() {
     setState(() => _future = widget.api.getPresets());
@@ -40,37 +67,44 @@ class _PresetsPageState extends State<PresetsPage> {
       _refresh();
     } on HubApiException catch (error) {
       _notice(
-        error.statusCode == 409 ? '预设已被其他操作更新，正在刷新。' : error.message,
+        error.message,
         error: true,
       );
       if (error.statusCode == 409) _refresh();
     }
   }
 
-  Future<void> _add(String revision) async {
-    final value = await showPresetEditor(context, kind: _kind);
-    if (value == null) return;
-    await _runMutation(
-      () => widget.api.createPreset(
-        kind: _kind,
-        revision: revision,
-        value: value,
-      ),
-    );
+  Future<void> _add() async {
+    final kind = _kind;
+    final value = await showPresetEditor(context, kind: kind, api: widget.api,
+        onSave: (value) async {
+      // Creation does not overwrite an existing preset. Read a fresh revision
+      // on every explicit save attempt, rather than capturing the page's old
+      // revision for the entire lifetime of this dialog. The server still
+      // checks both duplicate names and writes racing this GET.
+      final latest = await widget.api.getPresets();
+      final items = kind == 'style' ? latest.styles : latest.characters;
+      if (items.any((item) => item.name == value['name'])) {
+        throw const FormatException('同名预设已存在，请更换名称或取消后编辑原预设；未覆盖原内容');
+      }
+      await widget.api
+          .createPreset(kind: kind, revision: latest.revision, value: value);
+      await _verifySaved(kind, value);
+    });
+    if (value != null) _notice('保存并回读确认成功：${value['name']}');
   }
 
   Future<void> _edit(PresetSummary item, String revision) async {
-    final value =
-        await showPresetEditor(context, kind: item.kind, initial: item);
-    if (value == null) return;
-    await _runMutation(
-      () => widget.api.updatePreset(
-        kind: item.kind,
-        originalName: item.name,
-        revision: revision,
-        value: value,
-      ),
-    );
+    final value = await showPresetEditor(context,
+        kind: item.kind, initial: item, api: widget.api, onSave: (value) async {
+      await widget.api.updatePreset(
+          kind: item.kind,
+          originalName: item.name,
+          revision: revision,
+          value: value);
+      await _verifySaved(item.kind, value);
+    });
+    if (value != null) _notice('保存并回读确认成功：${value['name']}');
   }
 
   Future<void> _delete(PresetSummary item, String revision) async {
@@ -137,6 +171,15 @@ class _PresetsPageState extends State<PresetsPage> {
           onSelectionChanged: (value) => setState(() => _segment = value.first),
         ),
         const SizedBox(height: 16),
+        TextField(
+            controller: _searchController,
+            decoration: const InputDecoration(
+                prefixIcon: Icon(Icons.search),
+                labelText: '搜索预设名称、LoRA、提示词或匹配词',
+                border: OutlineInputBorder()),
+            onChanged: (value) =>
+                setState(() => _search = value.trim().toLowerCase())),
+        const SizedBox(height: 16),
         FutureBuilder<PresetListResult>(
           future: _future,
           builder: (context, snapshot) {
@@ -152,13 +195,18 @@ class _PresetsPageState extends State<PresetsPage> {
               return Center(child: Text('${snapshot.error}'));
             }
             final data = snapshot.data!;
-            final items = _segment == 0 ? data.styles : data.characters;
+            final items = (_segment == 0 ? data.styles : data.characters)
+                .where((item) =>
+                    '${item.name} ${item.prompt} ${item.match.join(' ')} ${item.loras.map((l) => l['name']).join(' ')}'
+                        .toLowerCase()
+                        .contains(_search))
+                .toList();
             return Column(
               children: [
                 Align(
                   alignment: Alignment.centerRight,
                   child: FilledButton.icon(
-                    onPressed: () => _add(data.revision),
+                    onPressed: _add,
                     icon: const Icon(Icons.add),
                     label: Text('新增${_segment == 0 ? '画风' : '角色'}'),
                   ),

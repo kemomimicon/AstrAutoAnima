@@ -17,14 +17,14 @@ from prompt_pool_runtime import _merge_prompt_pools  # noqa: E402
 class KPDynamicRuntimeTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
+        if not json.loads((PLUGIN / 'data/kp_prompt_pool.json').read_text('utf-8')).get('prompts'):
+            raise unittest.SkipTest('Private K catalog is not distributed')
         cls.pool = json.loads(
             (PLUGIN / "data" / "kp_prompt_pool.json").read_text(encoding="utf-8")
         )
         cls.catalog = dynamic.load_kp_module_catalog(
             PLUGIN / "data" / "kp_dynamic_modules.json"
         )
-        if not cls.pool.get("prompts"):
-            raise unittest.SkipTest("公开发行版故意不附带 K 提示词语料")
 
     def test_catalog_covers_all_runtime_slots(self) -> None:
         expected = {

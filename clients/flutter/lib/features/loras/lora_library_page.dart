@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 
 import '../../core/hub_api.dart';
 import '../../core/models.dart';
+import 'civitai_download_page.dart';
+import 'lora_share_dialog.dart';
 
 class LoraLibraryPage extends StatefulWidget {
   const LoraLibraryPage({required this.api, super.key});
@@ -18,6 +20,10 @@ class _LoraLibraryPageState extends State<LoraLibraryPage> {
   String _category = 'all';
 
   void _reload() => setState(() => _future = widget.api.getLoraCatalog());
+
+  Future<void> _share(LoraCatalogItem item) async {
+    await showLoraShareDialog(context, item);
+  }
 
   Future<void> _edit(LoraCatalogItem item, String revision) async {
     final value = await showDialog<Map<String, dynamic>>(
@@ -53,6 +59,14 @@ class _LoraLibraryPageState extends State<LoraLibraryPage> {
                   onPressed: _reload,
                   icon: const Icon(Icons.sync),
                   label: const Text('重新扫描')),
+              IconButton(
+                  tooltip: '从 Civitai 下载 LoRA',
+                  icon: const Icon(Icons.cloud_download),
+                  onPressed: () async {
+                    await Navigator.of(context).push(MaterialPageRoute<void>(
+                        builder: (_) => CivitaiDownloadPage(api: widget.api)));
+                    if (mounted) _reload();
+                  }),
             ],
           ),
           const SizedBox(height: 8),
@@ -102,7 +116,8 @@ class _LoraLibraryPageState extends State<LoraLibraryPage> {
                       _category == 'all' || item.category == _category;
                   final haystack =
                       '${item.displayName}\n${item.path}'.toLowerCase();
-                  return matchesCategory &&
+                  return item.present &&
+                      matchesCategory &&
                       (_query.isEmpty || haystack.contains(_query));
                 }).toList();
                 if (items.isEmpty) {
@@ -127,9 +142,17 @@ class _LoraLibraryPageState extends State<LoraLibraryPage> {
                             maxLines: 3,
                             overflow: TextOverflow.ellipsis),
                         isThreeLine: true,
-                        trailing: IconButton(
-                            icon: const Icon(Icons.edit_outlined),
-                            onPressed: () => _edit(item, result.revision)),
+                        trailing:
+                            Row(mainAxisSize: MainAxisSize.min, children: [
+                          IconButton(
+                              tooltip: '分享链接和触发词',
+                              icon: const Icon(Icons.share_outlined),
+                              onPressed: () => _share(item)),
+                          IconButton(
+                              tooltip: '编辑 LoRA',
+                              icon: const Icon(Icons.edit_outlined),
+                              onPressed: () => _edit(item, result.revision)),
+                        ]),
                       ),
                     );
                   },
@@ -162,6 +185,7 @@ class _LoraEditor extends StatefulWidget {
 
 class _LoraEditorState extends State<_LoraEditor> {
   late final _name = TextEditingController(text: widget.item.displayName);
+  late final _source = TextEditingController(text: widget.item.sourceUrl);
   late final _prompt =
       TextEditingController(text: widget.item.recommendedPrompt);
   late String _category = widget.item.category;
@@ -170,6 +194,7 @@ class _LoraEditorState extends State<_LoraEditor> {
   @override
   void dispose() {
     _name.dispose();
+    _source.dispose();
     _prompt.dispose();
     super.dispose();
   }
@@ -205,6 +230,13 @@ class _LoraEditorState extends State<_LoraEditor> {
               ),
               const SizedBox(height: 12),
               TextField(
+                  controller: _source,
+                  decoration: const InputDecoration(
+                      labelText: '公开来源链接（分享用）',
+                      helperText: 'Civitai 下载自动记录；其他来源手动填写，不填令牌或下载签名。'),
+                  maxLines: 2),
+              const SizedBox(height: 12),
+              TextField(
                   controller: _prompt,
                   minLines: 3,
                   maxLines: 8,
@@ -226,6 +258,7 @@ class _LoraEditorState extends State<_LoraEditor> {
               ? null
               : () => Navigator.pop(context, {
                     'display_name': _name.text.trim(),
+                    'source_url': _source.text.trim(),
                     'category': _category,
                     'recommended_prompt': _prompt.text.trim(),
                     'enabled': _enabled,

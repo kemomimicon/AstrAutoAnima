@@ -22,14 +22,14 @@ from prompt_pool_runtime import (  # noqa: E402
 
 class GroupSelectorTests(unittest.TestCase):
     def test_defaults(self) -> None:
-        body, selection = parse_group_selector("角色=example_character 雨夜")
-        self.assertEqual(body, "角色=example_character 雨夜")
+        body, selection = parse_group_selector("角色=6ctmika 雨夜")
+        self.assertEqual(body, "角色=6ctmika 雨夜")
         self.assertEqual(selection["source_codes"], ["B", "G", "D", "P"])
         self.assertEqual(selection["safety_codes"], ["N", "H"])
 
     def test_pair(self) -> None:
-        body, selection = parse_group_selector("C/H 角色=example_character 雨夜")
-        self.assertEqual(body, "角色=example_character 雨夜")
+        body, selection = parse_group_selector("C/H 角色=6ctmika 雨夜")
+        self.assertEqual(body, "角色=6ctmika 雨夜")
         self.assertEqual(selection["source_codes"], ["C"])
         self.assertEqual(selection["safety_codes"], ["H"])
 
@@ -110,19 +110,19 @@ class PoolTests(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.pool_path = PLUGIN / "data" / "anima_random_prompt_pool.json"
         cls.pool = load_prompt_pool(cls.pool_path)
-        if not cls.pool["prompts"]:
-            raise unittest.SkipTest("公开发行版故意不附带真实提示词语料")
+        if not cls.pool.get("prompts"):
+            raise unittest.SkipTest("Private corpus statistics excluded from public release; synthetic pool tests run separately")
 
     def test_catalog_stats(self) -> None:
         stats = prompt_pool_stats(self.pool)
-        self.assertEqual(stats["total"], 7633)
-        self.assertEqual(stats["enabled"], 7555)
+        self.assertEqual(stats["total"], 23063)
+        self.assertEqual(stats["enabled"], 22495)
         self.assertEqual(stats["sources"]["B"], 450)
-        self.assertEqual(stats["sources"]["G"], 300)
-        self.assertEqual(stats["sources"]["D"], 2167)
+        self.assertEqual(stats["sources"]["G"], 4000)
+        self.assertEqual(stats["sources"]["D"], 13897)
         self.assertEqual(stats["sources"]["C"], 4716)
-        self.assertEqual(stats["safety_codes"]["H"], 1298)
-        self.assertEqual(stats["safety_codes"]["S"], 1863)
+        self.assertEqual(stats["safety_codes"]["H"], 1476)
+        self.assertEqual(stats["safety_codes"]["S"], 5441)
 
     def test_explicit_reverse_group_reports_error(self) -> None:
         with self.assertRaisesRegex(Exception, "暂无可用提示词"):
@@ -175,7 +175,7 @@ class PoolTests(unittest.TestCase):
             self.assertEqual(first["weight"], 7)
             self.assertEqual(first["source_code"], "B")
             self.assertEqual(migrated["quality_presets"]["general"]["prompt"], "custom quality")
-            self.assertEqual(migrated["catalog_revision"], 2026090101)
+            self.assertEqual(migrated["catalog_revision"], 2026091006)
             self.assertTrue((target.parent / "pool.pre-0.2.6.json").is_file())
 
     def test_default_sources_do_not_include_codex(self) -> None:

@@ -36,7 +36,7 @@ class PromptPoolRuntimeTests(unittest.TestCase):
                     "id": "good-002",
                     "enabled": True,
                     "weight": 1,
-                    "prompt": "synthetic sensitive-routing sample",
+                    "prompt": "1girl, solo, nude, bathing",
                     "categories": ["summer"],
                     "safety_level": "nsfw",
                 },

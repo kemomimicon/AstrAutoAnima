@@ -140,15 +140,18 @@ class CompShareApi {
   Future<Map<String, dynamic>> _invoke(
     String action, [
     Map<String, String> values = const {},
+    bool accountOnly = false,
   ]) async {
-    if (!config.isConfigured) {
+    if (accountOnly
+        ? config.publicKey.isEmpty || config.privateKey.isEmpty
+        : !config.isConfigured) {
       throw const CompShareApiException('请先保存完整的优云智算 API 配置。');
     }
     final body = <String, String>{
       'Action': action,
       'PublicKey': config.publicKey,
-      'Region': config.region,
-      'Zone': config.zone,
+      if (!accountOnly) 'Region': config.region,
+      if (!accountOnly) 'Zone': config.zone,
       ...values,
     };
     body['Signature'] = signature(body, config.privateKey);
@@ -195,6 +198,29 @@ class CompShareApi {
     return CompShareInstance.fromJson(raw);
   }
 
+  /// Account-level read only. No instance ID, region, or power action is sent.
+  Future<Map<String, String>> balance() async {
+    final payload = await _invoke('GetBalance', const {}, true);
+    final info = payload['AccountInfo'];
+    if (info is! Map) {
+      throw const CompShareApiException('余额响应格式无法识别。');
+    }
+    final result = <String, String>{};
+    for (final key in [
+      'AmountAvailable',
+      'Amount',
+      'AmountFree',
+      'AmountFreeze',
+      'AmountCredit'
+    ]) {
+      final raw = info[key];
+      final number = raw == null ? null : num.tryParse(raw.toString());
+      if (number != null && number.isFinite) result[key] = raw.toString();
+    }
+    if (result.isEmpty) throw const CompShareApiException('接口未提供可识别的余额。');
+    return result;
+  }
+
   Future<void> start({String withoutGpuSpec = ''}) async {
     await _invoke('StartCompShareInstance', {
       'UHostId': config.uhostId,
@@ -204,5 +230,9 @@ class CompShareApi {
 
   Future<void> stop() async {
     await _invoke('StopCompShareInstance', {'UHostId': config.uhostId});
+  }
+
+  Future<void> reboot() async {
+    await _invoke('RebootCompShareInstance', {'UHostId': config.uhostId});
   }
 }

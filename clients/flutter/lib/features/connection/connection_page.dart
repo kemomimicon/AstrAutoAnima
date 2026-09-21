@@ -1,3 +1,4 @@
+import '../../core/courtyard_theme.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
@@ -87,11 +88,7 @@ class _ConnectionPageState extends State<ConnectionPage> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      Icon(
-                        Icons.hub_outlined,
-                        size: 48,
-                        color: Theme.of(context).colorScheme.primary,
-                      ),
+                      const CourtyardWelcome(),
                       const SizedBox(height: 18),
                       Text(
                         '连接工作站',

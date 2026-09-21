@@ -11,7 +11,7 @@
   },
   "2": {
     "inputs": {
-      "model": "YOUR_SEEDVR2_MODEL.gguf",
+      "model": "YOUR_SEEDVR2_MODEL.safetensors",
       "device": "cuda:0",
       "blocks_to_swap": 32,
       "swap_io_components": true,
@@ -58,22 +58,21 @@
         0
       ],
       "seed": 100,
-      "new_resolution": 4096,
-      "tile_width": 1024,
-      "tile_height": 1024,
-      "mask_blur": 3,
-      "tile_padding": 64,
-      "tile_upscale_resolution": 1536,
-      "tiling_strategy": "Linear",
-      "anti_aliasing_strength": 0.1,
-      "blending_method": "content_aware",
-      "color_correction": "lab",
-      "resolution_target": "longest",
-      "tile_batch_size": 1
+      "resolution": 4096,
+      "max_resolution": 4096,
+      "batch_size": 1,
+      "uniform_batch_size": false,
+      "temporal_overlap": 0,
+      "prepend_frames": 0,
+      "input_noise_scale": 0.0,
+      "latent_noise_scale": 0.0,
+      "offload_device": "cpu",
+      "enable_debug": false,
+      "color_correction": "lab"
     },
-    "class_type": "SeedVR2TilingUpscaler",
+    "class_type": "SeedVR2VideoUpscaler",
     "_meta": {
-      "title": "SeedVR2 分块放大"
+      "title": "SeedVR2 原生整图放大（VAE分块）"
     }
   },
   "5": {

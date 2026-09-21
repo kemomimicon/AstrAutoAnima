@@ -1,6 +1,6 @@
 {
-  "pack_version": "0.5.0-beta.2",
-  "created_at": "2026-08-30",
+  "pack_version": "0.8.0-beta.1-public",
+  "created_at": "2026-09-19",
   "custom_nodes": [
     {
       "name": "ComfyUI-Booru-Tagger",
@@ -24,6 +24,7 @@
       "source": "included_in_pack",
       "required_class_types": [
         "AnimaPromptBatchEncode",
+        "AnimaSafetyAuditResult",
         "AnimaCaptionBatchGuard",
         "AnimaReverseCompiler",
         "AnimaReverseResultSaver"
@@ -43,6 +44,21 @@
       "required_class_types": [
         "SeedVR2TilingUpscaler"
       ]
+    },
+    {
+      "name": "ComfyUI-Impact-Pack",
+      "repository": "https://github.com/ltdrdata/ComfyUI-Impact-Pack.git",
+      "required_class_types": [
+        "FaceDetailer",
+        "SAMLoader"
+      ]
+    },
+    {
+      "name": "ComfyUI-Impact-Subpack",
+      "repository": "https://github.com/ltdrdata/ComfyUI-Impact-Subpack.git",
+      "required_class_types": [
+        "UltralyticsDetectorProvider"
+      ]
     }
   ],
   "models": [
@@ -58,29 +74,56 @@
       "selector": "cl-tagger-v2-v2_00",
       "gated": true,
       "redistributable_in_pack": false,
-      "target_root": "/workspace/ComfyUI/models/booru_tagger"
+      "target_root": "models/booru_tagger"
     },
     {
       "logical_name": "JoyCaption Beta One Q6_K",
       "repository": "mradermacher/llama-joycaption-beta-one-hf-llava-GGUF",
       "filename": "llama-joycaption-beta-one-hf-llava.Q6_K.gguf",
-      "target_root": "/workspace/ComfyUI/models/llava_gguf"
+      "target_root": "models/llava_gguf"
     },
     {
       "logical_name": "JoyCaption Beta One mmproj F16",
       "repository": "concedo/llama-joycaption-beta-one-hf-llava-mmproj-gguf",
       "filename": "llama-joycaption-beta-one-llava-mmproj-model-f16.gguf",
-      "target_root": "/workspace/ComfyUI/models/llava_gguf"
+      "target_root": "models/llava_gguf"
     },
     {
-      "logical_name": "SeedVR2 3B Q4_K_M",
-      "filename": "seedvr2_ema_3b-Q4_K_M.gguf",
+      "logical_name": "SeedVR2 3B FP16",
+      "filename": "seedvr2_ema_3b_fp16.safetensors",
       "managed_by": "ComfyUI-SeedVR2_VideoUpscaler"
     },
     {
       "logical_name": "SeedVR2 VAE FP16",
       "filename": "ema_vae_fp16.safetensors",
       "managed_by": "ComfyUI-SeedVR2_VideoUpscaler"
+    },
+    {
+      "logical_name": "Face YOLOv8n",
+      "repository": "Bingsu/adetailer",
+      "filename": "face_yolov8n.pt",
+      "target_root": "models/ultralytics/bbox"
+    },
+    {
+      "logical_name": "Hand YOLOv8s",
+      "repository": "Bingsu/adetailer",
+      "filename": "hand_yolov8s.pt",
+      "target_root": "models/ultralytics/bbox"
+    },
+    {
+      "logical_name": "Foot YOLOv8x",
+      "repository": "MonetEinsley/ADetailer_CM",
+      "filename": "foot_yolov8x.pt",
+      "sha256": "d5d824d3335b46ae3c44b27bdbcab21ad8a824921b04a271730c3ba7d1922eb4",
+      "target_root": "models/ultralytics/bbox",
+      "redistributable_in_pack": false,
+      "note": "Third-party pickle-based detector; download manually and verify SHA256 before use."
+    },
+    {
+      "logical_name": "SAM ViT-B",
+      "filename": "sam_vit_b_01ec64.pth",
+      "target_root": "models/sams",
+      "managed_by": "ComfyUI-Impact-Pack"
     }
   ],
   "workflows": [
@@ -89,6 +132,7 @@
     "Anima_WD_CT_JoyCaption_Reverse_Beta_api.json",
     "Anima_HQ_Txt2Img_Beta_api.json",
     "Anima_Refine_Existing_Beta_api.json",
+    "Anima_Detail_Repair_Beta_api.json",
     "Anima_SeedVR2_Refine_Beta_api.json"
   ]
 }

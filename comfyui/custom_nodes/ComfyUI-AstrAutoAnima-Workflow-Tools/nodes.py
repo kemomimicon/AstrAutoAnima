@@ -15,6 +15,30 @@ import numpy as np
 from PIL import Image
 
 
+class AnimaSafetyAuditResult:
+    """Unfiltered tagger text, bound to one audit request. No images in UI output."""
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {"tags": ("STRING", {"forceInput": True}),
+                             "nonce": ("STRING", {"default": ""})}}
+
+    RETURN_TYPES = ()
+    FUNCTION = "report"
+    CATEGORY = "AstrAutoAnima/Safety"
+    OUTPUT_NODE = True
+
+    @classmethod
+    def IS_CHANGED(cls, **kwargs):
+        return float("nan")
+
+    def report(self, tags, nonce):
+        if isinstance(tags, list) and len(tags) == 1:
+            tags = tags[0]
+        if not isinstance(tags, str) or not tags.strip() or not nonce:
+            raise ValueError("CLTagger returned empty or invalid audit tags")
+        return {"ui": {"aaa_safety": [{"status": "ok", "nonce": nonce, "tags": tags}]}, "result": ()}
+
+
 _CONTROL_MARKERS = (
     "final:",
     "assistant:",
@@ -212,7 +236,7 @@ def _count_records(value: Any) -> int:
 def _split_tags(value: Any) -> list[str]:
     tags: list[str] = []
     for text in _flatten_strings(value):
-        for raw in re.split(r"[,\n;]+", text):
+        for raw in re.split(r"[,\n]+|;(?![dDpP)(])", text):
             tag = raw.strip().strip("[]{}\"'")
             tag = tag.replace("_", " ")
             tag = re.sub(r"\s+", " ", tag).strip().lower()
@@ -639,6 +663,10 @@ def _categorize_tags(tags: Iterable[str]) -> dict[str, list[str]]:
             continue
         if tag.startswith("character:"):
             result["character"].append(tag.removeprefix("character:").strip())
+        elif tag.lower() in {":d", ";d", ":)", ";)", ":p", ";p", ":o", ":3", "xd", ">_<", "^_^", ":(", ";("}:
+            result["action"].append(tag)
+        elif _contains_keyword(tag, _SPECIAL_FEATURE_WORDS):
+            result["special_features"].append(tag)
         elif _contains_keyword(tag, _ACTION_WORDS):
             result["action"].append(tag)
         elif _contains_keyword(tag, _COMPOSITION_WORDS):
@@ -647,8 +675,6 @@ def _categorize_tags(tags: Iterable[str]) -> dict[str, list[str]]:
             result["scene"].append(tag)
         elif _contains_keyword(tag, _CLOTHING_WORDS):
             result["clothing"].append(tag)
-        elif _contains_keyword(tag, _SPECIAL_FEATURE_WORDS):
-            result["special_features"].append(tag)
         elif _contains_keyword(tag, _APPEARANCE_WORDS):
             result["appearance"].append(tag)
         else:

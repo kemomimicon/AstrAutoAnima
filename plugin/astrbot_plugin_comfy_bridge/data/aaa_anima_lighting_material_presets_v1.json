@@ -1,0 +1,1119 @@
+{
+  "schema_version": "1.0",
+  "library_id": "aaa_anima_lighting_material_core_v1",
+  "library_name": "AAA Anima 光影与材质预设库",
+  "version": "1.0.0",
+  "language": "zh-CN",
+  "target": [
+    "AstrAutoAnima",
+    "ComfyUI",
+    "Anima"
+  ],
+  "design": {
+    "modular": true,
+    "lighting_material_separated": true,
+    "quality_prefix_included": false,
+    "artist_tags_included": false,
+    "character_tags_included": false,
+    "scene_tags_included": false,
+    "recommended_prompt_style": "danbooru-style tags + concise visual phrases",
+    "hard_requirements": [
+      "光影与材质必须完全分离",
+      "禁止自动加入 masterpiece/best quality/score_* 等质量词",
+      "禁止自动加入画师、角色、场景标签",
+      "同一时间最多一个 key lighting",
+      "同一目标物体默认最多一个 primary material",
+      "保持本地可用，不依赖 LLM 或在线 API"
+    ]
+  },
+  "merge_policy": {
+    "lighting": {
+      "max_key_lighting": 1,
+      "max_effect_lighting": 1,
+      "allow_key_plus_effect": true,
+      "deduplicate_terms": true,
+      "conflict_behavior": "reject_or_replace_previous",
+      "recommended_order": [
+        "key",
+        "effect"
+      ]
+    },
+    "material": {
+      "max_primary_material_per_target": 1,
+      "max_detail_material_per_target": 2,
+      "max_surface_effect_per_target": 1,
+      "deduplicate_terms": true,
+      "conflict_behavior": "reject_or_replace_previous",
+      "recommended_order": [
+        "primary_material",
+        "detail_material",
+        "surface_effect"
+      ]
+    },
+    "global": {
+      "separator": ", ",
+      "do_not_auto_add_quality_tags": true,
+      "do_not_auto_add_score_tags": true,
+      "do_not_auto_weight": true
+    }
+  },
+  "lighting_presets": [
+    {
+      "id": "lighting_soft_diffuse",
+      "name_zh": "柔和漫射光",
+      "prompt": "soft lighting, diffuse light, soft shadows, gentle highlights, balanced illumination",
+      "category": "lighting",
+      "role": "key",
+      "exclusive_group": "key_lighting",
+      "intensity": "medium",
+      "avoid_with": [
+        "lighting_dramatic_chiaroscuro",
+        "lighting_strong_side",
+        "lighting_low_key"
+      ],
+      "notes": "通用默认光，低冲突。"
+    },
+    {
+      "id": "lighting_natural_daylight",
+      "name_zh": "自然日光",
+      "prompt": "natural daylight, soft sunlight, natural shadows, balanced exposure",
+      "category": "lighting",
+      "role": "key",
+      "exclusive_group": "key_lighting",
+      "intensity": "medium",
+      "avoid_with": [
+        "lighting_moonlight",
+        "lighting_neon_rain",
+        "lighting_candlelight"
+      ],
+      "notes": "户外日常。"
+    },
+    {
+      "id": "lighting_window_soft",
+      "name_zh": "窗边柔光",
+      "prompt": "window light, soft side lighting, gentle shadows, warm highlights",
+      "category": "lighting",
+      "role": "key",
+      "exclusive_group": "key_lighting",
+      "intensity": "medium",
+      "avoid_with": [
+        "lighting_strong_side",
+        "lighting_spotlight"
+      ],
+      "notes": "室内人像。"
+    },
+    {
+      "id": "lighting_window_slant",
+      "name_zh": "窗边斜射光",
+      "prompt": "sunlight through window, angled light, soft cast shadows, warm highlights",
+      "category": "lighting",
+      "role": "key",
+      "exclusive_group": "key_lighting",
+      "intensity": "medium",
+      "avoid_with": [
+        "lighting_overcast",
+        "lighting_moonlight"
+      ],
+      "notes": "教室/房间。"
+    },
+    {
+      "id": "lighting_golden_hour",
+      "name_zh": "黄金时刻",
+      "prompt": "golden hour, warm sunlight, long soft shadows, warm rim light, atmospheric glow",
+      "category": "lighting",
+      "role": "key",
+      "exclusive_group": "key_lighting",
+      "intensity": "medium",
+      "avoid_with": [
+        "lighting_moonlight",
+        "lighting_blue_hour",
+        "lighting_overcast"
+      ],
+      "notes": "暖色高复用。"
+    },
+    {
+      "id": "lighting_sunset_backlight",
+      "name_zh": "夕阳逆光",
+      "prompt": "sunset backlighting, warm rim light, long shadows, atmospheric haze, glowing edges",
+      "category": "lighting",
+      "role": "key",
+      "exclusive_group": "key_lighting",
+      "intensity": "strong",
+      "avoid_with": [
+        "lighting_high_key"
+      ],
+      "notes": "轮廓强、适合长发裙摆。"
+    },
+    {
+      "id": "lighting_backlight_clean",
+      "name_zh": "纯净逆光",
+      "prompt": "backlighting, rim lighting, glowing edges, soft silhouette lighting",
+      "category": "lighting",
+      "role": "key",
+      "exclusive_group": "key_lighting",
+      "intensity": "medium",
+      "avoid_with": [
+        "lighting_high_key"
+      ],
+      "notes": "不绑定时间。"
+    },
+    {
+      "id": "lighting_rim_strong",
+      "name_zh": "强轮廓光",
+      "prompt": "strong rim lighting, backlighting, bright edge light, darkened foreground",
+      "category": "lighting",
+      "role": "effect",
+      "exclusive_group": "rim_effect",
+      "intensity": "strong",
+      "avoid_with": [
+        "lighting_high_key"
+      ],
+      "notes": "作为效果光使用。"
+    },
+    {
+      "id": "lighting_volumetric",
+      "name_zh": "体积光束",
+      "prompt": "volumetric lighting, god rays, light shafts, atmospheric haze, dust particles",
+      "category": "lighting",
+      "role": "effect",
+      "exclusive_group": "atmospheric_effect",
+      "intensity": "medium",
+      "avoid_with": [],
+      "notes": "建议与一个主光叠加。"
+    },
+    {
+      "id": "lighting_dappled_sunlight",
+      "name_zh": "森林斑驳光",
+      "prompt": "dappled sunlight, leaf shadows, scattered light, soft highlights, natural daylight",
+      "category": "lighting",
+      "role": "key",
+      "exclusive_group": "key_lighting",
+      "intensity": "medium",
+      "avoid_with": [
+        "lighting_overcast"
+      ],
+      "notes": "树林/庭院。"
+    },
+    {
+      "id": "lighting_dramatic_chiaroscuro",
+      "name_zh": "戏剧明暗",
+      "prompt": "dramatic lighting, chiaroscuro, hard light, deep shadows, high contrast",
+      "category": "lighting",
+      "role": "key",
+      "exclusive_group": "key_lighting",
+      "intensity": "strong",
+      "avoid_with": [
+        "lighting_soft_diffuse",
+        "lighting_high_key"
+      ],
+      "notes": "高对比塑形。"
+    },
+    {
+      "id": "lighting_low_key",
+      "name_zh": "低调暗光",
+      "prompt": "low key lighting, deep shadows, restrained highlights, dark ambience, selective illumination",
+      "category": "lighting",
+      "role": "key",
+      "exclusive_group": "key_lighting",
+      "intensity": "strong",
+      "avoid_with": [
+        "lighting_high_key",
+        "lighting_soft_diffuse"
+      ],
+      "notes": "暗场景。"
+    },
+    {
+      "id": "lighting_high_key",
+      "name_zh": "高调明亮光",
+      "prompt": "high key lighting, bright ambient light, soft shadows, clean highlights, low contrast",
+      "category": "lighting",
+      "role": "key",
+      "exclusive_group": "key_lighting",
+      "intensity": "medium",
+      "avoid_with": [
+        "lighting_low_key",
+        "lighting_dramatic_chiaroscuro",
+        "lighting_rim_strong"
+      ],
+      "notes": "清爽人像。"
+    },
+    {
+      "id": "lighting_studio_soft",
+      "name_zh": "摄影棚柔光",
+      "prompt": "studio lighting, soft key light, subtle fill light, gentle rim light, controlled shadows",
+      "category": "lighting",
+      "role": "key",
+      "exclusive_group": "key_lighting",
+      "intensity": "medium",
+      "avoid_with": [
+        "lighting_dramatic_chiaroscuro"
+      ],
+      "notes": "角色展示。"
+    },
+    {
+      "id": "lighting_three_point",
+      "name_zh": "三点布光",
+      "prompt": "three point lighting, key light, fill light, rim light, balanced shadows",
+      "category": "lighting",
+      "role": "key",
+      "exclusive_group": "key_lighting",
+      "intensity": "medium",
+      "avoid_with": [
+        "lighting_rim_strong"
+      ],
+      "notes": "标准人像塑形。"
+    },
+    {
+      "id": "lighting_spotlight",
+      "name_zh": "舞台聚光",
+      "prompt": "spotlight, stage lighting, dark surroundings, strong directional light, dramatic shadows",
+      "category": "lighting",
+      "role": "key",
+      "exclusive_group": "key_lighting",
+      "intensity": "strong",
+      "avoid_with": [
+        "lighting_high_key",
+        "lighting_soft_diffuse"
+      ],
+      "notes": "舞台/聚焦。"
+    },
+    {
+      "id": "lighting_moonlight",
+      "name_zh": "月光冷调",
+      "prompt": "moonlight, cool blue lighting, soft rim light, deep shadows, quiet night ambience",
+      "category": "lighting",
+      "role": "key",
+      "exclusive_group": "key_lighting",
+      "intensity": "medium",
+      "avoid_with": [
+        "lighting_golden_hour",
+        "lighting_natural_daylight"
+      ],
+      "notes": "夜景通用。"
+    },
+    {
+      "id": "lighting_blue_hour",
+      "name_zh": "蓝调时刻",
+      "prompt": "blue hour, cool ambient light, twilight lighting, soft shadows, subtle rim light",
+      "category": "lighting",
+      "role": "key",
+      "exclusive_group": "key_lighting",
+      "intensity": "medium",
+      "avoid_with": [
+        "lighting_golden_hour"
+      ],
+      "notes": "暮色环境。"
+    },
+    {
+      "id": "lighting_overcast",
+      "name_zh": "阴天柔光",
+      "prompt": "overcast lighting, diffuse daylight, soft contrast, muted shadows, even illumination",
+      "category": "lighting",
+      "role": "key",
+      "exclusive_group": "key_lighting",
+      "intensity": "soft",
+      "avoid_with": [
+        "lighting_golden_hour",
+        "lighting_dappled_sunlight"
+      ],
+      "notes": "低对比稳定。"
+    },
+    {
+      "id": "lighting_neon_rain",
+      "name_zh": "雨夜霓虹光",
+      "prompt": "neon lighting, colored rim light, cyan and magenta glow, wet light reflections, dark ambience",
+      "category": "lighting",
+      "role": "key",
+      "exclusive_group": "key_lighting",
+      "intensity": "strong",
+      "avoid_with": [
+        "lighting_high_key",
+        "lighting_natural_daylight"
+      ],
+      "notes": "夜城/雨夜。"
+    },
+    {
+      "id": "lighting_cyan_magenta",
+      "name_zh": "赛博双色光",
+      "prompt": "cyan and magenta lighting, colored rim light, high contrast lighting, neon glow",
+      "category": "lighting",
+      "role": "effect",
+      "exclusive_group": "colored_light_effect",
+      "intensity": "strong",
+      "avoid_with": [],
+      "notes": "纯双色效果。"
+    },
+    {
+      "id": "lighting_warm_indoor",
+      "name_zh": "暖色室内灯",
+      "prompt": "warm indoor lighting, soft ambient light, warm highlights, gentle shadows, cozy illumination",
+      "category": "lighting",
+      "role": "key",
+      "exclusive_group": "key_lighting",
+      "intensity": "medium",
+      "avoid_with": [
+        "lighting_moonlight"
+      ],
+      "notes": "室内日常。"
+    },
+    {
+      "id": "lighting_candlelight",
+      "name_zh": "烛光",
+      "prompt": "candlelight, warm flickering light, soft shadows, warm highlights, intimate ambience",
+      "category": "lighting",
+      "role": "key",
+      "exclusive_group": "key_lighting",
+      "intensity": "soft",
+      "avoid_with": [
+        "lighting_high_key"
+      ],
+      "notes": "低照度暖光。"
+    },
+    {
+      "id": "lighting_firelight",
+      "name_zh": "火光",
+      "prompt": "firelight, warm orange glow, flickering highlights, deep soft shadows, reflected warm light",
+      "category": "lighting",
+      "role": "key",
+      "exclusive_group": "key_lighting",
+      "intensity": "strong",
+      "avoid_with": [
+        "lighting_high_key"
+      ],
+      "notes": "营火/奇幻。"
+    },
+    {
+      "id": "lighting_early_morning",
+      "name_zh": "清晨冷暖光",
+      "prompt": "early morning light, soft cool shadows, warm sunlight, gentle atmospheric haze",
+      "category": "lighting",
+      "role": "key",
+      "exclusive_group": "key_lighting",
+      "intensity": "soft",
+      "avoid_with": [
+        "lighting_moonlight"
+      ],
+      "notes": "清晨氛围。"
+    },
+    {
+      "id": "lighting_winter_reflection",
+      "name_zh": "冬日反射光",
+      "prompt": "cool winter daylight, reflected snow light, soft blue shadows, diffuse illumination",
+      "category": "lighting",
+      "role": "key",
+      "exclusive_group": "key_lighting",
+      "intensity": "medium",
+      "avoid_with": [
+        "lighting_golden_hour"
+      ],
+      "notes": "雪景人物。"
+    },
+    {
+      "id": "lighting_underwater_caustics",
+      "name_zh": "水下焦散光",
+      "prompt": "underwater lighting, caustic light patterns, blue ambient light, rippling highlights, soft haze",
+      "category": "lighting",
+      "role": "key",
+      "exclusive_group": "key_lighting",
+      "intensity": "medium",
+      "avoid_with": [
+        "lighting_golden_hour"
+      ],
+      "notes": "水下/泳池。"
+    },
+    {
+      "id": "lighting_backlit_haze",
+      "name_zh": "逆光薄雾",
+      "prompt": "backlighting, atmospheric haze, diffused rim light, soft glow, low contrast shadows",
+      "category": "lighting",
+      "role": "key",
+      "exclusive_group": "key_lighting",
+      "intensity": "medium",
+      "avoid_with": [
+        "lighting_dramatic_chiaroscuro"
+      ],
+      "notes": "柔和电影感。"
+    },
+    {
+      "id": "lighting_strong_side",
+      "name_zh": "强侧光",
+      "prompt": "strong side lighting, directional light, sculpted shadows, bright highlights, dramatic contrast",
+      "category": "lighting",
+      "role": "key",
+      "exclusive_group": "key_lighting",
+      "intensity": "strong",
+      "avoid_with": [
+        "lighting_soft_diffuse",
+        "lighting_high_key"
+      ],
+      "notes": "强塑形。"
+    },
+    {
+      "id": "lighting_soft_side_back",
+      "name_zh": "柔和侧逆光",
+      "prompt": "soft side backlighting, gentle rim light, soft shadows, warm reflected light",
+      "category": "lighting",
+      "role": "key",
+      "exclusive_group": "key_lighting",
+      "intensity": "medium",
+      "avoid_with": [
+        "lighting_rim_strong"
+      ],
+      "notes": "人像友好。"
+    }
+  ],
+  "material_presets": [
+    {
+      "id": "material_silk",
+      "name_zh": "丝绸",
+      "prompt": "silk fabric, smooth texture, soft folds, subtle sheen, delicate specular highlights",
+      "category": "material",
+      "family": "fabric",
+      "exclusive_group": "primary_material",
+      "intensity": "medium",
+      "avoid_with": [
+        "material_satin",
+        "material_velvet"
+      ],
+      "notes": "细腻、柔和、轻微光泽。"
+    },
+    {
+      "id": "material_satin",
+      "name_zh": "缎面",
+      "prompt": "satin fabric, smooth glossy surface, flowing folds, bright specular highlights, soft reflections",
+      "category": "material",
+      "family": "fabric",
+      "exclusive_group": "primary_material",
+      "intensity": "strong",
+      "avoid_with": [
+        "material_silk",
+        "material_velvet"
+      ],
+      "notes": "高光更强。"
+    },
+    {
+      "id": "material_velvet",
+      "name_zh": "天鹅绒",
+      "prompt": "velvet fabric, soft dense texture, rich surface, deep soft highlights, subtle directional sheen",
+      "category": "material",
+      "family": "fabric",
+      "exclusive_group": "primary_material",
+      "intensity": "medium",
+      "avoid_with": [
+        "material_silk",
+        "material_satin"
+      ],
+      "notes": "吸光、暗部丰富。"
+    },
+    {
+      "id": "material_cotton",
+      "name_zh": "纯棉",
+      "prompt": "cotton fabric, soft matte texture, visible fabric weave, natural folds, diffuse highlights",
+      "category": "material",
+      "family": "fabric",
+      "exclusive_group": "primary_material",
+      "intensity": "soft",
+      "avoid_with": [],
+      "notes": "自然哑光。"
+    },
+    {
+      "id": "material_linen",
+      "name_zh": "亚麻",
+      "prompt": "linen fabric, visible weave, slightly rough texture, natural wrinkles, matte surface",
+      "category": "material",
+      "family": "fabric",
+      "exclusive_group": "primary_material",
+      "intensity": "soft",
+      "avoid_with": [],
+      "notes": "纹理明显。"
+    },
+    {
+      "id": "material_chiffon",
+      "name_zh": "雪纺",
+      "prompt": "chiffon fabric, lightweight fabric, semi-transparent layers, delicate folds, soft translucency",
+      "category": "material",
+      "family": "fabric",
+      "exclusive_group": "primary_material",
+      "intensity": "medium",
+      "avoid_with": [],
+      "notes": "轻薄半透明。"
+    },
+    {
+      "id": "material_organza",
+      "name_zh": "欧根纱",
+      "prompt": "organza fabric, sheer fabric, crisp translucent folds, subtle sheen, delicate highlights",
+      "category": "material",
+      "family": "fabric",
+      "exclusive_group": "primary_material",
+      "intensity": "medium",
+      "avoid_with": [],
+      "notes": "透明但挺括。"
+    },
+    {
+      "id": "material_lace",
+      "name_zh": "蕾丝",
+      "prompt": "lace fabric, intricate lace pattern, delicate threads, semi-transparent fabric, fine textile detail",
+      "category": "material",
+      "family": "fabric",
+      "exclusive_group": "detail_material",
+      "intensity": "medium",
+      "avoid_with": [],
+      "notes": "适合局部细节。"
+    },
+    {
+      "id": "material_knit",
+      "name_zh": "针织毛衣",
+      "prompt": "knitted fabric, visible knit pattern, soft fibers, thick textile texture, soft diffuse shading",
+      "category": "material",
+      "family": "fabric",
+      "exclusive_group": "primary_material",
+      "intensity": "soft",
+      "avoid_with": [],
+      "notes": "针织冬装。"
+    },
+    {
+      "id": "material_wool",
+      "name_zh": "羊毛呢",
+      "prompt": "wool fabric, dense soft fibers, slightly fuzzy texture, thick folds, matte surface",
+      "category": "material",
+      "family": "fabric",
+      "exclusive_group": "primary_material",
+      "intensity": "soft",
+      "avoid_with": [],
+      "notes": "大衣/呢料。"
+    },
+    {
+      "id": "material_denim",
+      "name_zh": "牛仔布",
+      "prompt": "denim fabric, visible twill weave, sturdy texture, natural creases, stitched seams",
+      "category": "material",
+      "family": "fabric",
+      "exclusive_group": "primary_material",
+      "intensity": "medium",
+      "avoid_with": [],
+      "notes": "斜纹和缝线。"
+    },
+    {
+      "id": "material_leather",
+      "name_zh": "皮革",
+      "prompt": "leather, fine leather grain, smooth surface, natural creases, controlled specular highlights",
+      "category": "material",
+      "family": "fabric",
+      "exclusive_group": "primary_material",
+      "intensity": "medium",
+      "avoid_with": [],
+      "notes": "自然皮革反光。"
+    },
+    {
+      "id": "material_patent_leather",
+      "name_zh": "漆皮",
+      "prompt": "patent leather, smooth glossy surface, sharp specular highlights, strong reflections, clean folds",
+      "category": "material",
+      "family": "fabric",
+      "exclusive_group": "primary_material",
+      "intensity": "strong",
+      "avoid_with": [],
+      "notes": "强反光。"
+    },
+    {
+      "id": "material_latex",
+      "name_zh": "乳胶质感",
+      "prompt": "latex material, smooth tight surface, glossy finish, strong specular highlights, clean reflections",
+      "category": "material",
+      "family": "fabric",
+      "exclusive_group": "primary_material",
+      "intensity": "strong",
+      "avoid_with": [],
+      "notes": "强反光贴体，谨慎使用。"
+    },
+    {
+      "id": "material_sheer",
+      "name_zh": "薄纱",
+      "prompt": "sheer fabric, translucent textile, delicate folds, soft transparency, subtle edge highlights",
+      "category": "material",
+      "family": "fabric",
+      "exclusive_group": "detail_material",
+      "intensity": "medium",
+      "avoid_with": [],
+      "notes": "适合作为叠层。"
+    },
+    {
+      "id": "material_fuzzy_fabric",
+      "name_zh": "绒毛织物",
+      "prompt": "fuzzy fabric, soft short fibers, plush texture, diffuse highlights, soft edges",
+      "category": "material",
+      "family": "fabric",
+      "exclusive_group": "primary_material",
+      "intensity": "soft",
+      "avoid_with": [],
+      "notes": "绒毛感。"
+    },
+    {
+      "id": "material_polished_metal",
+      "name_zh": "抛光金属",
+      "prompt": "polished metal, smooth metallic surface, sharp reflections, bright specular highlights, high reflectivity",
+      "category": "material",
+      "family": "metal",
+      "exclusive_group": "primary_material",
+      "intensity": "strong",
+      "avoid_with": [
+        "material_matte_metal"
+      ],
+      "notes": "高反射。"
+    },
+    {
+      "id": "material_brushed_metal",
+      "name_zh": "拉丝金属",
+      "prompt": "brushed metal, fine directional texture, anisotropic reflections, muted metallic highlights",
+      "category": "material",
+      "family": "metal",
+      "exclusive_group": "primary_material",
+      "intensity": "medium",
+      "avoid_with": [],
+      "notes": "方向性纹理。"
+    },
+    {
+      "id": "material_matte_metal",
+      "name_zh": "哑光金属",
+      "prompt": "matte metal, fine rough surface, subdued reflections, soft metallic highlights",
+      "category": "material",
+      "family": "metal",
+      "exclusive_group": "primary_material",
+      "intensity": "soft",
+      "avoid_with": [
+        "material_polished_metal"
+      ],
+      "notes": "低反射。"
+    },
+    {
+      "id": "material_gold",
+      "name_zh": "黄金",
+      "prompt": "polished gold, warm metallic surface, rich golden reflections, bright specular highlights",
+      "category": "material",
+      "family": "metal",
+      "exclusive_group": "primary_material",
+      "intensity": "strong",
+      "avoid_with": [
+        "material_silver"
+      ],
+      "notes": "暖色金属。"
+    },
+    {
+      "id": "material_silver",
+      "name_zh": "白银",
+      "prompt": "polished silver, cool metallic surface, clean reflections, bright specular highlights",
+      "category": "material",
+      "family": "metal",
+      "exclusive_group": "primary_material",
+      "intensity": "strong",
+      "avoid_with": [
+        "material_gold"
+      ],
+      "notes": "冷色金属。"
+    },
+    {
+      "id": "material_copper",
+      "name_zh": "铜",
+      "prompt": "copper, warm reddish metal, polished metallic texture, warm reflections, subtle patina",
+      "category": "material",
+      "family": "metal",
+      "exclusive_group": "primary_material",
+      "intensity": "medium",
+      "avoid_with": [],
+      "notes": "偏红暖金属。"
+    },
+    {
+      "id": "material_brass",
+      "name_zh": "黄铜",
+      "prompt": "brass, warm golden metal, slightly aged surface, soft metallic reflections, fine surface detail",
+      "category": "material",
+      "family": "metal",
+      "exclusive_group": "primary_material",
+      "intensity": "medium",
+      "avoid_with": [],
+      "notes": "复古机械。"
+    },
+    {
+      "id": "material_weathered_metal",
+      "name_zh": "旧金属",
+      "prompt": "weathered metal, scratched surface, worn edges, oxidation, rough metallic texture",
+      "category": "material",
+      "family": "metal",
+      "exclusive_group": "primary_material",
+      "intensity": "medium",
+      "avoid_with": [],
+      "notes": "磨损氧化。"
+    },
+    {
+      "id": "material_clear_glass",
+      "name_zh": "透明玻璃",
+      "prompt": "clear glass, transparent surface, refraction, clean reflections, sharp specular highlights",
+      "category": "material",
+      "family": "transparent",
+      "exclusive_group": "primary_material",
+      "intensity": "strong",
+      "avoid_with": [
+        "material_frosted_glass"
+      ],
+      "notes": "透明折射。"
+    },
+    {
+      "id": "material_frosted_glass",
+      "name_zh": "磨砂玻璃",
+      "prompt": "frosted glass, translucent surface, diffused reflections, soft highlights, blurred refraction",
+      "category": "material",
+      "family": "transparent",
+      "exclusive_group": "primary_material",
+      "intensity": "soft",
+      "avoid_with": [
+        "material_clear_glass"
+      ],
+      "notes": "柔化折射。"
+    },
+    {
+      "id": "material_crystal",
+      "name_zh": "水晶",
+      "prompt": "clear crystal, faceted surface, refraction, internal reflections, sparkling highlights",
+      "category": "material",
+      "family": "transparent",
+      "exclusive_group": "primary_material",
+      "intensity": "strong",
+      "avoid_with": [],
+      "notes": "切面反射。"
+    },
+    {
+      "id": "material_gemstone",
+      "name_zh": "宝石",
+      "prompt": "polished gemstone, translucent crystal, internal reflections, saturated color, sharp highlights",
+      "category": "material",
+      "family": "transparent",
+      "exclusive_group": "primary_material",
+      "intensity": "strong",
+      "avoid_with": [],
+      "notes": "饱和色+内部反射。"
+    },
+    {
+      "id": "material_clear_ice",
+      "name_zh": "冰晶",
+      "prompt": "clear ice, translucent frozen surface, refraction, internal cracks, cold specular highlights",
+      "category": "material",
+      "family": "transparent",
+      "exclusive_group": "primary_material",
+      "intensity": "medium",
+      "avoid_with": [],
+      "notes": "透明冰。"
+    },
+    {
+      "id": "material_thin_ice",
+      "name_zh": "薄冰",
+      "prompt": "thin translucent ice, frosted edges, subtle cracks, soft refraction, cold reflections",
+      "category": "material",
+      "family": "transparent",
+      "exclusive_group": "primary_material",
+      "intensity": "soft",
+      "avoid_with": [],
+      "notes": "薄冰。"
+    },
+    {
+      "id": "material_porcelain",
+      "name_zh": "白瓷",
+      "prompt": "white porcelain, smooth glazed surface, clean glossy highlights, subtle reflections",
+      "category": "material",
+      "family": "stone_ceramic",
+      "exclusive_group": "primary_material",
+      "intensity": "medium",
+      "avoid_with": [],
+      "notes": "洁净釉面。"
+    },
+    {
+      "id": "material_ceramic",
+      "name_zh": "陶器",
+      "prompt": "ceramic surface, fine clay texture, glazed finish, soft reflections, subtle imperfections",
+      "category": "material",
+      "family": "stone_ceramic",
+      "exclusive_group": "primary_material",
+      "intensity": "soft",
+      "avoid_with": [],
+      "notes": "陶土质感。"
+    },
+    {
+      "id": "material_marble",
+      "name_zh": "大理石",
+      "prompt": "polished marble, natural stone veins, smooth surface, subtle reflections, fine stone texture",
+      "category": "material",
+      "family": "stone_ceramic",
+      "exclusive_group": "primary_material",
+      "intensity": "medium",
+      "avoid_with": [],
+      "notes": "天然纹理。"
+    },
+    {
+      "id": "material_rough_stone",
+      "name_zh": "粗石",
+      "prompt": "rough stone, irregular surface, granular texture, weathered edges, diffuse shading",
+      "category": "material",
+      "family": "stone_ceramic",
+      "exclusive_group": "primary_material",
+      "intensity": "soft",
+      "avoid_with": [],
+      "notes": "粗颗粒。"
+    },
+    {
+      "id": "material_granite",
+      "name_zh": "花岗岩",
+      "prompt": "granite, speckled stone texture, hard rough surface, subtle mineral reflections",
+      "category": "material",
+      "family": "stone_ceramic",
+      "exclusive_group": "primary_material",
+      "intensity": "soft",
+      "avoid_with": [],
+      "notes": "斑点矿物。"
+    },
+    {
+      "id": "material_concrete",
+      "name_zh": "混凝土",
+      "prompt": "concrete surface, fine porous texture, matte finish, subtle imperfections, rough shading",
+      "category": "material",
+      "family": "stone_ceramic",
+      "exclusive_group": "primary_material",
+      "intensity": "soft",
+      "avoid_with": [],
+      "notes": "工业/城市。"
+    },
+    {
+      "id": "material_plaster",
+      "name_zh": "石膏",
+      "prompt": "plaster surface, fine chalky texture, matte finish, soft diffuse shading",
+      "category": "material",
+      "family": "stone_ceramic",
+      "exclusive_group": "primary_material",
+      "intensity": "soft",
+      "avoid_with": [],
+      "notes": "粉质哑光。"
+    },
+    {
+      "id": "material_polished_wood",
+      "name_zh": "抛光木材",
+      "prompt": "polished wood, visible wood grain, smooth varnished surface, warm reflections",
+      "category": "material",
+      "family": "wood_paper",
+      "exclusive_group": "primary_material",
+      "intensity": "medium",
+      "avoid_with": [],
+      "notes": "清漆木纹。"
+    },
+    {
+      "id": "material_natural_wood",
+      "name_zh": "原木",
+      "prompt": "natural wood, visible wood grain, slightly rough surface, matte finish, organic texture",
+      "category": "material",
+      "family": "wood_paper",
+      "exclusive_group": "primary_material",
+      "intensity": "soft",
+      "avoid_with": [],
+      "notes": "自然木纹。"
+    },
+    {
+      "id": "material_weathered_wood",
+      "name_zh": "旧木材",
+      "prompt": "weathered wood, aged wood grain, worn edges, cracks, rough surface texture",
+      "category": "material",
+      "family": "wood_paper",
+      "exclusive_group": "primary_material",
+      "intensity": "medium",
+      "avoid_with": [],
+      "notes": "旧化木材。"
+    },
+    {
+      "id": "material_paper",
+      "name_zh": "纸张",
+      "prompt": "paper texture, fine paper fibers, matte surface, subtle grain",
+      "category": "material",
+      "family": "wood_paper",
+      "exclusive_group": "primary_material",
+      "intensity": "soft",
+      "avoid_with": [],
+      "notes": "普通纸张。"
+    },
+    {
+      "id": "material_textured_paper",
+      "name_zh": "粗纹纸",
+      "prompt": "textured paper, visible paper grain, rough fibers, matte surface",
+      "category": "material",
+      "family": "wood_paper",
+      "exclusive_group": "primary_material",
+      "intensity": "soft",
+      "avoid_with": [],
+      "notes": "粗纤维。"
+    },
+    {
+      "id": "material_watercolor_paper",
+      "name_zh": "水彩纸",
+      "prompt": "watercolor paper texture, visible paper grain, soft pigment bleeding, matte surface",
+      "category": "material",
+      "family": "wood_paper",
+      "exclusive_group": "primary_material",
+      "intensity": "soft",
+      "avoid_with": [],
+      "notes": "水彩媒介。"
+    },
+    {
+      "id": "material_canvas",
+      "name_zh": "油画布",
+      "prompt": "canvas texture, visible woven fibers, layered paint texture, subtle surface relief",
+      "category": "material",
+      "family": "wood_paper",
+      "exclusive_group": "primary_material",
+      "intensity": "medium",
+      "avoid_with": [],
+      "notes": "油画媒介。"
+    },
+    {
+      "id": "material_impasto",
+      "name_zh": "厚涂颜料",
+      "prompt": "impasto paint, thick paint layers, visible brushstrokes, raised paint texture, rich surface detail",
+      "category": "material",
+      "family": "wood_paper",
+      "exclusive_group": "detail_material",
+      "intensity": "strong",
+      "avoid_with": [],
+      "notes": "厚涂笔触。"
+    },
+    {
+      "id": "material_wet_surface",
+      "name_zh": "湿润表面",
+      "prompt": "wet surface, water droplets, glossy reflections, strong specular highlights, reflective moisture",
+      "category": "material",
+      "family": "special",
+      "exclusive_group": "surface_effect",
+      "intensity": "strong",
+      "avoid_with": [],
+      "notes": "可叠加在主材质上。"
+    },
+    {
+      "id": "material_wet_fabric",
+      "name_zh": "雨水打湿布料",
+      "prompt": "wet fabric, damp textile, darker wet areas, clinging folds, subtle glossy highlights",
+      "category": "material",
+      "family": "special",
+      "exclusive_group": "surface_effect",
+      "intensity": "medium",
+      "avoid_with": [],
+      "notes": "仅湿衣物。"
+    },
+    {
+      "id": "material_water_surface",
+      "name_zh": "水面",
+      "prompt": "water surface, ripples, reflections, transparent water, shimmering highlights",
+      "category": "material",
+      "family": "special",
+      "exclusive_group": "primary_material",
+      "intensity": "medium",
+      "avoid_with": [
+        "material_calm_water"
+      ],
+      "notes": "动态水面。"
+    },
+    {
+      "id": "material_calm_water",
+      "name_zh": "平静水面",
+      "prompt": "calm water surface, mirror-like reflections, subtle ripples, soft highlights",
+      "category": "material",
+      "family": "special",
+      "exclusive_group": "primary_material",
+      "intensity": "soft",
+      "avoid_with": [
+        "material_water_surface"
+      ],
+      "notes": "镜面感水面。"
+    },
+    {
+      "id": "material_snow",
+      "name_zh": "雪",
+      "prompt": "fresh snow, soft granular texture, diffuse reflections, cool highlights, subtle sparkle",
+      "category": "material",
+      "family": "special",
+      "exclusive_group": "primary_material",
+      "intensity": "soft",
+      "avoid_with": [],
+      "notes": "雪地。"
+    },
+    {
+      "id": "material_frost",
+      "name_zh": "霜冻",
+      "prompt": "frosted surface, fine ice crystals, cold texture, subtle sparkling highlights",
+      "category": "material",
+      "family": "special",
+      "exclusive_group": "surface_effect",
+      "intensity": "medium",
+      "avoid_with": [],
+      "notes": "附着效果。"
+    },
+    {
+      "id": "material_pearl",
+      "name_zh": "珍珠",
+      "prompt": "pearl surface, smooth nacre, soft iridescence, rounded specular highlights",
+      "category": "material",
+      "family": "special",
+      "exclusive_group": "primary_material",
+      "intensity": "medium",
+      "avoid_with": [],
+      "notes": "柔和珠光。"
+    },
+    {
+      "id": "material_mother_of_pearl",
+      "name_zh": "贝母",
+      "prompt": "mother of pearl, smooth iridescent surface, subtle rainbow reflections, pearlescent sheen",
+      "category": "material",
+      "family": "special",
+      "exclusive_group": "primary_material",
+      "intensity": "medium",
+      "avoid_with": [],
+      "notes": "偏彩虹珠光。"
+    },
+    {
+      "id": "material_feather",
+      "name_zh": "羽毛",
+      "prompt": "fine feathers, layered feather texture, soft edges, delicate highlights",
+      "category": "material",
+      "family": "special",
+      "exclusive_group": "primary_material",
+      "intensity": "soft",
+      "avoid_with": [],
+      "notes": "羽毛层次。"
+    },
+    {
+      "id": "material_fur",
+      "name_zh": "毛皮",
+      "prompt": "soft fur, individual fine hairs, layered fibers, soft directional highlights",
+      "category": "material",
+      "family": "special",
+      "exclusive_group": "primary_material",
+      "intensity": "medium",
+      "avoid_with": [],
+      "notes": "细毛方向。"
+    },
+    {
+      "id": "material_hair_sheen",
+      "name_zh": "头发光泽",
+      "prompt": "smooth hair strands, fine individual strands, soft specular highlights, natural hair sheen",
+      "category": "material",
+      "family": "special",
+      "exclusive_group": "surface_effect",
+      "intensity": "soft",
+      "avoid_with": [],
+      "notes": "头发专用表面效果。"
+    },
+    {
+      "id": "material_matte_surface",
+      "name_zh": "磨砂表面",
+      "prompt": "matte surface, fine roughness, diffuse reflections, soft highlights, low gloss",
+      "category": "material",
+      "family": "special",
+      "exclusive_group": "surface_effect",
+      "intensity": "soft",
+      "avoid_with": [],
+      "notes": "通用低光泽效果。"
+    }
+  ]
+}

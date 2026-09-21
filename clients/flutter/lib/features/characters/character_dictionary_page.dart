@@ -1,3 +1,4 @@
+import '../../core/courtyard_theme.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -309,7 +310,7 @@ class _CharacterDictionaryPageState extends State<CharacterDictionaryPage> {
             decoration: InputDecoration(
               labelText: '搜索角色',
               hintText: '例如：初音未来 / hatsune miku',
-              prefixIcon: const Icon(Icons.search),
+              prefixIcon: const CourtyardIcon(Icons.search),
               suffixIcon: _query.text.isEmpty
                   ? null
                   : IconButton(
@@ -319,7 +320,7 @@ class _CharacterDictionaryPageState extends State<CharacterDictionaryPage> {
                         _page = 1;
                         unawaited(_search());
                       },
-                      icon: const Icon(Icons.clear),
+                      icon: const CourtyardIcon(Icons.clear),
                     ),
             ),
           ),
@@ -375,7 +376,7 @@ class _CharacterDictionaryPageState extends State<CharacterDictionaryPage> {
                             setState(() => _page = result.page - 1);
                             unawaited(_search());
                           },
-                    icon: const Icon(Icons.chevron_left),
+                    icon: const CourtyardIcon(Icons.chevron_left),
                   ),
                   Text('${result.page} / ${result.pages}'),
                   IconButton(
@@ -386,7 +387,7 @@ class _CharacterDictionaryPageState extends State<CharacterDictionaryPage> {
                             setState(() => _page = result.page + 1);
                             unawaited(_search());
                           },
-                    icon: const Icon(Icons.chevron_right),
+                    icon: const CourtyardIcon(Icons.chevron_right),
                   ),
                 ],
               ),
@@ -426,14 +427,14 @@ class _CharacterDictionaryPageState extends State<CharacterDictionaryPage> {
                 IconButton(
                   tooltip: '复制标准英文 tag',
                   onPressed: () => _copy(item.tag, '英文 tag'),
-                  icon: const Icon(Icons.content_copy),
+                  icon: const CourtyardIcon(Icons.content_copy),
                 ),
                 if (!widget.adminMode)
                   IconButton(
                     tooltip: favorite == null ? '收藏角色' : '取消收藏',
                     onPressed: () => _toggleFavorite(item),
-                    icon:
-                        Icon(favorite == null ? Icons.star_border : Icons.star),
+                    icon: CourtyardIcon(
+                        favorite == null ? Icons.star_border : Icons.star),
                   ),
               ],
             ),
@@ -463,25 +464,26 @@ class _CharacterDictionaryPageState extends State<CharacterDictionaryPage> {
                   TextButton.icon(
                     onPressed: () =>
                         _copy(prompt, _strong ? '强模式提示词' : '弱模式提示词'),
-                    icon: const Icon(Icons.copy_all),
+                    icon: const CourtyardIcon(Icons.copy_all),
                     label: Text(_strong ? '复制强模式' : '复制弱模式'),
                   ),
                   if (widget.onUseCharacter != null)
                     FilledButton.tonalIcon(
                       key: ValueKey('use-character-${item.tag}'),
                       onPressed: () => widget.onUseCharacter!(item, _strong),
-                      icon: const Icon(Icons.person_add_alt_1_outlined),
+                      icon:
+                          const CourtyardIcon(Icons.person_add_alt_1_outlined),
                       label: const Text('添加到使用角色'),
                     ),
                   if (widget.adminMode) ...[
                     TextButton.icon(
                       onPressed: () => _editCharacter(item),
-                      icon: const Icon(Icons.edit_outlined),
+                      icon: const CourtyardIcon(Icons.edit_outlined),
                       label: const Text('编辑'),
                     ),
                     TextButton.icon(
                       onPressed: () => _disableCharacter(item),
-                      icon: Icon(
+                      icon: CourtyardIcon(
                           item.disabled ? Icons.restore : Icons.delete_outline),
                       label: Text(item.disabled ? '恢复' : '停用'),
                     ),

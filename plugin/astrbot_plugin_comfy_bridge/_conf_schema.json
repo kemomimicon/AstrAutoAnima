@@ -1,4 +1,123 @@
 {
+  "qq_actions_hub_url": {
+    "description": "QQ 引用收藏/举报连接的本机 Hub HTTP 地址（需同步更新 Hub，不能填写外部网址）",
+    "type": "string",
+    "default": "http://127.0.0.1:6278"
+  },
+  "comfyui_output_root": {
+    "description": "ComfyUI 实际 output 绝对路径（用于随机画风、去元数据及签名副本；Linux 区分大小写）",
+    "type": "string",
+    "default": ""
+  },
+  "safety_mode_enabled": {
+    "description": "安全模式总开关（默认关闭）",
+    "type": "bool",
+    "default": false
+  },
+  "safety_review_scope": {
+    "description": "审核范围：input=仅输入，output=仅输出，both=两者",
+    "type": "string",
+    "default": "both",
+    "options": [
+      "input",
+      "output",
+      "both"
+    ]
+  },
+  "safety_exempt_terms": {
+    "description": "临时放行词：每行一个具体匹配词，不是正则；清空恢复拦截",
+    "type": "text",
+    "default": ""
+  },
+  "safety_admin_umos": {
+    "description": "信用通知管理员私聊 UMO，每行一个，例如 aiocqhttp:FriendMessage:12345678；请按实际平台名填写",
+    "type": "text",
+    "default": ""
+  },
+  "safety_admin_qq": {
+    "description": "Hub 管理账号未绑定 QQ 时使用的管理员 QQ（不得填写群号）",
+    "type": "string",
+    "default": ""
+  },
+  "safety_audit_threshold": {
+    "description": "CLTagger 审核阈值，初始 0.35；需结合实际样本校准",
+    "type": "float",
+    "default": 0.35
+  },
+  "safety_audit_timeout": {
+    "description": "单张输出审核超时秒数；超时不返图、不扣分",
+    "type": "int",
+    "default": 120
+  },
+  "hq_use_seedvr2": {
+    "description": "HQ 使用基础生图 + 局部修复 + SeedVR2 放大（关闭回到旧二次采样）",
+    "type": "bool",
+    "default": false
+  },
+  "hq_detail_hands_default": {
+    "description": "HQ 默认修复手部",
+    "type": "bool",
+    "default": false
+  },
+  "hq_detail_feet_default": {
+    "description": "HQ 默认修复脚部",
+    "type": "bool",
+    "default": false
+  },
+  "hq_detail_face_default": {
+    "description": "HQ 默认修复脸部（当前建议关闭，仅在脸崩时启用）",
+    "type": "bool",
+    "default": false
+  },
+  "detail_face_detector_name": {
+    "description": "脸部检测模型（ComfyUI models/ultralytics 下的相对路径）",
+    "type": "string",
+    "default": "bbox/face_yolov8n.pt"
+  },
+  "detail_hand_detector_name": {
+    "description": "手部检测模型（ComfyUI models/ultralytics 下的相对路径）",
+    "type": "string",
+    "default": "bbox/hand_yolov8s.pt"
+  },
+  "detail_foot_detector_name": {
+    "description": "脚部检测模型（需另行安装到 ComfyUI models/ultralytics/bbox）",
+    "type": "string",
+    "default": "bbox/foot_yolov8x.pt"
+  },
+  "camera_extreme_lora_name": {
+    "description": "极限俯/仰视辅助 LoRA 路径；留空时只使用提示词控制",
+    "type": "string",
+    "default": "",
+    "hint": "仅 camera_pitch=extreme_low/extreme_high 时加载，普通机位不加载。建议放入 models/loras/anima_lora/camera。"
+  },
+  "camera_extreme_lora_strength": {
+    "description": "极限机位 LoRA 模型强度",
+    "type": "float",
+    "default": 0.65
+  },
+  "default_sampler_name": {
+    "description": "默认采样器（原有=沿用工作流）",
+    "type": "string",
+    "default": "er_sde",
+    "options": [
+      "original",
+      "er_sde",
+      "euler",
+      "euler_ancestral",
+      "heun",
+      "dpm_2",
+      "dpm_2_ancestral",
+      "2m",
+      "2m_sde",
+      "2m_sde_gpu",
+      "dpmpp_sde",
+      "dpmpp_3m_sde",
+      "dpmpp_3m_sde_gpu",
+      "lms",
+      "ddim",
+      "uni_pc"
+    ]
+  },
   "comfyui_base_url": {
     "description": "ComfyUI API 地址",
     "type": "string",
@@ -8,7 +127,7 @@
   "workflow_path": {
     "description": "ComfyUI API 工作流 JSON 路径",
     "type": "string",
-    "default": "/workspace/ComfyUI/user/default/workflows/anima_custom_flow_api.json",
+    "default": "",
     "hint": "必须是 Save (API Format) 导出的 JSON。绝对路径或相对插件目录均可。"
   },
   "workflow_registry_path": {
@@ -20,25 +139,31 @@
   "hq_workflow_path": {
     "description": "HQ ComfyUI API 工作流 JSON 路径",
     "type": "string",
-    "default": "/workspace/ComfyUI/user/default/workflows/Anima_HQ_Txt2Img_Beta_api.json",
+    "default": "",
     "hint": "HQ Stable/Beauty 共用一份拓扑，由 Profile 决定采样、放大和重绘参数。"
   },
   "refine_workflow_path": {
     "description": "放大精修 ComfyUI API 工作流 JSON 路径",
     "type": "string",
-    "default": "/workspace/ComfyUI/user/default/workflows/Anima_Refine_Existing_Beta_api.json",
+    "default": "",
     "hint": "Refine Light/Medium 共用一份拓扑；Beta 默认不开启 Detailer 或 Tile。"
   },
   "seedvr2_workflow_path": {
     "description": "SeedVR2 放大 API 工作流 JSON 路径",
     "type": "string",
-    "default": "/workspace/ComfyUI/user/default/workflows/Anima_SeedVR2_Refine_Beta_api.json",
+    "default": "",
     "hint": "用于 /arefine seedvr2；需要 SeedVR2 VideoUpscaler 与 SeedVR2 Tiling Upscaler 节点和对应模型。"
+  },
+  "detail_repair_workflow_path": {
+    "description": "手、脚、脸局部修复 API 工作流 JSON 路径",
+    "type": "string",
+    "default": "",
+    "hint": "用于 HQ 的 SeedVR2 前置修复；需要 Impact Pack、Impact Subpack、SAM 与对应 YOLO 检测模型。"
   },
   "job_store_path": {
     "description": "统一 Job / Asset 记录目录",
     "type": "string",
-    "default": "/workspace/astrbot-runtime/data/plugin_data/astrbot_plugin_comfy_bridge/job_store",
+    "default": "",
     "hint": "使用独立 JSON 保存任务、父子关系、采样参数、LoRA 计划和图片哈希，不迁移现有数据库。"
   },
   "positive_prompt_node_id": {
@@ -74,7 +199,7 @@
   "preset_store_path": {
     "description": "角色与画风预设 JSON 路径",
     "type": "string",
-    "default": "/workspace/astrbot-runtime/data/plugin_data/astrbot_plugin_comfy_bridge/presets.json",
+    "default": "",
     "hint": "管理员指令创建的预设会持久化到这里。"
   },
   "character_dictionary_enabled": {
@@ -86,32 +211,36 @@
   "character_dictionary_path": {
     "description": "中文角色名词典 JSON 路径",
     "type": "string",
-    "default": "/workspace/astrbot-runtime/data/plugin_data/astrbot_plugin_comfy_bridge/character_dictionary.json",
+    "default": "",
     "hint": "由 tools/build_character_dictionary.py 生成。文件不存在时自动退回原有角色处理，不影响生图。"
   },
   "character_dictionary_edits_path": {
     "description": "角色词典管理覆盖层路径",
     "type": "string",
-    "default": "/workspace/astrbot-runtime/data/plugin_data/astrbot_plugin_comfy_bridge/hub_state/character_dictionary_edits.json",
+    "default": "",
     "hint": "由 Hub 管理端维护。禁用、别名、作品和外貌修订保存在此，不会在重建基础词典时丢失。"
   },
   "character_dictionary_default_mode": {
     "description": "中文角色标签默认强度",
     "type": "string",
     "default": "weak",
-    "options": ["weak", "strong", "off"],
-    "hint": "weak 只添加角色与作品 tag；strong 继续添加性别和固定外貌；off 保留原样。单次可用 角色模式=弱|强|关闭 覆盖。"
+    "options": [
+      "weak",
+      "strong",
+      "off"
+    ],
+    "hint": "非 QQ 入口未指定模式时使用此值。QQ 生图词典匹配默认 strong；客户端显式选择不受影响。weak 只添加角色与作品 tag；strong 继续添加性别和固定外貌；off 保留原样。单次可用 角色模式=弱|强|关闭 覆盖。"
   },
   "prompt_pool_path": {
     "description": "随机好图提示词池 JSON 路径",
     "type": "string",
-    "default": "/workspace/astrbot-runtime/data/plugin_data/astrbot_plugin_comfy_bridge/anima_random_prompt_pool.json",
+    "default": "",
     "hint": "首次使用会复制插件内置提示词库；之后可通过管理指令查询、导入、导出和维护，升级时保留用户修改与删除墓碑。"
   },
   "kp_dynamic_enabled": {
     "description": "K 组启用动态模块拼装",
     "type": "bool",
-    "default": true,
+    "default": false,
     "hint": "开启后从 KP 01-14 模块库实时组合场景、构图、光影、动作、表情、风格等；关闭后继续抽取原有 77 个固定范例。"
   },
   "kp_dynamic_modules_path": {
@@ -236,28 +365,53 @@
     "description": "自主绘图默认比例",
     "type": "string",
     "default": "2:3",
-    "options": ["1:1", "2:3", "3:2", "3:4", "4:3", "9:16", "16:9"]
+    "options": [
+      "1:1",
+      "2:3",
+      "3:2",
+      "3:4",
+      "4:3",
+      "9:16",
+      "16:9"
+    ]
   },
   "agent_tool_default_quality": {
     "description": "自主绘图默认工作流质量",
     "type": "string",
     "default": "quick",
-    "options": ["quick", "hq_stable", "hq_beauty"],
+    "options": [
+      "quick",
+      "hq_stable",
+      "hq_beauty"
+    ],
     "hint": "quick 使用普通生图；hq_stable 和 hq_beauty 使用对应 HQ Profile。"
   },
   "agent_tool_default_sampler": {
     "description": "自主绘图默认采样器预设",
     "type": "string",
     "default": "original",
-    "options": ["original", "2m", "2m_sde", "2m_sde_gpu"]
+    "options": [
+      "original",
+      "2m",
+      "2m_sde",
+      "2m_sde_gpu"
+    ]
   },
   "agent_tool_default_scheduler": {
     "description": "自主绘图默认调度器",
     "type": "string",
     "default": "workflow",
     "options": [
-      "workflow", "normal", "karras", "exponential", "sgm_uniform", "simple",
-      "ddim_uniform", "beta", "linear_quadratic", "kl_optimal"
+      "workflow",
+      "normal",
+      "karras",
+      "exponential",
+      "sgm_uniform",
+      "simple",
+      "ddim_uniform",
+      "beta",
+      "linear_quadratic",
+      "kl_optimal"
     ],
     "hint": "workflow 表示保留所选 Quick/HQ Profile 的调度器原值。"
   },
@@ -314,7 +468,7 @@
   "input_dir": {
     "description": "反推输入图片临时目录",
     "type": "string",
-    "default": "/workspace/astrbot-runtime/data/plugin_data/astrbot_plugin_comfy_bridge/inputs"
+    "default": ""
   },
   "reverse_workflow_enabled": {
     "description": "/aip 启用专用反推工作流",
@@ -325,14 +479,21 @@
   "reverse_workflow_path": {
     "description": "反推 ComfyUI API 工作流 JSON 路径",
     "type": "string",
-    "default": "/workspace/ComfyUI/user/default/workflows/Anima_WD_CT_JoyCaption_Reverse_Beta_api.json",
+    "default": "",
     "hint": "使用工作流安装包内的 API 版本，不是普通界面工作流。"
   },
   "reverse_default_preset": {
     "description": "/aip 默认反推模式",
     "type": "string",
     "default": "full",
-    "options": ["full", "scene", "action", "character", "safe", "raw"],
+    "options": [
+      "full",
+      "scene",
+      "action",
+      "character",
+      "safe",
+      "raw"
+    ],
     "hint": "指令可用 模式=场景 临时覆盖。"
   },
   "reverse_image_node_id": {
@@ -353,7 +514,7 @@
   "reverse_history_dir": {
     "description": "反推历史数据目录",
     "type": "string",
-    "default": "/workspace/astrbot-runtime/data/plugin_data/astrbot_plugin_comfy_bridge/reverse_history",
+    "default": "",
     "hint": "结构化结果默认标记为 pending_review，供以后审核并入随机提示词库。"
   },
   "reverse_save_thumbnail": {
@@ -424,7 +585,10 @@
     "description": "画风 LoRA 加载模式",
     "type": "string",
     "default": "dynamic",
-    "options": ["dynamic", "fixed"],
+    "options": [
+      "dynamic",
+      "fixed"
+    ],
     "hint": "dynamic 会在每次任务的内存工作流中创建标准 LoraLoader 链，不再受四槽限制；fixed 保持旧工作流槽位模式。"
   },
   "dynamic_style_node_id_start": {
@@ -566,7 +730,7 @@
   "output_dir": {
     "description": "临时结果保存目录",
     "type": "string",
-    "default": "/workspace/astrbot-runtime/data/plugin_data/astrbot_plugin_comfy_bridge/outputs"
+    "default": ""
   },
   "output_cleanup_enabled": {
     "description": "自动清理插件结果图片",

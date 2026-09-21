@@ -11,8 +11,10 @@ from typing import Any
 
 try:
     from .workflow_runtime import WorkflowError, build_prompt_text
+    from .kp_dynamic_runtime import _safety_for_text
 except ImportError:  # pragma: no cover - direct local tests
     from workflow_runtime import WorkflowError, build_prompt_text
+    from kp_dynamic_runtime import _safety_for_text
 
 
 VALID_SAFETY_LABELS = {"normal", "nsfw", "sexual"}
@@ -88,6 +90,7 @@ def _merge_prompt_pools(
     # step already applies content-based administrator deletions, so stale ID
     # tombstones must not hide the newly assigned record.
     deleted_ids.difference_update(replacement_ids)
+    retired = bundled.get("retired_managed_prompt_fingerprints", {})
     merged_prompts: list[dict[str, Any]] = []
     seen_ids: set[str] = set()
 
@@ -96,6 +99,10 @@ def _merge_prompt_pools(
             continue
         prompt_id = str(existing.get("id", "")).strip()
         if not prompt_id or prompt_id in seen_ids or prompt_id in deleted_ids:
+            continue
+        # Only retire known, unmodified old defaults. Custom entries and edits survive.
+        fingerprint = hashlib.sha256(json.dumps(existing, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+        if fingerprint in retired.get(prompt_id, []):
             continue
         bundled_item = bundled_by_id.get(prompt_id)
         existing_source = str(existing.get("source_code", "")).strip().upper()
@@ -186,6 +193,9 @@ def ensure_prompt_pool(path: Path, bundled_path: Path) -> Path:
         backup = path.with_name(f"{path.stem}.pre-0.2.6.json")
         if not backup.exists():
             shutil.copy2(path, backup)
+        revision_backup = path.with_name(f"{path.stem}.pre-catalog-{bundled_revision}-{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}.json")
+        with path.open('rb') as source, revision_backup.open('xb') as target:
+            shutil.copyfileobj(source, target)
         _write_json_atomic(path, _merge_prompt_pools(persistent, bundled))
     except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
         raise WorkflowError(f"无法初始化或升级随机提示词池：{exc}") from exc
@@ -444,6 +454,7 @@ def select_random_prompt(
         and bool(item.get("enabled", True))
         and _entry_source_code(item) in source_set
         and _entry_safety_code(item) in safety_set
+        and not (_entry_source_code(item) == "K" and _entry_safety_code(item) == "N" and _safety_for_text(str(item.get("prompt", ""))) != "N")
         and required_groups.issubset(set(prompt_entry_custom_groups(item)))
     ]
     if not eligible:

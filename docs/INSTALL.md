@@ -9,7 +9,7 @@
 
 ## 1. 前置条件
 
-- Python 3.10 或 3.11。
+- 本项目运行模块 Python 3.10+；使用新版向导全新安装 AstrBot 时需 Python 3.12+。
 - AstrBot 4.x，已通过 NapCat/aiocqhttp 收发 QQ 消息。
 - ComfyUI API 能从 AstrBot 所在机器访问。
 - 已按 Anima 模型卡安装模型及基础工作流依赖。
@@ -56,7 +56,7 @@ ASTRBOT_DATA/plugin_data/astrbot_plugin_comfy_bridge
 完整重启 AstrBot。日志中应出现：
 
 ```text
-Plugin astrbot_plugin_comfy_bridge (0.4.0)
+Plugin astrbot_plugin_comfy_bridge (0.5.0-beta.1)
 ```
 
 公开包的内置提示词池是空的，不会覆盖私人库。新安装需要按第 7 节导入自己的提示词。
@@ -260,7 +260,7 @@ flutter build apk --release
 按顺序完成：
 
 1. ComfyUI `/system_stats` 返回 200。
-2. AstrBot 日志出现插件 `0.4.0`，QQ `/aimg_status` 有响应。
+2. AstrBot 日志出现插件 `0.5.0-beta.1`，QQ `/aimg_status` 有响应。
 3. `/aimg 1girl, solo` 成功回图。
 4. 配置预设后验证角色/画风 LoRA。
 5. `/aip 仅反推 分类=场景,动作` 成功返回文本。

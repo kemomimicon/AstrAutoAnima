@@ -9,6 +9,7 @@ import math
 import mimetypes
 import os
 import re
+import time
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
@@ -20,6 +21,7 @@ import httpx
 
 from .auth import AuthPrincipal, SYSTEM_ADMIN
 from .config import Settings
+from .personal_styles import _validate_loras
 from .schemas import (
     DeliveryTarget,
     DeliveryTargetListResponse,
@@ -28,7 +30,7 @@ from .schemas import (
     RemoteJobPage,
     RemoteJobResponse,
 )
-from .personal_styles import resolve_personal_style_key
+from .personal_styles import resolve_personal_style_key, list_personal_styles
 from .repositories import RepositoryError
 
 
@@ -152,6 +154,11 @@ def _filter_sources(value: str) -> set[str]:
 def _prompt_ids_from_plain(messages: list[str]) -> list[str]:
     found: list[str] = []
     for message in messages:
+        # Explicit ID fields support imported IDs without hard-coded source prefixes.
+        for group in re.findall(r"条目=([^｜\s]+)", message):
+            for ident in group.split(','):
+                if re.fullmatch(r"[A-Za-z0-9_.-]{1,300}", ident) and ident not in found:
+                    found.append(ident)
         for prompt_id in _PROMPT_ID_PATTERN.findall(message):
             if prompt_id not in found:
                 found.append(prompt_id)
@@ -161,6 +168,10 @@ def _prompt_ids_from_plain(messages: list[str]) -> list[str]:
 def build_remote_command(
     payload: RemoteJobCreateRequest, target: _TargetRecord
 ) -> tuple[str, str]:
+    if payload.character_variant and (not payload.character.strip() or payload.kind in {"chaos", "multi", "remake"}):
+        raise RemoteJobError("角色造型需要指定单个角色预设，不适用于混沌、多人或原图重跑")
+    if payload.kind == "refine" and payload.profile in {"", "seedvr2"} and payload.denoise is not None:
+        raise RemoteJobError("SeedVR2 没有传统 denoise；如需 Anima 重绘请选择 light 模式，不能静默忽略重绘参数")
     pool_filter = _normalize_pool_filter(payload.pool_filter)
     effective_safety = payload.safety_code
     selected_safety = _filter_safety(pool_filter)
@@ -205,7 +216,7 @@ def build_remote_command(
         ("chinese", True): "/aicn",
         ("reverse", False): "/aip",
         ("reverse", True): "/aip",
-        ("random", False): "来张好图抄一抄",
+        ("random", False): "来张好图抽一抽",
         ("random", True): "来张好图五连抽",
         ("chaos", False): "来张好图混沌时刻",
         ("chaos", True): "来张好图混沌五连抽",
@@ -213,10 +224,53 @@ def build_remote_command(
         ("hq", True): "/ahq",
         ("refine", False): "/arefine",
         ("refine", True): "/arefine",
+        ("remake", False): "/aremake",
+        ("multi", False): "/amulti",
     }[(payload.kind, payload.five_draw)]
     parts = [prefix]
+    visual = (("主光", payload.lighting_key), ("效果光", payload.lighting_effect),
+              ("主材质", payload.material_primary), ("细节材质", ','.join(payload.material_details)),
+              ("表面效果", payload.material_surface),
+              ("镜头距离", payload.camera_distance), ("水平机位", payload.camera_yaw),
+              ("俯仰机位", payload.camera_pitch), ("镜头效果", payload.camera_lens),
+              ("画面倾斜", payload.camera_roll))
+    for value in payload.material_details:
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,100}", value):
+            raise RemoteJobError("材质预设 ID 不合法")
+    if any(value for _, value in visual) and (payload.kind in {"remake", "multi"} or (payload.kind == "refine" and payload.profile in {"", "seedvr2"})):
+        raise RemoteJobError("此任务不支持光影材质；请关闭预设或选择普通生图/Anima 精修")
+    if payload.kind == "remake":
+        if not re.fullmatch(r"引用令牌=[0-9a-f]{32}", payload.prompt):
+            raise RemoteJobError("请使用图片旁的重跑按钮创建引用令牌")
+        edits = [f'/aremake {payload.prompt}']
+        for label, value in [('角色', payload.character), ('画风', payload.style), ('比例', payload.ratio)]:
+            if value:
+                edits.append(label + '=' + json.dumps(value, ensure_ascii=False))
+        if payload.remake_fixed_seed:
+            edits.append('固定种子')
+        if payload.remake_adjustment.strip():
+            edits.append(payload.remake_adjustment.strip())
+        return ' '.join(edits), effective_safety
+    if payload.kind == "multi":
+        if payload.character or payload.style or payload.personal_style_slot or payload.trial_style:
+            raise RemoteJobError("裸模多人图的人物请写在分段提示词中，不使用全局角色/画风预设")
+        if not payload.prompt.strip():
+            raise RemoteJobError("多人图需要人物分段描述")
+        knobs = []
+        for name, value in (("比例", payload.ratio), ("采样器", payload.sampler), ("调度器", payload.scheduler), ("步数", payload.steps), ("CFG", payload.cfg)):
+            if value is not None and value != "":
+                knobs.append(f"{name}={value}")
+        return " ".join(["/amulti", *knobs, payload.prompt.strip()]), effective_safety
     if payload.kind == "hq":
         parts.append(payload.profile or "stable")
+        parts.extend(
+            (
+                f"修手={'开启' if payload.detail_hands else '关闭'}",
+                f"修脚={'开启' if payload.detail_feet else '关闭'}",
+                f"修脸={'开启' if payload.detail_face else '关闭'}",
+                f"修复后放大={'开启' if payload.detail_upscale else '关闭'}",
+            )
+        )
     elif payload.kind == "refine":
         parts.append(payload.profile or "seedvr2")
     if payload.kind == "reverse":
@@ -240,9 +294,18 @@ def build_remote_command(
             parts.append(f"模式={payload.reverse_preset}")
     if random_kind and pool_filter:
         parts.append(pool_filter)
+    # Positional selectors/profiles must precede every key=value directive.
+    if payload.camera_extreme_lora or any((payload.camera_distance, payload.camera_yaw,
+            payload.camera_pitch, payload.camera_lens, payload.camera_roll)):
+        parts.append(f"极限辅助={'开启' if payload.camera_extreme_lora else '关闭'}")
     if payload.kind != "chaos":
+        if payload.character_variant:
+            if not payload.character.strip():
+                raise RemoteJobError("选择造型时必须指定角色预设")
+            parts.append(f"造型={payload.character_variant}")
         if payload.character.strip():
-            parts.append(f"角色={payload.character.strip()}")
+            name = payload.character.strip()
+            parts.append("角色=" + (json.dumps(name, ensure_ascii=False) if any(c.isspace() for c in name) or '"' in name or "'" in name else name))
             parts.append(
                 "角色模式="
                 + {"weak": "弱", "strong": "强", "off": "关闭"}[
@@ -250,7 +313,10 @@ def build_remote_command(
                 ]
             )
         if payload.style.strip():
-            parts.append(f"画风={payload.style.strip()}")
+            name = payload.style.strip()
+            parts.append("画风=" + (json.dumps(name, ensure_ascii=False) if any(c.isspace() for c in name) or '"' in name or "'" in name else name))
+        if payload.character_strength is not None:
+            parts.append(f"角色权重={payload.character_strength:g}")
         if payload.ratio:
             parts.append(f"比例={payload.ratio}")
     if payload.sampler:
@@ -269,6 +335,7 @@ def build_remote_command(
         if payload.kind != "refine":
             raise RemoteJobError("parent_job_id is only valid for refine jobs")
         parts.append(f"任务={payload.parent_job_id.strip()}")
+    parts.extend(f"{name}={value}" for name, value in visual if value)
     if payload.prompt.strip():
         parts.append(payload.prompt.strip())
     if payload.kind in {"direct", "chinese", "hq"} and not payload.prompt.strip():
@@ -395,10 +462,51 @@ class RemoteJobManager:
         self._jobs: dict[str, RemoteJobResponse] = {}
         self._owners: dict[str, str] = {}
         self._tasks: set[asyncio.Task[None]] = set()
+        self._suite_image_index: dict[str, int] = {}
         self._semaphore = asyncio.Semaphore(1)
+        from .safety_runtime import PriorityGate
+        self._safety_gate = PriorityGate(1)
+        self._safety_users = {}
+        self._admin_exempt_jobs = set()
+        self._stream_targets = {}
+        self._stream_sent = {}
         self._records_dir = self.settings.remote_job_store_dir / "records"
         self._media_dir = self.settings.remote_job_store_dir / "media"
+        self._attachment_images: dict[tuple[str, str], RemoteJobImage] = {}
         self._load_persisted_jobs()
+
+    def _safety_policy(self):
+        from .safety_runtime import load_policy
+        return load_policy(self.settings.plugin_data_dir / "safety")
+
+    def _credit_store(self):
+        from .safety_runtime import CreditStore
+        return CreditStore(self.settings.plugin_data_dir / "safety")
+
+    def _safety_priority(self, job_id):
+        if job_id in self._admin_exempt_jobs or not self._safety_policy().enabled:
+            return 0
+        qq = self._safety_users.get(job_id, "")
+        return int(not qq or self._credit_store().score(qq) < 5)
+
+    def _require_approved(self, content, job_id=None):
+        if job_id is not None and job_id in self._admin_exempt_jobs:
+            return
+        policy = self._safety_policy()
+        if policy.enabled and not self._credit_store().approved(content, policy.fingerprint):
+            raise RemoteJobError("图片未通过当前安全审核，不予提供")
+
+    def _dispatch_slot(self, job_id):
+        from contextlib import asynccontextmanager
+        @asynccontextmanager
+        async def slot():
+            if self._safety_policy().enabled:
+                # Share the plugin queue with QQ; do not hold a Hub serial gate.
+                yield
+            else:
+                async with self._safety_gate.slot(lambda: self._safety_priority(job_id)):
+                    yield
+        return slot()
 
     def _record_path(self, job_id: str) -> Path:
         return self._records_dir / f"{job_id}.json"
@@ -409,6 +517,7 @@ class RemoteJobManager:
         payload = {
             "schema_version": "1.0",
             "owner": owner,
+            "admin_exempt": job_id in self._admin_exempt_jobs,
             "job": job.model_dump(mode="json"),
         }
         path = self._record_path(job_id)
@@ -444,8 +553,15 @@ class RemoteJobManager:
                 interrupted.append(job.id)
             self._jobs[job.id] = job
             self._owners[job.id] = owner
+            if payload.get("admin_exempt") is True:
+                self._admin_exempt_jobs.add(job.id)
         for job_id in interrupted:
             self._persist(job_id)
+            if self._jobs[job_id].task_suite_id:
+                try:
+                    self.cancel_suite(job_id, SYSTEM_ADMIN)
+                except OSError:
+                    pass
 
     def targets(
         self, principal: AuthPrincipal = SYSTEM_ADMIN
@@ -462,7 +578,51 @@ class RemoteJobManager:
         payload: RemoteJobCreateRequest,
         principal: AuthPrincipal = SYSTEM_ADMIN,
     ) -> RemoteJobResponse:
+        suite = None
+        suite_id = ''
+        if payload.task_suite_id:
+            if payload.kind not in {'direct', 'chinese', 'reverse', 'remake'} or payload.five_draw or payload.reverse_only:
+                raise RemoteJobError('套组仅支持直接/中文/反推生图/重跑，不支持五连抽或仅反推')
+            from .task_suites import suite_snapshot
+            try:
+                suite = suite_snapshot(self.settings, principal, payload.task_suite_id)
+            except RepositoryError as exc:
+                raise RemoteJobError(str(exc)) from exc
+            suite_id = uuid.uuid4().hex
+            payload = payload.model_copy(update={'style': '__hub_suite_' + suite_id,
+                'character': '__suite_replace_identity__', 'character_variant': '',
+                'personal_style_slot': None, 'trial_style': None})
+        qq = principal.qq
+        if not qq and principal.is_admin:
+            policy_path = self.settings.plugin_data_dir / "safety/policy.json"
+            if policy_path.is_file():
+                qq = str(json.loads(policy_path.read_text(encoding="utf-8")).get("safety_admin_qq", ""))
+        if self._safety_policy().enabled and not principal.is_admin:
+            if not re.fullmatch(r"[1-9][0-9]{4,14}", qq):
+                raise RemoteJobError("安全模式需要绑定真实 QQ；管理员请配置 safety_admin_qq")
+            if self._credit_store().score(qq) <= 0:
+                raise RemoteJobError("信用为0，生成失败；请联系管理员")
         personal_style_slot = payload.personal_style_slot
+        random_id = ''
+        random_keys = []
+        if payload.style == '随机模式':
+            if payload.kind == 'chaos' or payload.personal_style_slot is not None or payload.trial_style is not None:
+                raise RemoteJobError('随机预设不能与混沌、个人槽位或临时调色盘同时指定')
+            if principal.role != 'legacy_lite':
+                random_keys = [item.style_key for item in list_personal_styles(self.settings, principal).items]
+            random_id = uuid.uuid4().hex
+            payload = payload.model_copy(update={'style': '__hub_random_' + random_id})
+        trial = payload.trial_style
+        trial_id = ""
+        if trial is not None:
+            if payload.kind == "chaos" or payload.style or personal_style_slot is not None:
+                raise RemoteJobError("临时调色盘不能与混沌、全局画风或个人槽位同时使用")
+            try:
+                _validate_loras(self.settings, trial)
+            except RepositoryError as exc:
+                raise RemoteJobError(str(exc)) from exc
+            trial_id = uuid.uuid4().hex
+            payload = payload.model_copy(update={"style": f"__hub_trial_{trial_id}"})
         if payload.personal_style_slot is not None:
             if payload.kind == "chaos":
                 raise RemoteJobError("personal style cannot be used for chaos jobs")
@@ -484,6 +644,8 @@ class RemoteJobManager:
             raise RemoteJobError("unknown or disabled delivery target")
         command, effective_safety = build_remote_command(payload, target)
         command_preview = command
+        if random_id:
+            command_preview = command_preview.replace('__hub_random_' + random_id, '随机模式')
         if personal_style_slot is not None:
             command_preview = re.sub(
                 r"画风=\S+",
@@ -503,14 +665,45 @@ class RemoteJobManager:
             profile=payload.profile,
             target_id=target.public.id,
             target_label=target.public.label,
+            deliver_to_im=payload.deliver_to_im,
             command_preview=command_preview,
             message="任务已进入队列",
             created_at=now,
             updated_at=now,
         )
         self._jobs[job.id] = job
+        if principal.is_admin:
+            self._admin_exempt_jobs.add(job.id)
+        self._safety_users[job.id] = qq
         self._owners[job.id] = principal.subject
         self._persist(job.id)
+        if suite is not None:
+            suite_root = self.settings.plugin_data_dir / 'hub_state' / 'task_suite_runs'
+            suite_root.mkdir(parents=True, exist_ok=True)
+            with (suite_root / f'{suite_id}.json').open('x', encoding='utf-8') as stream:
+                json.dump({**suite, 'owner': principal.subject, 'job_id': job.id,
+                           'expires_at': time.time() + max(7200, self.settings.remote_job_timeout_seconds * len(suite['rows']) + 120),
+                           'rows_status': ['queued'] * len(suite['rows'])}, stream, ensure_ascii=False)
+            self._update(job.id, task_suite_id=suite_id, task_suite_name=suite['name'],
+                         command_preview=command_preview.replace('__hub_suite_' + suite_id, suite['name']).replace('__suite_replace_identity__', '套组'),
+                         message=f"套组已进入队列，共 {len(suite['rows'])} 项")
+        trial_path = None
+        random_path = None
+        if random_id:
+            random_root = self.settings.hub_state_dir / 'random_styles'
+            random_root.mkdir(parents=True, exist_ok=True)
+            random_path = random_root / f'{random_id}.json'
+            with random_path.open('x', encoding='utf-8') as stream:
+                json.dump({'expires_at': time.time() + 7200, 'owner': principal.subject,
+                           'personal_keys': random_keys}, stream)
+        if trial is not None:
+            trial_root = self.settings.hub_state_dir / "style_trials"
+            trial_root.mkdir(parents=True, exist_ok=True)
+            trial_path = trial_root / f"{trial_id}.json"
+            with trial_path.open("x", encoding="utf-8") as stream:
+                json.dump({"expires_at": time.time() + 7200, "owner": principal.subject,
+                           "style": {"hidden": True, "prompt": trial.prompt, "loras": [
+                               {"name": item.path, "strength_model": item.strength, "strength_clip": item.strength if item.strength_clip is None else item.strength_clip} for item in trial.loras]}}, stream, ensure_ascii=False)
         task = asyncio.create_task(
             self._run(
                 job.id,
@@ -522,15 +715,59 @@ class RemoteJobManager:
             )
         )
         self._tasks.add(task)
+        if random_path is not None:
+            def finish_random(_task):
+                try:
+                    if random_path.is_file() and not random_path.is_symlink():
+                        random_path.unlink()
+                except OSError:
+                    pass
+            task.add_done_callback(finish_random)
+        if trial_path is not None:
+            def finish_trial(_task):
+                # Only this generated UUID file; never sweep user configuration.
+                try:
+                    if trial_path.is_file() and not trial_path.is_symlink():
+                        trial_path.unlink()
+                except OSError:
+                    pass
+            task.add_done_callback(finish_trial)
         task.add_done_callback(self._tasks.discard)
-        return job
+        return self._jobs[job.id]
 
     def get(
         self, job_id: str, principal: AuthPrincipal = SYSTEM_ADMIN
     ) -> RemoteJobResponse | None:
         if not principal.is_admin and self._owners.get(job_id) != principal.subject:
             return None
-        return self._jobs.get(job_id)
+        job = self._jobs.get(job_id)
+        return self._suite_progress(job) if job else None
+
+    def _suite_progress(self, job):
+        if not job.task_suite_id:
+            return job
+        path = self.settings.plugin_data_dir / 'hub_state' / 'task_suite_runs' / f'{job.task_suite_id}.json'
+        try:
+            run = json.loads(path.read_text(encoding='utf-8'))
+            rows = [dict(index=i+1, character=r['character'], style=r['style'], status=run['rows_status'][i], job_id=run.get('row_job_ids', {}).get(str(i), ''))
+                    for i, r in enumerate(run['rows'])]
+            done = sum(r['status'] in {'succeeded', 'failed', 'cancelled'} for r in rows)
+            message = f"套组 {run['name']}：{done}/{len(rows)} 项已结束"
+            if job.status not in {'queued', 'running'}:
+                message += '；' + job.message
+            return job.model_copy(update={'task_suite_rows': rows, 'message': message})
+        except (OSError, ValueError, KeyError, TypeError, IndexError):
+            return job
+
+    def cancel_suite(self, job_id, principal):
+        job = self.get(job_id, principal)
+        if job is None or not job.task_suite_id:
+            raise RemoteJobError('任务套组不存在或无权取消')
+        path = self.settings.plugin_data_dir / 'hub_state' / 'task_suite_runs' / f'{job.task_suite_id}.cancel'
+        if not path.exists():
+            with path.open('x', encoding='utf-8') as stream:
+                stream.write('cancel pending rows')
+        return {'message': '已请求取消未执行项；正在生成的单项会完成'}
 
     def list(
         self,
@@ -565,7 +802,7 @@ class RemoteJobManager:
             raise RemoteJobError("remote job page out of range")
         start = (page - 1) * page_size
         return RemoteJobPage(
-            items=jobs[start : start + page_size],
+            items=[self._suite_progress(job) for job in jobs[start : start + page_size]],
             page=page,
             pages=pages,
             total=total,
@@ -587,6 +824,10 @@ class RemoteJobManager:
         path = self._media_dir / job_id / f"{image.id}{suffix}"
         if not path.is_file():
             return None
+        try:
+            self._require_approved(path.read_bytes(), job_id)
+        except RemoteJobError:
+            return None
         return image, path
 
     def mark_liked(
@@ -603,6 +844,51 @@ class RemoteJobManager:
             liked.append(prompt_id)
             self._update(job_id, liked_prompt_ids=liked)
         return self._jobs[job_id]
+
+    def unmark_liked(self, prompt_id, principal):
+        from .prompt_likes import _saved_id
+        for job_id, job in list(self._jobs.items()):
+            if self._owners.get(job_id) != principal.subject:
+                continue
+            liked = [p for p in job.liked_prompt_ids if p != prompt_id and _saved_id(principal, p) != prompt_id]
+            if liked != job.liked_prompt_ids:
+                self._update(job_id, liked_prompt_ids=liked)
+
+    def remake_image(self, job_id: str, image_id: str, principal: AuthPrincipal, options=None):
+        original = self.get(job_id, principal)
+        located = self.get_image(job_id, image_id, principal)
+        if original is None or located is None:
+            raise RemoteJobError("图片不存在或无权访问")
+        image, _ = located
+        if not original.bridge_job_ids:
+            raise RemoteJobError("旧记录未保存插件任务关联，不能保证原参数重跑")
+        assets_root = self.settings.plugin_data_dir / "job_store" / "assets"
+        suite_source_job = ''
+        if image.task_suite_index:
+            row = next((row for row in original.task_suite_rows if row['index'] == image.task_suite_index), None)
+            suite_source_job = row.get('job_id', '') if row else ''
+            if not suite_source_job:
+                raise RemoteJobError('套组单项关联尚未落盘，请稍后刷新；不会猜测原图')
+        found = []
+        for path in assets_root.glob("img_*.json"):
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+                if data.get("sha256") == image.sha256 and data.get("job_id") in original.bridge_job_ids and data.get("type") == "result" and (not suite_source_job or data.get('job_id') == suite_source_job):
+                    found.append(data)
+            except (OSError, ValueError):
+                continue
+        if len(found) != 1:
+            raise RemoteJobError("图片的原任务关联缺失或不唯一，拒绝猜测")
+        token = uuid.uuid4().hex
+        root = self.settings.hub_state_dir / "image_actions"
+        root.mkdir(parents=True, exist_ok=True)
+        ticket = root / f"{token}.json"
+        with ticket.open("x", encoding="utf-8") as stream:
+            json.dump({"action": "remake", "asset_id": found[0]["asset_id"], "expires_at": time.time()+7200}, stream)
+        edits = {} if options is None else dict(character=options.character, style=options.style,
+            ratio=options.ratio, remake_fixed_seed=options.fixed_seed, remake_adjustment=options.adjustment,
+            task_suite_id=options.task_suite_id)
+        return self.create(RemoteJobCreateRequest(target_id=original.target_id, kind="remake", prompt=f"引用令牌={token}", safety_code=original.safety_code, deliver_to_im=original.deliver_to_im, **edits), principal)
 
     def _update(self, job_id: str, **changes: Any) -> None:
         current = self._jobs[job_id]
@@ -626,9 +912,27 @@ class RemoteJobManager:
         source_image: tuple[bytes, str, str] | None = None,
         text_only: bool = False,
     ) -> None:
-        async with self._semaphore:
+        async with self._dispatch_slot(job_id):
             self._update(job_id, status="running", message="AstrBot 正在生成")
+            suite_rows = self._suite_progress(self._jobs[job_id]).task_suite_rows
+            run_timeout = self.settings.remote_job_timeout_seconds * max(1, min(20, len(suite_rows)))
             try:
+                policy = self._safety_policy()
+                if policy.enabled or job_id in self._admin_exempt_jobs:
+                    qq = self._safety_users.get(job_id, "")
+                    admin_exempt = job_id in self._admin_exempt_jobs
+                    if policy.enabled and not admin_exempt and (not re.fullmatch(r"[1-9][0-9]{4,14}", qq) or self._credit_store().score(qq) <= 0):
+                        raise RemoteJobError("安全身份缺失或信用为0，生成失败")
+                    token = uuid.uuid4().hex
+                    tickets = self.settings.plugin_data_dir / "safety/tickets"
+                    tickets.mkdir(parents=True, exist_ok=True)
+                    with (tickets / f"{token}.json").open("x", encoding="utf-8") as stream:
+                        json.dump({"qq": qq, "root": job_id, "admin_exempt": admin_exempt,
+                                   "expires": time.time()+run_timeout+120}, stream)
+                    username = f"aaa_safe_{token}"
+                    if policy.enabled:
+                        self._stream_targets[job_id] = target
+                        self._stream_sent[job_id] = set()
                 plain, attachments, images = await asyncio.wait_for(
                     self._chat_and_collect(
                         job_id,
@@ -637,19 +941,39 @@ class RemoteJobManager:
                         source_image=source_image,
                         allow_text_only=text_only,
                     ),
-                    timeout=self.settings.remote_job_timeout_seconds,
+                    timeout=run_timeout,
                 )
                 message = plain[-1] if plain else "生成完成"
-                await self._send_im(target.umo, message, attachments)
+                deliver = self._jobs[job_id].deliver_to_im
+                if deliver and (job_id not in self._stream_targets or not attachments):
+                    await self._send_im(target.umo, message, attachments, job_id=job_id,
+                        bridge_ids=re.findall(r"任务=(job_[A-Za-z0-9_]+)", "\n".join(plain)))
                 self._update(
                     job_id,
                     status="succeeded",
-                    message=f"已发送到 {target.public.label}",
+                    message=f"已发送到 {target.public.label}" if deliver else "生成完成，仅保存在跑图记录；未发送 QQ",
                     images=images,
-                    prompt_ids=_prompt_ids_from_plain(plain),
+                    prompt_ids=list(dict.fromkeys([*_prompt_ids_from_plain(plain), *(image.prompt_id for image in images if image.prompt_id)]))[:20],
+                    bridge_job_ids=list(dict.fromkeys(re.findall(r"任务=(job_[A-Za-z0-9_]+)", "\n".join(plain))))[:20],
                 )
+                if self._jobs[job_id].task_suite_id:
+                    suite_job = self._suite_progress(self._jobs[job_id])
+                    if any(row['status'] != 'succeeded' for row in suite_job.task_suite_rows):
+                        self._update(job_id, status='failed', message='套组部分失败或取消；已完成图片保留，请查看逐项状态')
             except Exception as exc:
                 self._update(job_id, status="failed", message=str(exc)[:500])
+            finally:
+                if self._jobs[job_id].task_suite_id:
+                    # A timeout/shutdown must not leave later rows submitting behind the UI.
+                    try:
+                        self.cancel_suite(job_id, SYSTEM_ADMIN)
+                    except OSError:
+                        pass
+                self._suite_image_index.pop(job_id, None)
+                self._stream_targets.pop(job_id, None)
+                self._stream_sent.pop(job_id, None)
+                for key in [key for key in self._attachment_images if key[0] == job_id]:
+                    self._attachment_images.pop(key, None)
 
     def _client(self) -> httpx.AsyncClient:
         return httpx.AsyncClient(
@@ -671,6 +995,7 @@ class RemoteJobManager:
         plain: list[str] = []
         attachments: list[str] = []
         images: list[RemoteJobImage] = []
+        image_sources: dict[str, str] = {}
         async with self._client() as client:
             message: str | list[dict[str, str]] = command
             if source_image is not None:
@@ -702,8 +1027,25 @@ class RemoteJobManager:
                         continue
                     event_type = str(event.get("type", ""))
                     data = event.get("data")
+                    stored = None
+                    attachment_id = None
                     if event_type == "plain" and isinstance(data, str):
-                        if "已提交生成请求" not in data:
+                        if data.startswith('AAA_IMAGE_SUITE=') and self._jobs[job_id].task_suite_id:
+                            try:
+                                index = int(json.loads(data.split('=', 1)[1])['index'])
+                                if 1 <= index <= 20:
+                                    self._suite_image_index[job_id] = index
+                            except (ValueError, TypeError, KeyError):
+                                pass
+                        elif data.startswith('AAA_IMAGE_SOURCE='):
+                            try:
+                                mapping = json.loads(data.split('=', 1)[1])
+                                digest, ident = mapping['sha256'], mapping['prompt_id']
+                                if re.fullmatch(r'[0-9a-f]{64}', digest) and re.fullmatch(r'[A-Za-z0-9_.-]{1,300}', ident):
+                                    image_sources[digest] = ident
+                            except (ValueError, KeyError, TypeError):
+                                pass
+                        elif "已提交生成请求" not in data:
                             plain.append(data)
                     elif event_type == "attachment_saved":
                         attachment_id = _find_attachment_id(data)
@@ -721,28 +1063,56 @@ class RemoteJobManager:
                             stored = await self._store_attachment(
                                 job_id, client, attachment_id
                             )
+                            if self._safety_policy().enabled and stored is None:
+                                raise RemoteJobError("安全图片读取失败，不予投递")
                             if stored is not None and all(
-                                item.sha256 != stored.sha256 for item in images
+                                item.id != stored.id for item in images
                             ):
                                 images.append(stored)
                     elif event_type in {"image", "file"}:
                         attachment_id = _find_attachment_id(data)
                         reference = _find_media_reference(data)
-                        stored = await self._store_media_reference(job_id, reference)
+                        if attachment_id:
+                            stored = await self._store_attachment(job_id, client, attachment_id)
+                        else:
+                            stored = await self._store_media_reference(job_id, reference)
+                        if self._safety_policy().enabled and stored is None:
+                            raise RemoteJobError("安全图片读取失败，不予投递")
                         if stored is not None and all(
-                            item.sha256 != stored.sha256 for item in images
+                            item.id != stored.id for item in images
                         ):
                             images.append(stored)
                         if not attachment_id:
-                            if reference.startswith(("[IMAGE]", "[FILE]")):
+                            if self._safety_policy().enabled and stored is not None:
+                                safe_path = self._media_dir / job_id / f"{stored.id}{Path(stored.filename).suffix.casefold()}"
+                                content = safe_path.read_bytes()
+                                self._require_approved(content, job_id)
+                                attachment_id = await self._upload_bytes(client, content, stored.filename, stored.content_type)
+                            elif reference.startswith(("[IMAGE]", "[FILE]")):
                                 continue
-                            attachment_id = await self._upload_reference(
-                                client, reference
-                            )
+                            else:
+                                attachment_id = await self._upload_reference(client, reference)
                         if attachment_id and attachment_id not in attachments:
                             attachments.append(attachment_id)
                     elif event_type == "error":
                         raise RemoteJobError(str(data or "AstrBot chat failed"))
+                    if attachment_id and stored is not None:
+                        self._attachment_images[(job_id, attachment_id)] = stored
+                    for image in images:
+                        image.prompt_id = image_sources.get(image.sha256, image.prompt_id)
+                    if images:
+                        self._update(job_id, images=list(images), prompt_ids=list(dict.fromkeys([*_prompt_ids_from_plain(plain), *(image.prompt_id for image in images if image.prompt_id)]))[:20])
+                    if job_id in self._stream_targets and images:
+                        self._update(job_id, images=list(images),
+                                     prompt_ids=list(dict.fromkeys([*_prompt_ids_from_plain(plain), *(image.prompt_id for image in images if image.prompt_id)]))[:20],
+                                     message=f"已通过安全审核 {len(images)} 张，任务仍在执行")
+                        if self._jobs[job_id].deliver_to_im:
+                            sent = self._stream_sent[job_id]
+                            for attachment in attachments:
+                                if attachment not in sent:
+                                    await self._send_im(self._stream_targets[job_id].umo, plain[-1] if plain else "安全审核通过", [attachment],
+                                        job_id=job_id, bridge_ids=re.findall(r"任务=(job_[A-Za-z0-9_]+)", "\n".join(plain)))
+                                    sent.add(attachment)
         if plain and plain[-1].startswith("生成失败"):
             raise RemoteJobError(plain[-1])
         if not attachments and not (allow_text_only and plain):
@@ -849,6 +1219,7 @@ class RemoteJobManager:
     ) -> RemoteJobImage | None:
         if not content or len(content) > _MAX_MEDIA_BYTES:
             return None
+        self._require_approved(content, job_id)
         detected = _detected_image_type(content)
         guessed = mimetypes.guess_type(filename)[0] or ""
         if not content_type.startswith("image/"):
@@ -867,6 +1238,9 @@ class RemoteJobManager:
             filename = f"generated-image{suffix}"
         digest = hashlib.sha256(content).hexdigest()
         image_id = f"img_{digest[:16]}"
+        suite_index = self._suite_image_index.get(job_id, 0)
+        if suite_index:
+            image_id += f'_r{suite_index}'
         target_dir = self._media_dir / job_id
         target_dir.mkdir(parents=True, exist_ok=True)
         target = target_dir / f"{image_id}{suffix}"
@@ -881,6 +1255,7 @@ class RemoteJobManager:
                 temporary.write_bytes(content)
             os.replace(temporary, target)
         return RemoteJobImage(
+            task_suite_index=suite_index,
             id=image_id,
             filename=Path(filename).name,
             content_type=content_type,
@@ -971,7 +1346,16 @@ class RemoteJobManager:
             raise RemoteJobError("AstrBot file upload did not return an attachment id")
         return attachment_id
 
-    async def _send_im(self, umo: str, text: str, attachments: list[str]) -> None:
+    async def _send_im(self, umo: str, text: str, attachments: list[str], *, job_id: str = '', bridge_ids=None) -> None:
+        if job_id and bridge_ids and attachments:
+            from .qq_delivery import deliver_image
+            async with self._client() as client:
+                for attachment in attachments:
+                    image = self._attachment_images.get((job_id, attachment))
+                    if image is None:
+                        raise RemoteJobError('QQ 投递图片关联缺失；图片保留在记录中')
+                    await deliver_image(self.settings, client, umo, text, image.sha256, bridge_ids)
+            return
         chain: list[dict[str, str]] = []
         if text:
             chain.append({"type": "plain", "text": text})
