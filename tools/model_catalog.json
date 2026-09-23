@@ -1,0 +1,15 @@
+{
+  "default_profile": "anima-base-1.0",
+  "profiles": {
+    "anima-base-1.0": {
+      "name": "Anima Base 1.0（官方三件套，约 5.63 GB）",
+      "model_card": "https://huggingface.co/circlestone-labs/Anima",
+      "license_url": "https://huggingface.co/circlestone-labs/Anima/blob/main/LICENSE.md",
+      "files": [
+        {"field": "unet", "filename": "anima-base-v1.0.safetensors", "target": "models/diffusion_models/anima-base-v1.0.safetensors", "size": 4182218328, "sha256": "bd43b7cffe1ed1153d9c41e7beb2f18cb1273eafbaa3af3edd6a173dc90a006e", "url": "https://huggingface.co/circlestone-labs/Anima/resolve/main/split_files/diffusion_models/anima-base-v1.0.safetensors?download=true"},
+        {"field": "clip", "filename": "qwen_3_06b_base.safetensors", "target": "models/text_encoders/qwen_3_06b_base.safetensors", "size": 1192135096, "sha256": "cd2a512003e2f9f3cd3c32a9c3573f820bb28c940f73c57b1ddaa983d9223eba", "url": "https://huggingface.co/circlestone-labs/Anima/resolve/main/split_files/text_encoders/qwen_3_06b_base.safetensors?download=true"},
+        {"field": "vae", "filename": "qwen_image_vae.safetensors", "target": "models/vae/qwen_image_vae.safetensors", "size": 253806246, "sha256": "a70580f0213e67967ee9c95f05bb400e8fb08307e017a924bf3441223e023d1f", "url": "https://huggingface.co/circlestone-labs/Anima/resolve/main/split_files/vae/qwen_image_vae.safetensors?download=true"}
+      ]
+    }
+  }
+}

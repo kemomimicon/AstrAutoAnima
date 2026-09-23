@@ -8,7 +8,7 @@
 | AstrBot | <https://github.com/AstrBotDevs/AstrBot> | Bot 框架；本项目测试 4.x |
 | ComfyUI | <https://github.com/Comfy-Org/ComfyUI> | 工作流执行环境 |
 | NapCatQQ | <https://github.com/NapNeko/NapCatQQ> | QQ 接入；遵守其仓库许可及 QQ 平台规则 |
-| Anima Master | <https://github.com/YayiMiko/anima-master> | 测试版本 0.7.2；0.8.0 未验证 |
+| Anima Master | <https://github.com/YayiMiko/anima-master> | 测试版本 0.7.1；0.9.1 未验证 |
 | Anima | <https://huggingface.co/circlestone-labs/Anima> | 模型许可证独立，使用前阅读模型卡 |
 | ComfyUI-Booru-Tagger | <https://github.com/nestflow/ComfyUI-Booru-Tagger> | 反推外部节点 |
 | JoyCaption GGUF 节点 | <https://github.com/judian17/ComfyUI-joycaption-beta-one-GGUF> | 反推外部节点 |

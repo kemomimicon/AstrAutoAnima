@@ -7,7 +7,7 @@ desc: |
   保留提示词池、动态 LoRA、画布、采样器与反推历史，并新增 Workflow Registry、
   Job/Asset 元数据和 HQ/放大重修 Beta。
   K 使用独立的 00-14 动态模块拼装库，保留固定范例回退；App 点赞后可保存为参与随机抽取的 P 组。
-version: 0.5.0-beta.1
+version: 0.5.0-beta.2
 author: RelN
 repo: ""
 astrbot_version: ">=4.17,<5"

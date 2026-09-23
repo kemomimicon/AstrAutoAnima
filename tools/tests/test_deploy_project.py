@@ -67,6 +67,28 @@ class DeploymentTests(unittest.TestCase):
     def test_missing_models_stays_unconfigured(self):
         self.assertIsNone(quick_workflow(Plan('unused'), Path('unused'), lambda _: None))
 
+    def test_new_astrbot_init_is_noninteractive_and_cwd_exists(self):
+        with tempfile.TemporaryDirectory() as t:
+            root = Path(t) / 'install'
+            calls = []
+            def fake_run(command, log, cwd=None):
+                if 'init' in command:
+                    self.assertIn('--yes', command)
+                    self.assertTrue(Path(cwd).is_dir())
+                    calls.append(command)
+                if 'clone' in command:
+                    Path(command[-1]).mkdir(parents=True, exist_ok=True)
+                    (Path(command[-1]) / 'main.py').write_text('# fixture')
+            plan = Plan(str(root), install_astrbot=True, install_comfyui=True, install_dependencies=True)
+            with (patch('deploy_project.sys.version_info', (3, 12)),
+                  patch('deploy_project.shutil.which', return_value='git'),
+                  patch('deploy_project.make_env', side_effect=lambda path, log: python_at(path)),
+                  patch('deploy_project.port_open', return_value=False),
+                  patch('deploy_project.run', side_effect=fake_run),
+                  patch('deploy_project.start_services', return_value=[])):
+                deploy(plan, lambda _: None)
+            self.assertEqual(len(calls), 1)
+
     def test_full_offline_file_deployment_is_repeatable_and_preserves_data(self):
         with tempfile.TemporaryDirectory() as t:
             base = Path(t)
@@ -74,6 +96,12 @@ class DeploymentTests(unittest.TestCase):
             (astro / 'data/config').mkdir(parents=True)
             comfy.mkdir()
             (comfy / 'main.py').write_text('# fixture')
+            for environment in (astro, comfy):
+                runtime = python_at(environment / '.venv')
+                runtime.parent.mkdir(parents=True)
+                runtime.touch()
+            import os
+            (python_at(astro / '.venv').parent / ('astrbot.exe' if os.name == 'nt' else 'astrbot')).touch()
             python = python_at(root / 'hub/.venv')
             python.parent.mkdir(parents=True)
             python.touch()

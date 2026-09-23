@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import sys
@@ -13,7 +14,7 @@ from pathlib import Path
 TEXT_SUFFIXES = {
     ".py", ".md", ".json", ".yaml", ".yml", ".toml", ".txt", ".dart",
     ".kt", ".kts", ".cpp", ".cc", ".h", ".cmake", ".ps1", ".sh", ".bat",
-    ".properties", ".xml", ".example", ".gitignore",
+    ".properties", ".xml", ".example", ".gitignore", ".cmd",
 }
 FORBIDDEN_SUFFIXES = {
     ".safetensors", ".ckpt", ".pt", ".pth", ".onnx", ".gguf", ".pem", ".key",
@@ -27,7 +28,7 @@ FORBIDDEN_DIRS = {
     ".venv", "venv", "__pycache__", ".dart_tool", "build", ".gradle",
     "reverse_history", "job_store", "hub_state", "outputs", "inputs", "logs",
     ".pytest_cache", ".idea", ".ipynb_checkpoints", "kp_upstream",
-    "plugin_data", "style_gallery", "courtyard",
+    "plugin_data", "style_gallery",
 }
 TEXT_PATTERNS = {
     "private key block": re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----"),
@@ -50,6 +51,14 @@ def is_text(path: Path) -> bool:
 
 def scan(root: Path) -> list[str]:
     findings: list[str] = []
+    manifest = root / 'artwork-manifest.json'
+    approved = {item['path']: item['sha256'] for item in json.loads(manifest.read_text('utf-8-sig'))} if manifest.is_file() else {}
+    for name, expected in approved.items():
+        item = root / name
+        if not name.startswith('clients/flutter/assets/') or '..' in Path(name).parts:
+            findings.append('invalid artwork whitelist path: ' + name)
+        elif not item.is_file() or hashlib.sha256(item.read_bytes()).hexdigest() != expected:
+            findings.append('missing or altered authorized artwork: ' + name)
     for path in sorted(root.rglob("*")):
         relative = path.relative_to(root)
         if ".git" in relative.parts:
@@ -68,8 +77,10 @@ def scan(root: Path) -> list[str]:
             findings.append(f"forbidden private filename: {relative}")
         if path.name.startswith('.env.') and path.name != '.env.example':
             findings.append(f"private environment file: {relative}")
-        if path.name.startswith("oc_") and path.suffix.lower() in {".png", ".jpg", ".webp"}:
-            findings.append(f"private client artwork must not be bundled: {relative}")
+        if 'courtyard' in relative.parts or 'splash' in relative.parts or path.name.startswith('oc_'):
+            if path.suffix.lower() in {'.png', '.jpg', '.webp'}:
+                if approved.get(relative.as_posix()) != hashlib.sha256(path.read_bytes()).hexdigest():
+                    findings.append(f"unapproved or changed artwork: {relative}")
         if path.suffix.lower() in FORBIDDEN_SUFFIXES:
             findings.append(f"forbidden model/secret file: {relative}")
         if path.stat().st_size > 20 * 1024 * 1024:

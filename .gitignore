@@ -50,6 +50,10 @@ prompt_pool*.json
 *.gif
 *.mp4
 !clients/flutter/android/app/src/main/res/**/*.png
+!clients/flutter/assets/courtyard/light/*.png
+!clients/flutter/assets/courtyard/dark/*.png
+!clients/flutter/assets/courtyard/illustrations/*.webp
+!clients/flutter/assets/splash/oc_greeting_layered_atlas.png
 
 # Python
 __pycache__/

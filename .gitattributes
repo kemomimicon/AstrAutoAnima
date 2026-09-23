@@ -9,9 +9,11 @@
 *.md text eol=lf
 
 *.bat text eol=crlf
+*.cmd text eol=crlf
 *.ps1 text eol=crlf
 
 *.png binary
+*.webp binary
 *.ico binary
 *.apk binary
 *.zip binary

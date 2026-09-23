@@ -10,14 +10,16 @@
 
 ## Windows：首次部署
 
-1. 下载并完整解压 `AstrAutoAnima-lazy-bundle-0.5.0-beta.1.zip`。不要在 ZIP 内运行。
-2. 双击 `一键部署_AstrAutoAnima.bat`。缺 Python 3.12 时会询问是否用 winget 安装官方 Python；缺 Git 时也单独询问。拒绝则不下载。
+先选择对应系统的包：[Windows 分步指引](DEPLOY_WINDOWS.md) / [Linux 分步指引](DEPLOY_LINUX.md)。AstrBot Desktop 与 CLI 必须选择正确模式；桌面版无需填写内置 Python。
+
+1. 下载并完整解压 `AstrAutoAnima-lazy-bundle-windows-0.5.0-beta.2.zip`。不要在 ZIP 内运行。
+2. 双击 `Deploy-Windows.cmd`。缺 Python 3.12 时会询问是否用 winget 安装官方 Python；缺 Git 时也单独询问。拒绝则不下载。
 3. 选择一个**空的独立安装目录**，例如 `D:\AAA-install`，不要选择磁盘根目录、用户目录或 ZIP 解压目录内部。
 4. 二选一：
    - 已有环境：填写 AstrBot 根目录（包含 `data`）、ComfyUI 根目录及其 Python 可执行文件。venv 的 Python 通常在 `.venv\Scripts\python.exe`。
    - 全新环境：勾选下载 AstrBot 4.27.2、ComfyUI v0.21.1。会安装到独立目录，不覆盖其他实例。
 5. 首次安装勾选“允许安装依赖”。NVIDIA 环境保留 GPU 选项，须已安装兼容驱动；CPU 选项仅适合安装验证，实际生图可能非常慢。不支持自动选择 AMD/Intel 计算后端，请接入已配置好的 ComfyUI。
-6. 选择已下载的 Anima UNET、配套 CLIP、VAE。向导会复制到对应模型目录并生成一个不带私人 LoRA 的 Quick API 工作流。模型选错仍会失败，请按模型卡搭配。
+6. 选择本地 UNET、CLIP、VAE，或勾选下载默认 **Anima Base 1.0** 三件套并确认许可。会按哈希校验并自动放置，生成不含私人 LoRA 的 Quick API 工作流。勾选核心上游 **Anima Master 0.7.1**，按 [AM 配置说明](ANIMA_MASTER.md) 完成联通。
 7. 如果已有 AstrBot OpenAPI Key / 平台 Bot ID，一并填写；否则可稍后填写。**Bot ID 不是用户 QQ 或群号。**
 8. 按需勾选反推 / 放大节点与模型下载，默认全部关闭。
 9. 点击“预检并一键部署 / 启动”。部署时请勿关闭窗口；失败时不会自动删除旧数据、不会强杀服务，也不会重复执行另一套安装命令。
@@ -28,7 +30,7 @@
 
 - AstrBot：打开 `http://127.0.0.1:6185`。首次密码查看安装目录 `AstrBot.log`，按上游提示修改。
 - ComfyUI：打开 `http://127.0.0.1:8188`；健康接口 `/system_stats` 应返回 JSON。
-- Hub：访问 `http://127.0.0.1:6278/api/v1/health` 应显示 `0.5.0-beta.1` 和 `ok`。附带 Web App 的懒人包会自动配置首页；纯源码 / 服务包没有 Web App 时根页面 404 不代表服务未启动。
+- Hub：访问 `http://127.0.0.1:6278/api/v1/health` 应显示 `0.5.0-beta.2` 和 `ok`。附带 Web App 的懒人包会自动配置首页；纯源码 / 服务包没有 Web App 时根页面 404 不代表服务未启动。
 - App：填写 Hub 地址和安装目录 `runtime-env.json` 中的 `AAH_ADMIN_TOKEN`。不要把这个文件发到群里或提交 Git。
 - AstrBot API：在 WebUI `设置 → OpenAPI` 创建所需 API Key，授予实际使用接口的 chat / message 等权限，再用向导填写 Key 和 Bot ID。向导不会自行改写 AstrBot 的内部密钥数据库。
 - QQ：按 NapCat 和 AstrBot 官方文档完成登录、OneBot 连接；已有用户配置会保留。
@@ -42,7 +44,7 @@
 
 准备 Python 3.12+（全新 AstrBot）、venv 和 Git。有桌面时可执行 `sh 一键部署_AstrAutoAnima.sh` 打开同一个向导。无桌面不要调用 Tk 窗口：
 
-1. 复制 `examples/deployment-plan.example.json` 为自己的计划，修改安装目录和已有环境路径。
+1. 复制 `examples/deployment-plan.linux.json` 为自己的计划，修改安装目录和已有环境路径。
 2. 首次安装将 `install_dependencies` 设为 `true`；全新环境再按需设 `install_astrbot` / `install_comfyui` 为 `true`。
 3. 计划可填写模型本地路径；API Key 可以先留空。包含密钥的计划文件必须妥善保护，勿发布。
 

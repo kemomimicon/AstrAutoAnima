@@ -159,7 +159,20 @@ class CourtyardIcon extends StatelessWidget {
   Widget build(BuildContext context) {
     final fallback =
         Icon(icon, size: size, color: color, semanticLabel: semanticLabel);
-    return fallback;
+    final name = names[icon];
+    if (name == null ||
+        Theme.of(context).extension<CourtyardMarker>() == null) {
+      return fallback;
+    }
+    final mode =
+        Theme.of(context).brightness == Brightness.dark ? 'dark' : 'light';
+    return Image.asset('assets/courtyard/$mode/$name.png',
+        width: size ?? 28,
+        height: size ?? 28,
+        color: color,
+        semanticLabel: semanticLabel,
+        excludeFromSemantics: semanticLabel == null,
+        errorBuilder: (_, __, ___) => fallback);
   }
 }
 
@@ -167,7 +180,23 @@ class CourtyardWelcome extends StatelessWidget {
   const CourtyardWelcome({super.key});
   @override
   Widget build(BuildContext context) {
-    return const Icon(Icons.hub_outlined, size: 48);
+    if (Theme.of(context).extension<CourtyardMarker>() == null) {
+      return const Icon(Icons.hub_outlined, size: 48);
+    }
+    return Center(
+        child: Container(
+            width: 112,
+            height: 112,
+            padding: const EdgeInsets.all(4),
+            decoration: BoxDecoration(
+                color: const Color(0xFFF4F7FD),
+                borderRadius: BorderRadius.circular(20)),
+            clipBehavior: Clip.antiAlias,
+            child: Image.asset(
+                'assets/courtyard/illustrations/welcome_480.webp',
+                excludeFromSemantics: true,
+                errorBuilder: (_, __, ___) =>
+                    const Icon(Icons.hub_outlined, size: 48))));
   }
 }
 

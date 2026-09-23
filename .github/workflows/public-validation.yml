@@ -5,9 +5,23 @@ on:
   pull_request:
 
 jobs:
+  windows-deployment:
+    runs-on: windows-latest
+    env:
+      PYTHONDONTWRITEBYTECODE: "1"
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Windows native CMD and PowerShell regression
+        run: python scripts/run_public_tests.py tools
+      - name: Privacy check
+        run: python scripts/privacy_scan.py .
   python-validation:
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         python: ["3.11", "3.12"]
     env:
@@ -38,5 +52,7 @@ jobs:
           cp -R hub/service "$RUNNER_TEMP/aaa-hub-test-src"
           python -m pip install -e "$RUNNER_TEMP/aaa-hub-test-src"
           python scripts/run_public_tests.py hub --pytest
+      - name: Real Hub restart and preserved configuration smoke test
+        run: python scripts/smoke_hub_upgrade.py
       - name: Recheck no runtime artifacts were produced in release tree
         run: python scripts/privacy_scan.py .

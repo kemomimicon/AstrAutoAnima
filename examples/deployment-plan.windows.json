@@ -1,0 +1,14 @@
+{
+  "platform": "windows",
+  "destination": "D:/AAA-install",
+  "astrbot_mode": "desktop",
+  "astrbot": "%USERPROFILE%/.astrbot",
+  "comfyui": "D:/ComfyUI_windows_portable",
+  "install_dependencies": false,
+  "install_astrbot": false,
+  "install_comfyui": false,
+  "install_am": false,
+  "download_models": false,
+  "accept_model_license": false,
+  "gpu": true
+}

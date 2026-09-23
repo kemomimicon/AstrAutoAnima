@@ -12,11 +12,11 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION = "0.5.0-beta.1"
+VERSION = "0.5.0-beta.2"
 WORKFLOW_VERSION = "0.8.0-beta.1-public"
-ZIP_TIME = (2026, 9, 21, 0, 0, 0)
+ZIP_TIME = (2026, 9, 23, 0, 0, 0)
 LF_SUFFIXES = {".sh", ".py", ".json", ".yaml", ".yml", ".toml", ".md"}
-CRLF_SUFFIXES = {".bat", ".ps1"}
+CRLF_SUFFIXES = {".bat", ".cmd", ".ps1"}
 
 
 def public_files() -> list[Path]:
@@ -128,6 +128,8 @@ def main() -> int:
             ROOT / "docs" / "EASY_INSTALL.md",
             ROOT / "一键部署_AstrAutoAnima.bat",
             ROOT / "一键部署_AstrAutoAnima.sh",
+            ROOT / "Deploy-Windows.cmd",
+            ROOT / "Deploy-Linux.sh",
         }
     ]
     archives[f"AstrAutoAnima-tools-{VERSION}.zip"] = [
@@ -151,6 +153,9 @@ def main() -> int:
         "release-manifest.json",
         "一键部署_AstrAutoAnima.bat",
         "一键部署_AstrAutoAnima.sh",
+        "Deploy-Windows.cmd",
+        "Deploy-Linux.sh",
+        "artwork-manifest.json",
     }
     lazy_files = []
     for path in files:
@@ -158,9 +163,17 @@ def main() -> int:
         if relative.as_posix() in lazy_root_files or relative.parts[0] in lazy_roots:
             if "tests" not in relative.parts:
                 lazy_files.append(path)
-    archives[f"AstrAutoAnima-lazy-bundle-{VERSION}.zip"] = [
-        (path, (Path(source_prefix) / path.relative_to(ROOT)).as_posix())
-        for path in lazy_files
+    for platform in ('windows', 'linux'):
+        incompatible = {'.sh'} if platform == 'windows' else {'.cmd', '.bat', '.ps1'}
+        other_plan = 'deployment-plan.linux.json' if platform == 'windows' else 'deployment-plan.windows.json'
+        archives[f'AstrAutoAnima-lazy-bundle-{platform}-{VERSION}.zip'] = [
+            (path, (Path(source_prefix) / path.relative_to(ROOT)).as_posix())
+            for path in lazy_files if path.suffix.lower() not in incompatible and path.name != other_plan
+        ]
+    archives[f'AstrAutoAnima-artwork-{VERSION}.zip'] = [
+        (path, path.relative_to(ROOT).as_posix()) for path in files
+        if path.is_relative_to(ROOT / 'clients/flutter/assets')
+        or path in {ROOT / 'artwork-manifest.json', ROOT / 'docs/ARTWORK.md'}
     ]
 
     output.mkdir(parents=True, exist_ok=True)
@@ -180,7 +193,10 @@ def main() -> int:
                         continue
                     if name.startswith('/') or ':' in name or '..' in Path(name).parts or name.endswith(('.env', '.map')):
                         raise ValueError('Unsafe Web archive entry')
-                    bundle.writestr(f'{source_prefix}/hub/service/web/{name}', web.read(member))
+                    info = zipfile.ZipInfo(f'{source_prefix}/hub/service/web/{name}', ZIP_TIME)
+                    info.compress_type = zipfile.ZIP_DEFLATED
+                    info.external_attr = 0o644 << 16
+                    bundle.writestr(info, web.read(member))
         built.append(destination)
         print(f"BUILT {destination.name} ({destination.stat().st_size:,} bytes)")
 

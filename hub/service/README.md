@@ -1,8 +1,8 @@
 # AstrAutoAnima Hub
 
-当前公开测试版：`Hub 0.5.0-beta.1 / Client 0.5.0-beta.1 / Web App`
+当前公开测试版：`Hub 0.5.0-beta.2 / Client 0.5.0-beta.2 / Web App`
 
-本目录是独立部署、并与 `astrbot_plugin_comfy_bridge 0.5.0-beta.1` 配套的项目。目前提供：
+本目录是独立部署、并与 `astrbot_plugin_comfy_bridge 0.5.0-beta.2` 配套的项目。目前提供：
 
 - Hub 自身健康检查。
 - 管理端实时资源仪表每 2 秒更新 CPU、系统内存、GPU 核心、显存与 GPU 温度；接口仅允许管理员令牌访问。

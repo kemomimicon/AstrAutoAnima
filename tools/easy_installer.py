@@ -205,6 +205,10 @@ def download_file(
     *,
     expected_sha256: str = "",
 ) -> None:
+    # Both final and resume paths must stay in real directories.
+    from deployment_support import no_links
+    no_links(target)
+    no_links(target.with_name(target.name + '.part'))
     if target.is_file() and target.stat().st_size > 0:
         if not expected_sha256 or sha256_file(target) == expected_sha256.casefold():
             log(f"已存在且校验通过，安全跳过：{target}")

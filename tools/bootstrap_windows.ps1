@@ -1,28 +1,42 @@
+# ASCII-only bootstrap for Windows PowerShell 5.1 legacy code pages.
 $ErrorActionPreference = 'Stop'
 $releaseRoot = Split-Path -Parent $PSScriptRoot
 Set-Location -LiteralPath $releaseRoot
 
 function Find-ProjectPython {
-    foreach ($candidate in @('python', 'python3', "$env:LOCALAPPDATA\Programs\Python\Python312\python.exe")) {
+    # PS 5.1 turns native stderr into a terminating error under Stop, even with
+    # 2>$null. Missing Tk / missing py -3.12 is an expected probe failure.
+    $probePreference = $ErrorActionPreference
+    try {
+    $ErrorActionPreference = 'Continue'
+    foreach ($candidate in @("$env:LOCALAPPDATA\Programs\Python\Python312\python.exe", 'python', 'python3')) {
         $found = Get-Command $candidate -ErrorAction SilentlyContinue
-        if ($found) {
-            & $found.Source -c 'import sys; sys.exit(0 if sys.version_info >= (3,12) else 1)' 2>$null
+        if ($found -and $found.Source -notlike '*WindowsApps*') {
+            & $found.Source -c 'import sys,tkinter; sys.exit(0 if sys.version_info[:2] == (3,12) else 1)' 2>$null
             if ($LASTEXITCODE -eq 0) { return $found.Source }
         }
     }
+    $launcher = Get-Command py -ErrorAction SilentlyContinue
+    if ($launcher) {
+        $answer = & $launcher.Source -3.12 -c 'import sys,tkinter; print(sys.executable)' 2>$null
+        if ($LASTEXITCODE -eq 0 -and $answer -and (Test-Path -LiteralPath "$answer" -PathType Leaf)) { return "$answer" }
+    }
     return $null
+    } finally {
+        $ErrorActionPreference = $probePreference
+    }
 }
 
 $projectPython = Find-ProjectPython
 if (-not $projectPython) {
     Add-Type -AssemblyName System.Windows.Forms
-    $reply = [System.Windows.Forms.MessageBox]::Show('未找到 Python 3.12+。是否允许通过 winget 安装官方 Python 3.12？这是外部下载，不会安装模型。', '首次环境准备', 'YesNo')
-    if ($reply -ne 'Yes') { throw '已取消。可自行安装 Python 3.12 后重试。' }
-    if (-not (Get-Command winget -ErrorAction SilentlyContinue)) { throw '系统缺少 winget。请从 https://www.python.org/downloads/ 安装 Python 3.12，并启用 Tcl/Tk。' }
+    $reply = [System.Windows.Forms.MessageBox]::Show('Python 3.12 with Tk is required. Install official Python via winget? No models will be downloaded.', 'AAA environment setup', 'YesNo')
+    if ($reply -ne 'Yes') { throw 'Cancelled. Install Python 3.12 with Tcl/Tk and retry.' }
+    if (-not (Get-Command winget -ErrorAction SilentlyContinue)) { throw 'winget missing. Install Python 3.12 from https://www.python.org/downloads/' }
     & winget install --id Python.Python.3.12 --exact --source winget --accept-package-agreements --accept-source-agreements --scope user
-    if ($LASTEXITCODE -ne 0) { throw 'Python 安装失败，停止部署。' }
+    if ($LASTEXITCODE -ne 0) { throw 'Python installation failed.' }
     $projectPython = Find-ProjectPython
-    if (-not $projectPython) { throw '请重新打开部署入口以加载 Python 路径。' }
+    if (-not $projectPython) { throw 'Python not detected. Reopen this launcher after installation.' }
 }
 
 if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
@@ -30,13 +44,14 @@ if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
     if (Test-Path -LiteralPath (Join-Path $gitPath 'git.exe')) { $env:PATH = "$gitPath;$env:PATH" }
     else {
         Add-Type -AssemblyName System.Windows.Forms
-        $reply = [System.Windows.Forms.MessageBox]::Show('下载全新 ComfyUI 和外部节点需要 Git。是否通过 winget 安装官方 Git？选“否”仍可接入已有环境。', '可选环境准备', 'YesNo')
+        $reply = [System.Windows.Forms.MessageBox]::Show('New ComfyUI / node downloads need Git. Install Git via winget? No allows existing environments.', 'Optional Git', 'YesNo')
         if ($reply -eq 'Yes') {
+            if (-not (Get-Command winget -ErrorAction SilentlyContinue)) { throw 'winget missing. Install Git from https://git-scm.com/downloads' }
             & winget install --id Git.Git --exact --source winget --accept-package-agreements --accept-source-agreements
-            if ($LASTEXITCODE -ne 0) { throw 'Git 安装失败，停止部署。' }
+            if ($LASTEXITCODE -ne 0) { throw 'Git installation failed.' }
             if (Test-Path -LiteralPath $gitPath) { $env:PATH = "$gitPath;$env:PATH" }
         }
     }
 }
-& $projectPython (Join-Path $PSScriptRoot 'deploy_project.py')
-if ($LASTEXITCODE -ne 0) { throw '部署未完成，请查看上方错误信息。' }
+& $projectPython (Join-Path $PSScriptRoot 'deploy_project.py') --platform windows
+if ($LASTEXITCODE -ne 0) { throw 'Deployment incomplete. Read the error above.' }

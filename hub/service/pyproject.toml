@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "astr-auto-anima-hub"
-version = "0.5.0b1"
+version = "0.5.0b2"
 description = "Workstation service for AstrBot, ComfyUI and AstrAutoAnima clients"
 readme = "README.md"
 requires-python = ">=3.10"

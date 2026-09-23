@@ -13,7 +13,7 @@
 - AstrBot 4.x，已通过 NapCat/aiocqhttp 收发 QQ 消息。
 - ComfyUI API 能从 AstrBot 所在机器访问。
 - 已按 Anima 模型卡安装模型及基础工作流依赖。
-- **Anima Master 固定使用已联调的 0.7.2。0.8.0 尚未测试。**
+- **Anima Master 固定使用已联调的 0.7.1。0.9.1 尚未测试。**
 - Windows 客户端需要 Windows 10/11 x64；Android 客户端按 Release 中 APK 的最低系统要求。
 
 建议目录结构：
@@ -56,7 +56,7 @@ ASTRBOT_DATA/plugin_data/astrbot_plugin_comfy_bridge
 完整重启 AstrBot。日志中应出现：
 
 ```text
-Plugin astrbot_plugin_comfy_bridge (0.5.0-beta.1)
+Plugin astrbot_plugin_comfy_bridge (0.5.0-beta.2)
 ```
 
 公开包的内置提示词池是空的，不会覆盖私人库。新安装需要按第 7 节导入自己的提示词。
@@ -260,7 +260,7 @@ flutter build apk --release
 按顺序完成：
 
 1. ComfyUI `/system_stats` 返回 200。
-2. AstrBot 日志出现插件 `0.5.0-beta.1`，QQ `/aimg_status` 有响应。
+2. AstrBot 日志出现插件 `0.5.0-beta.2`，QQ `/aimg_status` 有响应。
 3. `/aimg 1girl, solo` 成功回图。
 4. 配置预设后验证角色/画风 LoRA。
 5. `/aip 仅反推 分类=场景,动作` 成功返回文本。

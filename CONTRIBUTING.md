@@ -7,4 +7,4 @@
 5. 提交前运行 `python scripts/validate_release.py .` 和 `python scripts/privacy_scan.py .`。
 6. Issue/日志先做脱敏；安全漏洞按 [SECURITY.md](SECURITY.md) 私下报告。
 
-Pull Request 请写明：动机、变更范围、验证环境、回滚方式，以及是否影响 Anima Master 0.7.2。
+Pull Request 请写明：动机、变更范围、验证环境、回滚方式，以及是否影响 Anima Master 0.7.1。

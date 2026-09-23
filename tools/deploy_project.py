@@ -19,6 +19,9 @@ import threading
 import time
 import urllib.request
 from dataclasses import asdict, dataclass
+from deployment_support import (host_platform, clean_path, no_links, astrbot_root,
+    comfy_root, discover_python, windows_start_script, download_base_models,
+    install_anima_master, configure_anima_master)
 
 ROOT = Path(__file__).resolve().parents[1]
 MARKER = '.aaa-managed-install'
@@ -27,6 +30,8 @@ MARKER = '.aaa-managed-install'
 @dataclass
 class Plan:
     destination: str
+    platform: str = 'auto'
+    astrbot_mode: str = 'cli'
     astrbot: str = ''
     comfyui: str = ''
     comfy_python: str = ''
@@ -41,10 +46,14 @@ class Plan:
     bot_id: str = ''
     api_key: str = ''
     external: str = ''
+    download_models: bool = False
+    accept_model_license: bool = False
+    install_am: bool = False
 
 
 def json_write(path, data, private=False):
     path = Path(path)
+    no_links(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     # Never follow a configuration symlink.
     if path.is_symlink():
@@ -57,19 +66,31 @@ def json_write(path, data, private=False):
 
 
 def checked_root(raw):
-    original = Path(raw).expanduser().absolute()
+    if not clean_path(raw):
+        raise ValueError('请填写独立安装目录')
+    original = Path(clean_path(raw)).absolute()
     resolved = original.resolve()
-    if original != resolved or any(p.is_symlink() or (hasattr(p, 'is_junction') and p.is_junction()) for p in (original, *original.parents)):
-        raise ValueError('部署目录及上级目录不能包含符号链接或目录联接')
+    no_links(original)
     source_inside = (ROOT / '.astr_auto_anima_public_root').is_file() and (resolved == ROOT or ROOT in resolved.parents)
     if resolved == Path(resolved.anchor) or resolved == Path.home() or source_inside:
         raise ValueError('请选择独立安装目录，不能使用磁盘根、用户目录或发布源码内部')
+    if resolved.exists() and not resolved.is_dir():
+        raise ValueError('安装目标是文件，请选择目录')
+    no_links(resolved / MARKER)
     if resolved.exists() and any(resolved.iterdir()) and not (resolved / MARKER).is_file():
         raise ValueError('目标目录非空且非本向导创建；请选择新目录。既有服务通过路径接入，不会被覆盖')
     return resolved
 
 
 def validate(plan):
+    if plan.platform not in ('auto', 'windows', 'linux') or plan.platform not in ('auto', host_platform()):
+        raise ValueError('操作系统选择不匹配：Windows 包只能在 Windows 执行，Linux 包只能在 Linux 执行')
+    if plan.astrbot_mode not in ('cli', 'desktop'):
+        raise ValueError('AstrBot 模式必须为 cli 或 desktop')
+    if plan.astrbot_mode == 'desktop' and (host_platform() != 'windows' or plan.install_astrbot):
+        raise ValueError('桌面版接入只用于已有 Windows AstrBot Desktop，不能同时勾选下载全新 AstrBot')
+    for key in ('destination', 'astrbot', 'comfyui', 'astrbot_python', 'comfy_python', 'unet', 'clip', 'vae'):
+        setattr(plan, key, clean_path(getattr(plan, key)))
     root = checked_root(plan.destination)
     if (plan.install_astrbot or plan.install_comfyui) and not plan.install_dependencies:
         raise ValueError('全新环境需要勾选“允许安装依赖”')
@@ -77,12 +98,33 @@ def validate(plan):
         raise ValueError('全新 AstrBot 环境需要 Python 3.12+；请用 Python 3.12 运行向导')
     if plan.install_comfyui and not shutil.which('git'):
         raise ValueError('下载 ComfyUI 需要 Git：https://git-scm.com/downloads')
-    for enabled, location, required, label in (
-        (plan.install_astrbot, plan.astrbot, 'data', 'AstrBot'),
-        (plan.install_comfyui, plan.comfyui, 'main.py', 'ComfyUI'),
-    ):
-        if not enabled and (not location or not (Path(location) / required).exists()):
-            raise ValueError(f'请选择已有 {label} 根目录，或勾选下载全新环境')
+    if not plan.install_astrbot:
+        if not plan.astrbot and plan.astrbot_mode != 'desktop':
+            raise ValueError('请选择已有 AstrBot 根目录，或勾选下载全新环境')
+        plan.astrbot = str(astrbot_root(plan.astrbot, plan.astrbot_mode))
+        if plan.astrbot_mode != 'desktop':
+            plan.astrbot_python = str(discover_python(Path(plan.astrbot), plan.astrbot_python))
+            executable = Path(plan.astrbot_python).parent / ('astrbot.exe' if os.name == 'nt' else 'astrbot')
+            if not executable.is_file():
+                raise ValueError('该 Python 环境没有 AstrBot CLI 启动器；桌面版请选择 desktop 模式，源码版请使用含 astrbot 命令的环境')
+    if not plan.install_comfyui:
+        if not plan.comfyui:
+            raise ValueError('请选择 ComfyUI 根目录或 portable 外层目录')
+        plan.comfyui = str(comfy_root(plan.comfyui))
+        plan.comfy_python = str(discover_python(Path(plan.comfyui), plan.comfy_python, portable=True))
+    for value in (plan.astrbot, plan.comfyui):
+        if value:
+            no_links(Path(value))
+            if root == Path(value) or Path(value) in root.parents:
+                raise ValueError('独立安装目录不能嵌套在已有 AstrBot/ComfyUI 目录中')
+    if plan.download_models and not plan.accept_model_license:
+        raise ValueError('请阅读并确认模型许可后再勾选下载 Anima Base 1.0')
+    if (plan.download_models or plan.install_am) and not shutil.which('curl'):
+        raise ValueError('模型/AM 下载需要 curl；Windows 请检查 curl.exe，Linux 请安装 curl')
+    from easy_installer import load_optional_components
+    known = {item['id'] for item in load_optional_components(ROOT)}
+    if set(filter(None, plan.external.split(','))) - known:
+        raise ValueError('可选组件 ID 不存在，请检查部署计划')
     for value in (plan.api_key, plan.bot_id):
         if any(c in value for c in '\r\n\0'):
             raise ValueError('凭据和 Bot ID 不能含换行')
@@ -96,7 +138,7 @@ def run(command, log, cwd=None):
     # Commands never contain credentials. Full pip/git output goes to the install log.
     log('执行：' + ' '.join(map(str, command)))
     flags = {'creationflags': subprocess.CREATE_NO_WINDOW} if os.name == 'nt' else {}
-    with subprocess.Popen(list(map(str, command)), cwd=cwd, stdout=subprocess.PIPE,
+    with subprocess.Popen(list(map(str, command)), cwd=cwd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                           stderr=subprocess.STDOUT, text=True, encoding='utf-8', errors='replace', **flags) as process:
         for line in process.stdout:
             log(line.rstrip())
@@ -129,7 +171,7 @@ def copy_source(source, target):
                     if item.is_symlink() or (hasattr(item, 'is_junction') and item.is_junction()):
                         raise ValueError('项目目录包含链接，请先人工检查：' + str(item))
     shutil.copytree(source, target, dirs_exist_ok=True,
-                    ignore=shutil.ignore_patterns('tests', '__pycache__', '*.pyc', '.env', '.venv'))
+                    ignore=shutil.ignore_patterns('tests', '__pycache__', '*.pyc', '.env', '.venv', '.git'))
 
 
 def quick_workflow(plan, comfy, log):
@@ -139,6 +181,7 @@ def quick_workflow(plan, comfy, log):
             return None
         source = Path(value).resolve()
         model_root = comfy / 'models' / folder
+        no_links(model_root)
         model_root.mkdir(parents=True, exist_ok=True)
         if source.is_relative_to(model_root.resolve()):
             model_names.append(source.relative_to(model_root.resolve()).as_posix())
@@ -229,10 +272,16 @@ def port_open(port):
 
 def start_services(root, log=print):
     root = checked_root(str(root))
+    for filename in ('runtime-env.json', 'services.json'):
+        if not (root / filename).is_file():
+            raise ValueError(f'缺少 {filename}：请先完成部署，不要手动新建空配置；当前目录：{root}')
     settings = json.loads((root / 'runtime-env.json').read_text('utf-8'))
     services = json.loads((root / 'services.json').read_text('utf-8'))
     reports = []
     for service in services:
+        if service.get('mode') == 'desktop':
+            reports.append('AstrBot Desktop：' + ('6185 端口已有服务，请在桌面端确认插件已加载' if port_open(service['port']) else '请手动打开 AstrBot Desktop；本入口不会启动第二套后端'))
+            continue
         if port_open(service['port']):
             check = health(service['health']) if service.get('health') else None
             if (service['name'] == 'Hub' and isinstance(check, dict) and check.get('service') == 'astr-auto-anima-hub') or (
@@ -242,6 +291,9 @@ def start_services(root, log=print):
                 reports.append(service['name'] + ' 端口已被占用，未启动第二份；请确认原服务')
             continue
         command = service['command']
+        if not Path(service['cwd']).is_dir():
+            reports.append(service['name'] + ' 工作目录不存在，请恢复原目录或重新配置：' + service['cwd'])
+            continue
         if not Path(command[0]).is_file():
             reports.append(service['name'] + ' 未配置可执行环境，需手动启动原服务')
             continue
@@ -292,11 +344,12 @@ def deploy(plan, log=print):
         apy = Path(plan.astrbot_python) if plan.astrbot_python else python_at(astro / '.venv')
         cpy = Path(plan.comfy_python) if plan.comfy_python else python_at(comfy / '.venv')
         if plan.install_astrbot:
+            astro.mkdir(parents=True, exist_ok=True)
             apy = make_env(astro / '.venv', log)
             run([apy, '-m', 'pip', 'install', 'astrbot==4.27.2'], log)
             executable = apy.parent / ('astrbot.exe' if os.name == 'nt' else 'astrbot')
             if not (astro / 'data/cmd_config.json').is_file():
-                run([executable, 'init'], log, astro)
+                run([executable, 'init', '--yes'], log, astro)
         if plan.install_comfyui:
             if not (comfy / 'main.py').exists():
                 run(['git', 'clone', '--branch', 'v0.21.1', '--depth', '1', 'https://github.com/Comfy-Org/ComfyUI.git', comfy], log)
@@ -321,7 +374,7 @@ def deploy(plan, log=print):
                 shutil.copy2(file, dest)
         if plan.install_dependencies:
             run([hub_python, '-m', 'pip', 'install', '-e', root / 'hub'], log)
-            if apy.is_file():
+            if plan.astrbot_mode != 'desktop' and apy.is_file():
                 run([apy, '-m', 'pip', 'install', '-r', plugin / 'requirements.txt'], log)
             if cpy.is_file():
                 run([cpy, '-m', 'pip', 'install', '-r', node / 'requirements.txt'], log)
@@ -330,6 +383,8 @@ def deploy(plan, log=print):
             install_external(InstallPlan(ROOT, astro / 'data', comfy, root / 'hub',
                              external=set(plan.external.split(',')), comfy_python=cpy,
                              install_external_requirements=plan.install_dependencies, apply=True), backup, log)
+        if plan.download_models:
+            download_base_models(ROOT, comfy, plan, log)
         flow = quick_workflow(plan, comfy, log)
         if flow is not None and not (workflows / 'AAA_Quick_Local_api.json').exists():
             json_write(workflows / 'AAA_Quick_Local_api.json', flow)
@@ -338,24 +393,35 @@ def deploy(plan, log=print):
             backup.mkdir(parents=True, exist_ok=True)
             shutil.copy2(config, backup / 'plugin_config.json')
         env = configure(plan, root, astro, comfy)
+        if plan.install_am:
+            am = install_anima_master(astro, root, log, copy_source)
+            if plan.install_dependencies and plan.astrbot_mode != 'desktop':
+                run([apy, '-m', 'pip', 'install', '-r', am / 'requirements.txt'], log)
+            configure_anima_master(astro, comfy, root, json_write)
         # API key never goes into the reusable plan.
         safe_plan = asdict(plan)
         safe_plan['api_key'] = ''
         json_write(root / 'last-plan.json', safe_plan, True)
         services = [
             {'name': 'ComfyUI', 'command': [str(cpy), 'main.py', '--listen', '127.0.0.1', '--port', '8188'] + ([] if plan.gpu else ['--cpu']), 'cwd': str(comfy), 'port': 8188, 'health': 'http://127.0.0.1:8188/system_stats'},
-            {'name': 'AstrBot', 'command': [str(apy.parent / ('astrbot.exe' if os.name == 'nt' else 'astrbot')), 'run', '--port', '6185'], 'cwd': str(astro), 'port': 6185},
+            {'name': 'AstrBot', 'mode': plan.astrbot_mode, 'command': [str(apy.parent / ('astrbot.exe' if os.name == 'nt' else 'astrbot')), 'run', '--port', '6185'], 'cwd': str(astro), 'port': 6185},
             {'name': 'Hub', 'command': [str(hub_python), '-m', 'astr_auto_anima_hub'], 'cwd': str(root / 'hub'), 'port': 6278, 'health': 'http://127.0.0.1:6278/api/v1/health'},
         ]
         json_write(root / 'services.json', services)
         # Self-contained start entry survives moving/deleting the downloaded release.
         shutil.copy2(Path(__file__), root / 'deploy_project.py')
+        shutil.copy2(Path(__file__).with_name('deployment_support.py'), root / 'deployment_support.py')
         if os.name == 'nt':
-            (root / 'Start.cmd').write_text('@echo off\r\n"%~dp0hub\\.venv\\Scripts\\python.exe" "%~dp0deploy_project.py" --start "%~dp0"\r\npause\r\n', 'utf-8')
+            (root / 'Start.cmd').write_text(windows_start_script(), 'ascii', newline='')
         else:
             (root / 'Start.sh').write_text('#!/bin/sh\nset -eu\nD=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)\nexec "$D/hub/.venv/bin/python" "$D/deploy_project.py" --start "$D"\n', 'utf-8')
             (root / 'Start.sh').chmod(0o700)
         missing = []
+        if plan.astrbot_mode == 'desktop':
+            missing.append('手动启动 AstrBot Desktop；若插件缺依赖，请通过其插件管理器安装 requests / pillow，勿给内置运行时盲目 pip 升级')
+        missing.append('Anima Master：兼容基线 0.7.1；上游 0.9.1（2026-09-23 核对）未联调，不自动升级。详细配置见发布包 docs/ANIMA_MASTER.md')
+        if not (astro / 'data/plugins/astrbot_plugin_anima_master/metadata.yaml').is_file():
+            missing.append('尚未安装核心上游 Anima Master：重新运行向导显式勾选安装 0.7.1，或在插件页安装固定版本')
         if not (workflows / 'AAA_Quick_Local_api.json').exists():
             missing.append('选择 Anima UNET / CLIP / VAE 或自行设置工作流；模型未随包分发')
         if not env.get('AAH_ASTRBOT_API_KEY'):
@@ -372,14 +438,21 @@ def deploy(plan, log=print):
         lock.unlink()  # Exact lock created above, never a directory or glob.
 
 
-def wizard():
+def wizard(platform='auto'):
     import tkinter as tk
     from tkinter import ttk, filedialog, messagebox
     app = tk.Tk()
     app.title('AstrAutoAnima 0.5.0 Beta 一键部署')
-    app.geometry('960x850')
-    frame = ttk.Frame(app, padding=12)
-    frame.pack(fill='both', expand=True)
+    app.geometry('980x850')
+    canvas = tk.Canvas(app)
+    scrollbar = ttk.Scrollbar(app, orient='vertical', command=canvas.yview)
+    scrollbar.pack(side='right', fill='y')
+    canvas.pack(side='left', fill='both', expand=True)
+    canvas.configure(yscrollcommand=scrollbar.set)
+    frame = ttk.Frame(canvas, padding=12)
+    window = canvas.create_window((0, 0), window=frame, anchor='nw')
+    frame.bind('<Configure>', lambda _: canvas.configure(scrollregion=canvas.bbox('all')))
+    canvas.bind('<Configure>', lambda event: canvas.itemconfigure(window, width=event.width))
     frame.columnconfigure(1, weight=1)
     values = {}
     fields = [('destination', '独立安装目录', str(ROOT.parent / 'AstrAutoAnima-install')),
@@ -393,30 +466,40 @@ def wizard():
         ttk.Label(frame, text=label).grid(row=row, column=0, sticky='w')
         ttk.Entry(frame, textvariable=value, show='*' if key == 'api_key' else '').grid(row=row, column=1, sticky='ew', pady=2)
         if key not in {'api_key', 'bot_id'}:
-            def choose(v=value, directory=key in {'destination', 'astrbot', 'comfyui'}):
-                chosen = filedialog.askdirectory() if directory else filedialog.askopenfilename()
+            def choose(v=value, directory=key in {'destination', 'astrbot', 'comfyui'}, must_exist=key != 'destination'):
+                chosen = filedialog.askdirectory(mustexist=must_exist) if directory else filedialog.askopenfilename()
                 if chosen:
                     v.set(chosen)
             ttk.Button(frame, text='选择', command=choose).grid(row=row, column=2)
+    platform_value = tk.StringVar(value=host_platform() if platform == 'auto' else platform)
+    mode_value = tk.StringVar(value='cli')
+    ttk.Label(frame, text='目标系统（必须与当前机器一致）').grid(row=10, column=0, sticky='w')
+    ttk.Combobox(frame, textvariable=platform_value, values=['windows', 'linux'], state='readonly').grid(row=10, column=1, sticky='ew')
+    ttk.Label(frame, text='AstrBot 类型：cli / 已有桌面版 desktop').grid(row=11, column=0, sticky='w')
+    ttk.Combobox(frame, textvariable=mode_value, values=['cli', 'desktop'] if host_platform() == 'windows' else ['cli'], state='readonly').grid(row=11, column=1, sticky='ew')
     opts = {}
     for row, (key, label, default) in enumerate([
         ('install_dependencies', '允许联网安装 Python 依赖（首次 Hub 必选）', False),
         ('install_astrbot', '下载全新 AstrBot 4.27.2（需 Python 3.12+，不修改已有服务）', False),
         ('install_comfyui', '下载全新 ComfyUI v0.21.1 和 PyTorch（数 GB）', False),
         ('gpu', '使用 NVIDIA GPU（驱动须已安装；取消则 CPU 仅供部署验证）', True),
-    ], start=len(fields)):
+        ('download_models', '下载默认 Anima Base 1.0 + CLIP + VAE（约 5.63 GB；已选本地文件优先）', False),
+        ('accept_model_license', '已阅读并同意模型许可（请先打开下方模型说明）', False),
+        ('install_am', '安装核心上游 Anima Master 0.7.1（固定版本，外部下载）', False),
+    ], start=12):
         opts[key] = tk.BooleanVar(value=default)
         ttk.Checkbutton(frame, text=label, variable=opts[key]).grid(row=row, column=0, columnspan=3, sticky='w')
     from easy_installer import load_optional_components
     optional = {}
     box = ttk.LabelFrame(frame, text='可选节点 / 模型下载（默认不选；训练组件不包含）')
-    box.grid(row=14, column=0, columnspan=3, sticky='ew')
+    box.grid(row=20, column=0, columnspan=3, sticky='ew')
+    import webbrowser
+    ttk.Button(frame, text='官方模型 / 下载链接 / 许可', command=lambda: webbrowser.open('https://huggingface.co/circlestone-labs/Anima')).grid(row=19, column=0, columnspan=3)
     for i, item in enumerate(load_optional_components(ROOT)):
         optional[item['id']] = tk.BooleanVar(value=False)
         ttk.Checkbutton(box, text=item['name'], variable=optional[item['id']]).grid(row=i // 2, column=i % 2, sticky='w')
     output = tk.Text(frame, height=13, wrap='word')
-    output.grid(row=16, column=0, columnspan=3, sticky='nsew')
-    frame.rowconfigure(16, weight=1)
+    output.grid(row=22, column=0, columnspan=3, sticky='nsew')
     messages = queue.Queue()
     busy = False
     def start():
@@ -424,13 +507,20 @@ def wizard():
         if busy:
             return
         plan = Plan(**{k: v.get().strip() for k, v in values.items()}, **{k: v.get() for k, v in opts.items()},
+                    platform=platform_value.get(), astrbot_mode=mode_value.get(),
                     external=','.join(k for k, v in optional.items() if v.get()))
         try:
             validate(plan)
         except Exception as exc:
             messagebox.showerror('预检未通过', str(exc))
             return
-        if not messagebox.askyesno('确认', '按勾选项部署并启动服务？已有服务请先正常停止。不会下载未选模型，不会自动登录 QQ。'):
+        confirmation = ('按勾选项部署并启动服务？\n'
+                        f'系统：{plan.platform}；AstrBot：{plan.astrbot_mode}\n'
+                        f'安装目录：{plan.destination}\n'
+                        f'AstrBot 数据根：{plan.astrbot or "新建独立实例"}\n'
+                        f'ComfyUI：{plan.comfyui or "新建独立实例"}\n'
+                        '已有服务请先正常停止。不会下载未选模型，不会自动登录 QQ。')
+        if not messagebox.askyesno('确认解析后的真实目录', confirmation):
             return
         busy = True
         button.config(state='disabled')
@@ -442,7 +532,7 @@ def wizard():
                 messages.put(('done', '部署中断：' + str(exc)))
         threading.Thread(target=work, daemon=True).start()
     button = ttk.Button(frame, text='预检并一键部署 / 启动', command=start)
-    button.grid(row=15, column=0, columnspan=3, pady=8)
+    button.grid(row=21, column=0, columnspan=3, pady=8)
     def poll():
         nonlocal busy
         while not messages.empty():
@@ -468,18 +558,23 @@ def main():
     parser.add_argument('--plan', type=Path, help='无桌面服务器使用 JSON 计划，字段见 Plan')
     parser.add_argument('--apply', action='store_true')
     parser.add_argument('--start', type=Path)
+    parser.add_argument('--platform', choices=['auto', 'windows', 'linux'], default='auto')
     args = parser.parse_args()
     if args.start:
         start_services(args.start)
     elif args.plan:
         plan = Plan(**json.loads(args.plan.read_text('utf-8-sig')))
+        if args.platform != 'auto':
+            plan.platform = args.platform
         validate(plan)
         if args.apply:
             deploy(plan)
         else:
             print('预检通过，未写入、未联网。追加 --apply 执行。')
     else:
-        wizard()
+        if host_platform() == 'linux' and not (os.getenv('DISPLAY') or os.getenv('WAYLAND_DISPLAY')):
+            raise ValueError('Linux 无桌面环境：使用 --plan examples/deployment-plan.linux.json 预检，再追加 --apply；见 docs/DEPLOY_LINUX.md')
+        wizard(args.platform)
 
 
 if __name__ == '__main__':

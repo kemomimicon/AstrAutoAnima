@@ -1,5 +1,14 @@
 # 更新记录
 
+## 0.5.0-beta.2（部署修复候选）
+
+- Windows/Linux 懒人包分离；修复 PowerShell 5.1 编码和 CMD 路径尾引号错误。
+- 支持 AstrBot Desktop 数据目录、ComfyUI portable 的实际 Python，预检拒绝错误目录。
+- 增加默认 Anima Base 1.0 三件套显式下载、大小和 SHA256 校验、自动存放。
+- 核心上游安装固定 Anima Master 0.7.1；纠正早先 0.7.2/0.8.0 说明，0.9.1 未联调。
+- 包含已授权项目主题与开屏，仍不含私人配置、词库、密钥及训练连接器。
+- 加入 Windows 原生 CMD、PowerShell 和下载/配置保护测试，以及开屏生命周期回归。
+
 ## 0.4.0
 
 - 插件、Hub 与客户端统一为正式版版本号，并同步 0.3.7/0.3.17 开发线的全部能力。
@@ -20,4 +29,4 @@
 - 公开提示词库清空，生产模型/LoRA/路径/身份配置全部替换为占位符。
 - 反推保存根目录新增 Linux/Windows 可配置白名单。
 
-已知限制：Anima Master 只验证 0.7.2；0.8.0 尚未测试。HQ、Refine、Reverse 和 Training 仍为 Beta。
+已知限制：Anima Master 只验证 0.7.1；0.9.1 尚未测试。HQ、Refine、Reverse 和 Training 仍为 Beta。

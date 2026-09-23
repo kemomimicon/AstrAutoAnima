@@ -38,12 +38,14 @@ def check(path):
                 continue
             if PRIVATE_PATH.search(content) or PRIVATE_PATH.search(content.replace(b'\x00', b'')):
                 failures.append('local user path embedded: ' + name)
-            if b'/extensions/anima-lora-studio/' in content or b'oc_greeting_layered_atlas' in content:
-                failures.append('excluded connector/artwork: ' + name)
+            if b'/extensions/anima-lora-studio/' in content:
+                failures.append('excluded connector: ' + name)
         if 'lazy-bundle' in path.name:
-            prefix = 'AstrAutoAnima-0.5.0-beta.1/'
-            for required in ('.astr_auto_anima_public_root', '一键部署_AstrAutoAnima.bat',
-                             'tools/deploy_project.py', 'hub/service/web/index.html'):
+            prefix = 'AstrAutoAnima-0.5.0-beta.2/'
+            entry = 'Deploy-Linux.sh' if '-linux-' in path.name else 'Deploy-Windows.cmd'
+            for required in ('.astr_auto_anima_public_root', entry,
+                             'tools/deploy_project.py', 'tools/deployment_support.py',
+                             'tools/model_catalog.json', 'hub/service/web/index.html'):
                 if prefix + required not in names:
                     failures.append('incomplete lazy bundle: ' + required)
     return failures

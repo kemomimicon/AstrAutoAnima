@@ -33,6 +33,14 @@ REQUIRED = (
     "tools/easy_installer.py",
     "tools/deploy_project.py",
     "tools/bootstrap_windows.ps1",
+    "tools/deployment_support.py",
+    "tools/model_catalog.json",
+    "Deploy-Windows.cmd",
+    "Deploy-Linux.sh",
+    "docs/DEPLOY_WINDOWS.md",
+    "docs/DEPLOY_LINUX.md",
+    "docs/ANIMA_MASTER.md",
+    "artwork-manifest.json",
     "docs/WORKFLOWS.md",
     "tools/optional_components.json",
     "examples/prompt_pool.custom-groups.example.json",
@@ -87,8 +95,8 @@ def main() -> int:
     manifest = root / "release-manifest.json"
     if manifest.is_file():
         payload = json.loads(manifest.read_text(encoding="utf-8-sig"))
-        if payload.get("release") != "0.5.0-beta.1" or payload.get("status") != "prerelease":
-            errors.append("release manifest does not describe 0.5.0-beta.1 prerelease")
+        if payload.get("release") != "0.5.0-beta.2" or payload.get("status") != "prerelease":
+            errors.append("release manifest does not describe 0.5.0-beta.2 prerelease")
 
     if errors:
         print("Release validation FAILED:")
