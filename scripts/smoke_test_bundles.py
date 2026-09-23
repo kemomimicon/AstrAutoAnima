@@ -46,7 +46,7 @@ def main():
             plan.write_text(json.dumps({'destination': str(base / 'new-install'),
                 'platform': platform, 'astrbot': str(astro), 'comfyui': str(comfy)}), encoding='utf-8')
             result = subprocess.run([sys.executable, str(root / 'tools/deploy_project.py'), '--plan', str(plan)],
-                cwd=root, env={**os.environ, 'PYTHONDONTWRITEBYTECODE': '1'}, capture_output=True)
+                cwd=root, env={**os.environ, 'PYTHONDONTWRITEBYTECODE': '1', 'PYTHONIOENCODING': 'ascii'}, capture_output=True)
             if result.returncode:
                 raise RuntimeError(result.stderr.decode('utf-8', errors='replace'))
             assert not (base / 'new-install').exists(), 'Preflight unexpectedly wrote installation'

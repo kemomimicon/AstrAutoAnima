@@ -578,6 +578,11 @@ def main():
 
 
 if __name__ == '__main__':
+    # Redirected consoles on non-Chinese Windows may default to cp1252/ASCII.
+    # Encoding a successful Chinese status message must not fail deployment.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, 'reconfigure'):
+            stream.reconfigure(encoding='utf-8', errors='replace')
     try:
         main()
     except Exception as exc:

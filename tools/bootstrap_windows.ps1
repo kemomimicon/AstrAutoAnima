@@ -1,5 +1,7 @@
 # ASCII-only bootstrap for Windows PowerShell 5.1 legacy code pages.
 $ErrorActionPreference = 'Stop'
+$env:PYTHONUTF8 = '1'
+[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
 $releaseRoot = Split-Path -Parent $PSScriptRoot
 Set-Location -LiteralPath $releaseRoot
 

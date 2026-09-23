@@ -1,5 +1,6 @@
 @echo off
 setlocal
+chcp 65001 >nul
 cd /d "%~dp0."
 if errorlevel 1 goto :failed
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "tools\bootstrap_windows.ps1"

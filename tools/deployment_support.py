@@ -76,7 +76,7 @@ def discover_python(root, explicit='', portable=False):
 
 def windows_start_script():
     # Never pass a quoted path ending in a backslash to Python's argv parser.
-    return ('@echo off\r\nsetlocal DisableDelayedExpansion\r\ncd /d "%~dp0."\r\n'
+    return ('@echo off\r\nsetlocal DisableDelayedExpansion\r\nchcp 65001 >nul\r\nset "PYTHONUTF8=1"\r\ncd /d "%~dp0."\r\n'
             'if errorlevel 1 goto :failed\r\n'
             'if not exist "hub\\.venv\\Scripts\\python.exe" goto :missing\r\n'
             '"hub\\.venv\\Scripts\\python.exe" "deploy_project.py" --start "."\r\n'

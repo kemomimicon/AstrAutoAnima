@@ -179,6 +179,15 @@ class PlatformTests(unittest.TestCase):
         for codepage in ('utf-8', 'gbk', 'cp1252'):
             self.assertEqual(content.decode(codepage), content.decode('ascii'))
 
+    def test_cli_error_is_utf8_even_under_ascii_console(self):
+        with tempfile.TemporaryDirectory() as t:
+            result = subprocess.run([sys.executable, str(ROOT / 'tools/deploy_project.py'),
+                '--plan', str(Path(t) / 'missing.json')], capture_output=True,
+                env={**os.environ, 'PYTHONDONTWRITEBYTECODE': '1', 'PYTHONIOENCODING': 'ascii'})
+            self.assertEqual(result.returncode, 1)
+            self.assertIn('部署失败', result.stderr.decode('utf-8'))
+            self.assertNotIn(b'UnicodeEncodeError', result.stderr)
+
     @unittest.skipUnless(os.name == 'nt', 'Windows native argv regression')
     def test_real_cmd_start_with_chinese_spaces_and_parentheses(self):
         with tempfile.TemporaryDirectory(prefix='AAA 跑图 (test) ') as t:
