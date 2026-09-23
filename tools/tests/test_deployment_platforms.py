@@ -40,7 +40,9 @@ class PlatformTests(unittest.TestCase):
             (root / 'python_embeded/python.exe').touch()
             comfy = comfy_root(t)
             self.assertEqual(comfy, (root / 'ComfyUI').resolve())
-            self.assertEqual(discover_python(comfy, portable=True), (root / 'python_embeded/python.exe').absolute())
+            # Windows runners may expose TEMP through an 8.3 alias (RUNNER~1).
+            # Compare the actual file, not two spellings of the same location.
+            self.assertTrue(discover_python(comfy, portable=True).samefile(root / 'python_embeded/python.exe'))
 
     def test_data_folder_and_desktop_default(self):
         with tempfile.TemporaryDirectory() as t:
