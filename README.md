@@ -8,6 +8,14 @@ LoRA、分级随机提示词、图片反推、HQ/放大精修、远程 Hub 和 W
 > HQ、Refine、Reverse 等高级工作流仍为实验性组件，
 > 请先在测试群和备份配置上验证，再迁移生产环境。
 
+## 完整发行整合包
+
+需要一次下载全部组件，请在 [0.5.0-beta.2 发布页](https://github.com/kemomimicon/AstrAutoAnima/releases/tag/v0.5.0-beta.2)
+选择 `AstrAutoAnima-0.5.0-beta.2-complete.zip`。完整包按用途分类收录 Windows/Linux 懒人包、
+各端客户端、服务组件、工具、源码、授权美术和中文文档；原有分包保持不变。
+使用前阅读 [完整包导航](docs/COMPLETE_SUITE.md)，完整解压后按自己的平台选择内部包，**无需全部安装**。
+包内附离线校验脚本，不包含模型权重、第三方环境或私人配置，仍按 Beta 验证边界发布。
+
 ## 组件版本
 
 | 组件 | 公开包版本 | 作用 |
