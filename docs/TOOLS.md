@@ -1,5 +1,15 @@
 # 本地管理工具
 
+## 新手推荐：安装后配置向导
+
+[首张图启动向导 1.1](FIRST_RUN_WIZARD.md) 将连接授权、投递群、用户令牌、词库导入、角色词典装配、确认保存、实际首图验收和离线帮助集中在九步中文界面。
+Windows 可用独立双击版，或运行 `tools/start_first_run_wizard.cmd`；有桌面的 Linux 运行 `sh tools/start_first_run_wizard.sh`。
+它用于已存在的本机懒人包安装，不会自动远程修改云服务器、重启服务或重置旧用户令牌。
+双击版已内置词库与用户管理器，直接从第 ⑤ / ⑨ 页打开，无须另外安装 Python。所有工具都应先编辑工作副本；向导未保存时不要用另一窗口同时改运行文件。
+按目的选择工具、模型装配和逐步生图流程见 [首图逐项操作](FIRST_IMAGE_WALKTHROUGH.md)。
+
+## 原有管理器
+
 三个 GUI 工具只使用 Python 标准库，不依赖 AstrBot、ComfyUI 或服务器。Windows 双击 `.bat`，
 Linux/macOS/终端直接运行 Python 文件。建议 Python 3.10+。
 

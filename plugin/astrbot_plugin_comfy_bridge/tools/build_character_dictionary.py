@@ -98,10 +98,19 @@ def main() -> None:
     parser.add_argument("--output", required=True, type=Path)
     args = parser.parse_args()
 
-    aliases = _alias_map(args.name_map)
-    for tag, names in _translation_sqlite(args.translation_sqlite).items():
+    output = build_dictionary(args.characters_jsonl, args.translation_sqlite, args.name_map)
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    args.output.write_text(json.dumps(output, ensure_ascii=False, separators=(",", ":")) + "\n", encoding="utf-8")
+    print(f"Wrote {len(output['characters'])} characters to {args.output}")
+
+
+def build_dictionary(characters_jsonl: Path, translation_sqlite: Path | None = None,
+                     name_map: Path | None = None) -> dict:
+    """Build in memory so GUI callers can stage, review and back up before saving."""
+    aliases = _alias_map(name_map)
+    for tag, names in _translation_sqlite(translation_sqlite).items():
         aliases[tag] = list(dict.fromkeys([*aliases.get(tag, []), *names]))
-    source_records = list(_records(args.characters_jsonl))
+    source_records = list(_records(characters_jsonl))
     records_by_id = {
         int(raw["id"]): raw
         for raw in source_records
@@ -154,18 +163,13 @@ def main() -> None:
     output = {
         "schema_version": "1.1",
         "source": {
-            "characters": str(args.characters_jsonl),
-            "name_map": str(args.name_map or ""),
-            "translation_sqlite": str(args.translation_sqlite or ""),
+            "characters": characters_jsonl.name,
+            "name_map": name_map.name if name_map else "",
+            "translation_sqlite": translation_sqlite.name if translation_sqlite else "",
         },
         "characters": characters,
     }
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(
-        json.dumps(output, ensure_ascii=False, separators=(",", ":")) + "\n",
-        encoding="utf-8",
-    )
-    print(f"Wrote {len(characters)} characters to {args.output}")
+    return output
 
 
 if __name__ == "__main__":
