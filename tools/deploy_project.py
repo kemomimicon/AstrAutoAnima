@@ -49,6 +49,12 @@ class Plan:
     download_models: bool = False
     accept_model_license: bool = False
     install_am: bool = False
+    download_mode: str = 'official'
+    hf_mirror: str = ''
+    github_mirror: str = ''
+    download_proxy: str = ''
+    revoke_best_effort: bool = False
+    am_archive: str = ''
 
 
 def json_write(path, data, private=False):
@@ -83,6 +89,20 @@ def checked_root(raw):
 
 
 def validate(plan):
+    from download_network import DownloadNetwork
+    DownloadNetwork.from_plan(plan).validate()
+    if plan.am_archive:
+        plan.am_archive = clean_path(plan.am_archive)
+        no_links(Path(plan.am_archive).absolute())
+        if not Path(plan.am_archive).is_file():
+            raise ValueError('本地 AM ZIP 不存在，请重新选择文件')
+    if plan.download_mode == 'local':
+        if plan.download_models and not all((plan.unet, plan.clip, plan.vae)):
+            raise ValueError('本地文件模式请选齐 UNET / CLIP / VAE，并取消自动下载模型')
+        if plan.install_am and not plan.am_archive:
+            raise ValueError('本地文件模式安装 AM 需要选择固定版本 ZIP')
+        if plan.external:
+            raise ValueError('本地文件模式请取消可选节点 / 模型下载；可先手动安装这些组件')
     if plan.platform not in ('auto', 'windows', 'linux') or plan.platform not in ('auto', host_platform()):
         raise ValueError('操作系统选择不匹配：Windows 包只能在 Windows 执行，Linux 包只能在 Linux 执行')
     if plan.astrbot_mode not in ('cli', 'desktop'):
@@ -119,7 +139,8 @@ def validate(plan):
                 raise ValueError('独立安装目录不能嵌套在已有 AstrBot/ComfyUI 目录中')
     if plan.download_models and not plan.accept_model_license:
         raise ValueError('请阅读并确认模型许可后再勾选下载 Anima Base 1.0')
-    if (plan.download_models or plan.install_am) and not shutil.which('curl'):
+    if ((plan.download_models and not all((plan.unet, plan.clip, plan.vae))) or
+            (plan.install_am and not plan.am_archive)) and not shutil.which('curl'):
         raise ValueError('模型/AM 下载需要 curl；Windows 请检查 curl.exe，Linux 请安装 curl')
     from easy_installer import load_optional_components
     known = {item['id'] for item in load_optional_components(ROOT)}
@@ -380,9 +401,11 @@ def deploy(plan, log=print):
                 run([cpy, '-m', 'pip', 'install', '-r', node / 'requirements.txt'], log)
         if plan.external:
             from easy_installer import InstallPlan, install_external
+            from download_network import DownloadNetwork
             install_external(InstallPlan(ROOT, astro / 'data', comfy, root / 'hub',
                              external=set(plan.external.split(',')), comfy_python=cpy,
-                             install_external_requirements=plan.install_dependencies, apply=True), backup, log)
+                             install_external_requirements=plan.install_dependencies, apply=True,
+                             download_network=DownloadNetwork.from_plan(plan)), backup, log)
         if plan.download_models:
             download_base_models(ROOT, comfy, plan, log)
         flow = quick_workflow(plan, comfy, log)
@@ -394,7 +417,9 @@ def deploy(plan, log=print):
             shutil.copy2(config, backup / 'plugin_config.json')
         env = configure(plan, root, astro, comfy)
         if plan.install_am:
-            am = install_anima_master(astro, root, log, copy_source)
+            from download_network import DownloadNetwork
+            am = install_anima_master(astro, root, log, copy_source,
+                                     local_archive=plan.am_archive, network=DownloadNetwork.from_plan(plan))
             if plan.install_dependencies and plan.astrbot_mode != 'desktop':
                 run([apy, '-m', 'pip', 'install', '-r', am / 'requirements.txt'], log)
             configure_anima_master(astro, comfy, root, json_write)
@@ -411,6 +436,7 @@ def deploy(plan, log=print):
         # Self-contained start entry survives moving/deleting the downloaded release.
         shutil.copy2(Path(__file__), root / 'deploy_project.py')
         shutil.copy2(Path(__file__).with_name('deployment_support.py'), root / 'deployment_support.py')
+        shutil.copy2(Path(__file__).with_name('download_network.py'), root / 'download_network.py')
         if os.name == 'nt':
             (root / 'Start.cmd').write_text(windows_start_script(), 'ascii', newline='')
         else:
@@ -498,8 +524,32 @@ def wizard(platform='auto'):
     for i, item in enumerate(load_optional_components(ROOT)):
         optional[item['id']] = tk.BooleanVar(value=False)
         ttk.Checkbutton(box, text=item['name'], variable=optional[item['id']]).grid(row=i // 2, column=i % 2, sticky='w')
+    network_box = ttk.LabelFrame(frame, text='公开文件下载：模型 / AM ZIP（不修改服务 API；Git / pip / winget 另用各自网络设置）')
+    network_box.grid(row=21, column=0, columnspan=3, sticky='ew', pady=8)
+    network_box.columnconfigure(1, weight=1)
+    values['download_mode'] = tk.StringVar(value='official')
+    ttk.Label(network_box, text='方式：官方 / 镜像 / 代理 / 本地文件').grid(row=0, column=0, sticky='w')
+    ttk.Combobox(network_box, textvariable=values['download_mode'], state='readonly',
+                 values=['official', 'mirror', 'proxy', 'local']).grid(row=0, column=1, sticky='ew')
+    for row, key, label in [(1, 'hf_mirror', 'HF 镜像 HTTPS 根地址（自行选择可信站点）'),
+                            (2, 'github_mirror', 'GitHub 文件镜像 HTTPS 前缀（拼接完整原 URL）'),
+                            (3, 'download_proxy', '文件代理 URL（如 http://127.0.0.1:7890）'),
+                            (4, 'am_archive', '本地 Anima Master 0.7.1 ZIP（固定提交）')]:
+        values[key] = tk.StringVar(value='')
+        ttk.Label(network_box, text=label).grid(row=row, column=0, sticky='w')
+        ttk.Entry(network_box, textvariable=values[key]).grid(row=row, column=1, sticky='ew')
+    def choose_am():
+        selected = filedialog.askopenfilename(filetypes=[('ZIP', '*.zip')])
+        if selected:
+            values['am_archive'].set(selected)
+    ttk.Button(network_box, text='选择 ZIP', command=choose_am).grid(row=4, column=2)
+    opts['revoke_best_effort'] = tk.BooleanVar(value=False)
+    ttk.Checkbutton(network_box, text='仅 Windows：同意证书吊销离线兼容（仅 0x80092013；仍校验证书，降低吊销检查保障）',
+                    variable=opts['revoke_best_effort'], state='normal' if os.name == 'nt' else 'disabled').grid(row=5, column=0, columnspan=3, sticky='w')
+    ttk.Label(network_box, text='本地模式只禁止此处文件下载，并非离线安装 Python 依赖。已有 .part 可续传；镜像文件须通过官方 SHA256。', wraplength=850).grid(row=6, column=0, columnspan=3, sticky='w')
+    ttk.Button(network_box, text='下载故障与本地导入说明', command=lambda: webbrowser.open((ROOT / 'docs/DOWNLOAD_NETWORK.md').as_uri())).grid(row=7, column=0, columnspan=3)
     output = tk.Text(frame, height=13, wrap='word')
-    output.grid(row=22, column=0, columnspan=3, sticky='nsew')
+    output.grid(row=23, column=0, columnspan=3, sticky='nsew')
     messages = queue.Queue()
     busy = False
     def start():
@@ -532,7 +582,7 @@ def wizard(platform='auto'):
                 messages.put(('done', '部署中断：' + str(exc)))
         threading.Thread(target=work, daemon=True).start()
     button = ttk.Button(frame, text='预检并一键部署 / 启动', command=start)
-    button.grid(row=21, column=0, columnspan=3, pady=8)
+    button.grid(row=22, column=0, columnspan=3, pady=8)
     def poll():
         nonlocal busy
         while not messages.empty():

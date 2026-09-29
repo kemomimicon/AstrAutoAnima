@@ -86,6 +86,7 @@ def windows_start_script():
 
 def download_base_models(root, comfy, plan, log):
     from easy_installer import download_file
+    from download_network import DownloadNetwork
     catalog = json.loads((root / 'tools/model_catalog.json').read_text('utf-8'))
     for entry in catalog['profiles']['anima-base-1.0']['files']:
         key = entry['field']
@@ -94,14 +95,15 @@ def download_base_models(root, comfy, plan, log):
         target = comfy / entry['target']
         no_links(target)
         log(f"下载 {entry['filename']} ({entry['size']:,} bytes)，来源：{entry['url']}")
-        download_file(entry['url'], target, log, expected_sha256=entry['sha256'])
+        download_file(entry['url'], target, log, expected_sha256=entry['sha256'],
+                      network=DownloadNetwork.from_plan(plan))
         if target.stat().st_size != entry['size']:
             raise ValueError('模型大小不符合发布清单：' + target.name)
         setattr(plan, key, str(target))
 
 
-def install_anima_master(astro, root, log, copy_source):
-    from easy_installer import download_file
+def install_anima_master(astro, root, log, copy_source, *, local_archive='', network=None):
+    from easy_installer import download_file, sha256_file
     target = astro / 'data/plugins/astrbot_plugin_anima_master'
     no_links(target)
     if target.exists():
@@ -111,9 +113,14 @@ def install_anima_master(astro, root, log, copy_source):
             log('已有 Anima Master 0.7.1，保留代码与配置，不覆盖')
             return target
         raise ValueError('已有 Anima Master 目录不是 0.7.1；不会自动覆盖或降级。请备份并在 AstrBot 插件页人工处理')
-    archive = root / 'downloads/anima-master-0.7.1.zip'
+    archive = Path(clean_path(local_archive)).absolute() if local_archive else root / 'downloads/anima-master-0.7.1.zip'
     no_links(archive)
-    download_file(AM_URL, archive, log, expected_sha256=AM_SHA256)
+    if local_archive:
+        if not archive.is_file() or sha256_file(archive) != AM_SHA256:
+            raise ValueError('本地 AM ZIP 的 SHA256 不匹配；需要固定提交的官方 ZIP，不接受其他版本或重新压缩的文件')
+        log('本地 AM ZIP 已通过官方固定 SHA256 校验，无需下载')
+    else:
+        download_file(AM_URL, archive, log, expected_sha256=AM_SHA256, network=network)
     with tempfile.TemporaryDirectory(prefix='aaa-am-') as temporary:
         staging = Path(temporary)
         prefix = 'anima-master-' + AM_COMMIT

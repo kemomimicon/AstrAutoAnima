@@ -37,6 +37,7 @@ class InstallPlan:
     comfy_python: Path | None = None
     install_external_requirements: bool = False
     apply: bool = False
+    download_network: Any = None
 
 
 def _first_existing(candidates: list[Path]) -> Path | None:
@@ -204,9 +205,13 @@ def download_file(
     log: Logger,
     *,
     expected_sha256: str = "",
+    network=None,
 ) -> None:
     # Both final and resume paths must stay in real directories.
     from deployment_support import no_links
+    from download_network import DownloadNetwork, fetch_public_file
+    network = network or DownloadNetwork()
+    network.validate()
     no_links(target)
     no_links(target.with_name(target.name + '.part'))
     if target.is_file() and target.stat().st_size > 0:
@@ -216,28 +221,18 @@ def download_file(
         raise InstallError(f"目标文件已存在但 SHA256 不匹配，请人工检查：{target}")
     target.parent.mkdir(parents=True, exist_ok=True)
     partial = target.with_name(target.name + ".part")
+    if expected_sha256 and partial.is_file() and sha256_file(partial) == expected_sha256.casefold():
+        os.replace(partial, target)
+        log(f"完整断点文件已通过 SHA256，直接完成：{target}")
+        return
+    source = network.source(url, expected_sha256)
     curl = shutil.which("curl")
     if not curl:
         raise InstallError("未找到 curl；大模型下载需要 curl 以支持断点续传")
-    run_checked(
-        [
-            curl,
-            "-L",
-            "--fail",
-            "--retry",
-            "20",
-            "--retry-delay",
-            "5",
-            "--connect-timeout",
-            "30",
-            "-C",
-            "-",
-            "-o",
-            str(partial),
-            url,
-        ],
-        log,
-    )
+    try:
+        fetch_public_file(curl, source, partial, log, network)
+    except (ValueError, OSError) as exc:
+        raise InstallError(str(exc)) from exc
     if expected_sha256:
         actual = sha256_file(partial)
         if actual != expected_sha256.casefold():
@@ -264,6 +259,7 @@ def install_external(plan: InstallPlan, backup_root: Path, log: Logger) -> None:
                     plan.comfyui_root / str(file["target"]),
                     log,
                     expected_sha256=str(file.get("sha256", "")),
+                    network=plan.download_network,
                 )
         else:
             raise InstallError(f"不支持的外部组件类型：{item['kind']}")

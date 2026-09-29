@@ -34,6 +34,8 @@ AAA_PYTHON=/path/to/python3.12 sh Deploy-Linux.sh --plan my-plan.json
 
 ## 边界
 
+模型或 AM ZIP 下载受限时，计划文件可配置 `download_mode`、`hf_mirror`、`github_mirror`、`download_proxy`、`am_archive`；见 [下载排错与字段说明](DOWNLOAD_NETWORK.md)。Windows 证书兼容开关不可用于 Linux。
+
 不自动安装系统驱动、配置 systemd、登录 QQ 或重启云实例。无卡环境可部署文件/CPU 验证，但不能据此判断 CUDA 推理正常。现有环境不自动替换 Torch。Windows 的便携 Python、盘符和 Desktop 数据目录规则不适用于 Linux。
 
 后续联通见 [AM 与模型](ANIMA_MASTER.md)、[一键部署总览](EASY_INSTALL.md)。

@@ -13,9 +13,11 @@ from build_release_archives import VERSION
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('directory', type=Path)
+    parser.add_argument('--deployment-revision', default='')
     args = parser.parse_args()
     for platform in ('windows', 'linux'):
-        archive = args.directory / f'AstrAutoAnima-lazy-bundle-{platform}-{VERSION}.zip'
+        suffix = '-' + args.deployment_revision if args.deployment_revision else ''
+        archive = args.directory / f'AstrAutoAnima-lazy-bundle-{platform}-{VERSION}{suffix}.zip'
         with tempfile.TemporaryDirectory(prefix='AAA bundle (test) ') as t:
             base = Path(t)
             with zipfile.ZipFile(archive) as z:
@@ -29,6 +31,9 @@ def main():
             root = base / 'release' / f'AstrAutoAnima-{VERSION}'
             assert (root / 'hub/service/web/index.html').is_file()
             assert (root / 'tools/model_catalog.json').is_file()
+            if args.deployment_revision:
+                assert (root / 'tools/download_network.py').is_file()
+                assert (root / 'docs/DOWNLOAD_NETWORK.md').is_file()
             if platform != ('windows' if os.name == 'nt' else 'linux'):
                 print(platform + ': archive structure OK; native preflight requires that OS')
                 continue

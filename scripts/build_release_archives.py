@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import re
 import subprocess
 import sys
 import zipfile
@@ -93,7 +94,10 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, default=ROOT / "dist")
     parser.add_argument("--web-archive", type=Path, help="Optional separately built public Web ZIP to include in lazy bundle")
+    parser.add_argument('--deployment-revision', help='Build only revised lazy/tools/source packages, e.g. network.1; do not overwrite original release assets')
     args = parser.parse_args()
+    if args.deployment_revision and not re.fullmatch(r'[a-z0-9]+(?:[.-][a-z0-9]+)*', args.deployment_revision):
+        parser.error('Invalid deployment revision')
     output = args.output.resolve()
 
     for check in ("privacy_scan.py", "validate_release.py"):
@@ -126,6 +130,8 @@ def main() -> int:
         or path in {
             ROOT / "docs" / "TOOLS.md",
             ROOT / "docs" / "EASY_INSTALL.md",
+            ROOT / "docs" / "DOWNLOAD_NETWORK.md",
+            ROOT / "docs" / "ANIMA_MASTER.md",
             ROOT / "一键部署_AstrAutoAnima.bat",
             ROOT / "一键部署_AstrAutoAnima.sh",
             ROOT / "Deploy-Windows.cmd",
@@ -177,6 +183,13 @@ def main() -> int:
     ]
 
     output.mkdir(parents=True, exist_ok=True)
+    if args.deployment_revision:
+        archives = {name.replace(VERSION, VERSION + '-' + args.deployment_revision): entries
+                    for name, entries in archives.items()
+                    if 'lazy-bundle' in name or name.endswith('-source.zip') or name.startswith('AstrAutoAnima-tools-')}
+        for name in archives:
+            if (output / name).exists():
+                raise ValueError('Revision archive already exists; choose a new revision/output: ' + name)
     built: list[Path] = []
     for filename, entries in archives.items():
         if not entries:
