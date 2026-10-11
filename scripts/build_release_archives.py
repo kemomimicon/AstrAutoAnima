@@ -105,11 +105,16 @@ def main() -> int:
 
     files = public_files()
     plugin_root = ROOT / "plugin" / "astrbot_plugin_comfy_bridge"
+    match = re.search(r'^version:\s*([0-9A-Za-z.+-]+)\s*$',
+                      (plugin_root / 'metadata.yaml').read_text('utf-8-sig'), re.M)
+    if not match:
+        raise ValueError('Plugin metadata version missing or invalid')
+    plugin_version = match.group(1)
     hub_root = ROOT / "hub" / "service"
     workflow_root = ROOT / "comfyui"
 
     archives: dict[str, list[tuple[Path, str]]] = {
-        f"astrbot_plugin_comfy_bridge-{VERSION}.zip": relative_entries(
+        f"astrbot_plugin_comfy_bridge-{plugin_version}.zip": relative_entries(
             files, plugin_root, exclude_parts={"tests"}
         ),
         f"astr_auto_anima_hub_service-{VERSION}.zip": relative_entries(
@@ -184,9 +189,10 @@ def main() -> int:
 
     output.mkdir(parents=True, exist_ok=True)
     if args.deployment_revision:
-        archives = {name.replace(VERSION, VERSION + '-' + args.deployment_revision): entries
+        archives = {(name if name.startswith('astrbot_plugin_comfy_bridge-') else
+                     name.replace(VERSION, VERSION + '-' + args.deployment_revision)): entries
                     for name, entries in archives.items()
-                    if 'lazy-bundle' in name or name.endswith('-source.zip') or name.startswith('AstrAutoAnima-tools-')}
+                    if 'lazy-bundle' in name or name.endswith('-source.zip') or name.startswith(('AstrAutoAnima-tools-', 'astrbot_plugin_comfy_bridge-'))}
         for name in archives:
             if (output / name).exists():
                 raise ValueError('Revision archive already exists; choose a new revision/output: ' + name)

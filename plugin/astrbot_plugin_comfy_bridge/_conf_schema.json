@@ -579,7 +579,7 @@
     "description": "画风 LoRA 槽位节点 ID",
     "type": "string",
     "default": "46,47,48,49",
-    "hint": "按工作流连接顺序填写，以英文逗号分隔。预设未使用的尾部槽位会在本次任务中旁路。"
+    "hint": "已有 LoRA 槽位时按实际连接顺序填写，以英文逗号分隔。无 LoRA 节点的 Quick 使用 dynamic 时可留空，自动从采样器 MODEL 和提示词 CLIP 接入；fixed 必须配置真实槽位。"
   },
   "style_lora_mode": {
     "description": "画风 LoRA 加载模式",
