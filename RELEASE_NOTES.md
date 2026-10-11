@@ -1,5 +1,12 @@
 # 0.5.0-beta.2 公开测试版
 
+## windows.1 紧急兼容补丁（2026-10-11）
+
+Windows 休眠拦截、反推本地保存、角色词典覆盖层及图片清理目录联接保护统一修复。
+保留 Linux 的真实休眠锁保护，扩展 Windows CI 至插件、Hub 和真实 Hub 启动检查。
+插件版本 0.5.0-beta.2-windows.1，Hub 包版本 0.5.0b2.post1。客户端不变，无需重下模型。
+包含 lora.1 / network.1 修复。升级、验收与回退见 docs/WINDOWS_COMPAT_HOTFIX.md。
+
 在公开 beta.1 基础上修复部署器的独立公共候选版本，不混入私人环境配置。
 
 ## 本次部署修复

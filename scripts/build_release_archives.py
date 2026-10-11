@@ -94,7 +94,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, default=ROOT / "dist")
     parser.add_argument("--web-archive", type=Path, help="Optional separately built public Web ZIP to include in lazy bundle")
-    parser.add_argument('--deployment-revision', help='Build only revised lazy/tools/source packages, e.g. network.1; do not overwrite original release assets')
+    parser.add_argument('--deployment-revision', help='Build revised source/lazy/tools/plugin/Hub/workflow packages without replacing old release assets')
     args = parser.parse_args()
     if args.deployment_revision and not re.fullmatch(r'[a-z0-9]+(?:[.-][a-z0-9]+)*', args.deployment_revision):
         parser.error('Invalid deployment revision')
@@ -126,6 +126,17 @@ def main() -> int:
             prefix=f"Anima_Workflow_Pack-{WORKFLOW_VERSION}",
         ),
     }
+    if args.deployment_revision == 'windows.1':
+        hotfix = [(ROOT / 'docs/WINDOWS_COMPAT_HOTFIX.md', 'README.md')]
+        for relative in ('main.py', 'preset_runtime.py', 'cleanup_runtime.py',
+                         'idle_guard_runtime.py', 'metadata.yaml', 'tools/install_character_dictionary.py'):
+            hotfix.append((plugin_root / relative, 'plugin_files/' + relative))
+        for relative in ('__init__.py', 'nodes.py', 'idle_guard.py', 'idle_admission.py'):
+            hotfix.append((workflow_root / 'custom_nodes/ComfyUI-AstrAutoAnima-Workflow-Tools' / relative,
+                           'comfyui_nodes/' + relative))
+        for relative in ('pyproject.toml', 'src/astr_auto_anima_hub/__init__.py', 'src/astr_auto_anima_hub/idle_guard.py'):
+            hotfix.append((hub_root / relative, 'hub_files/' + relative))
+        archives[f'AAA_Windows_Compatibility_Hotfix_{VERSION}.zip'] = hotfix
 
     tool_paths = [
         path
@@ -190,9 +201,11 @@ def main() -> int:
     output.mkdir(parents=True, exist_ok=True)
     if args.deployment_revision:
         archives = {(name if name.startswith('astrbot_plugin_comfy_bridge-') else
+                     name.replace(WORKFLOW_VERSION, WORKFLOW_VERSION + '-' + args.deployment_revision)
+                     if name.startswith('Anima_Workflow_Pack-') else
                      name.replace(VERSION, VERSION + '-' + args.deployment_revision)): entries
                     for name, entries in archives.items()
-                    if 'lazy-bundle' in name or name.endswith('-source.zip') or name.startswith(('AstrAutoAnima-tools-', 'astrbot_plugin_comfy_bridge-'))}
+                    if 'lazy-bundle' in name or name.endswith('-source.zip') or name.startswith(('AAA_Windows_Compatibility_Hotfix_', 'AstrAutoAnima-tools-', 'astrbot_plugin_comfy_bridge-', 'astr_auto_anima_hub_service-', 'Anima_Workflow_Pack-'))}
         for name in archives:
             if (output / name).exists():
                 raise ValueError('Revision archive already exists; choose a new revision/output: ' + name)

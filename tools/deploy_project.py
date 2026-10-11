@@ -250,7 +250,8 @@ def configure(plan, root, astro, comfy):
         config.setdefault(key, str(comfy / 'user/default/workflows' / file))
     for key, name in {'preset_store_path': 'presets.json', 'prompt_pool_path': 'anima_random_prompt_pool.json',
                       'output_dir': 'outputs', 'input_dir': 'inputs', 'job_store_path': 'job_store',
-                      'reverse_history_dir': 'reverse_history'}.items():
+                      'reverse_history_dir': 'reverse_history',
+                      'character_dictionary_edits_path': 'hub_state/character_dictionary_edits.json'}.items():
         config.setdefault(key, str(plugin_data / name))
     json_write(config_file, config, True)
     env_file = root / 'runtime-env.json'

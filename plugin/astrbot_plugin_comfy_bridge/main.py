@@ -95,7 +95,7 @@ from .camera_runtime import compile_camera_options
 from .image_runtime import EventImageResolver
 from .job_runtime import JobStore
 from .llm_runtime import reverse_image_prompt, translate_chinese_prompt
-from .cleanup_runtime import CleanupReport, cleanup_old_output_images
+from .cleanup_runtime import CleanupReport, cleanup_old_output_images, checked_output_path
 from .character_dictionary_runtime import resolve_character
 from .multi_person_runtime import parse_scene, plan_scene, render_scene, strip_standard_loras
 from .llm_runtime import current_text_provider_id
@@ -263,6 +263,7 @@ class ComfyWorkflowBridge(SafetyBridge, Star):
             )
         if not output_dir.is_absolute():
             output_dir = Path.cwd() / output_dir
+        output_dir = checked_output_path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
         return output_dir.resolve()
 
@@ -364,11 +365,7 @@ class ComfyWorkflowBridge(SafetyBridge, Star):
         if configured:
             path = Path(configured).expanduser()
         else:
-            path = Path(
-                "/workspace/astrbot-runtime/data/plugin_data/"
-                "astrbot_plugin_comfy_bridge/hub_state/"
-                "character_dictionary_edits.json"
-            )
+            path = self._character_dictionary_path().parent / "hub_state/character_dictionary_edits.json"
         if not path.is_absolute():
             path = Path(__file__).resolve().parent / path
         return path.resolve()
@@ -1015,8 +1012,7 @@ class ComfyWorkflowBridge(SafetyBridge, Star):
                 storage_root=str(
                     self.config.get(
                         "reverse_history_dir",
-                        "/workspace/astrbot-runtime/data/plugin_data/"
-                        "astrbot_plugin_comfy_bridge/reverse_history",
+                        str(self._character_dictionary_path().parent / "reverse_history"),
                     )
                 ),
                 save_thumbnail=bool(

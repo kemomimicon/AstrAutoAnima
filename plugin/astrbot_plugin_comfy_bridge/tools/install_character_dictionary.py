@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import json
 import shutil
 import sqlite3
@@ -13,7 +14,9 @@ from pathlib import Path
 
 
 DEFAULT_DATA_ROOT = Path(
-    "/workspace/astrbot-runtime/data/plugin_data/astrbot_plugin_comfy_bridge"
+    os.getenv("AAH_PLUGIN_DATA_DIR") or
+    (str(Path.home() / ".astrbot/data/plugin_data/astrbot_plugin_comfy_bridge")
+     if os.name == "nt" else "/workspace/astrbot-runtime/data/plugin_data/astrbot_plugin_comfy_bridge")
 )
 DEFAULT_CHARACTERS_URL = (
     "https://raw.githubusercontent.com/tcpassos/"

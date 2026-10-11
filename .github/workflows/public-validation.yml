@@ -16,6 +16,15 @@ jobs:
           python-version: "3.12"
       - name: Windows native CMD and PowerShell regression
         run: python scripts/run_public_tests.py tools
+      - name: Install Windows runtime test dependencies
+        run: |
+          python -m pip install "pytest>=8,<10" -r plugin/astrbot_plugin_comfy_bridge/requirements.txt
+          python -m pip install ./hub/service
+      - name: Windows plugin and Hub runtime regression
+        run: |
+          python scripts/run_public_tests.py plugin --pytest
+          python scripts/run_public_tests.py hub --pytest
+          python scripts/smoke_hub_upgrade.py
       - name: Privacy check
         run: python scripts/privacy_scan.py .
   python-validation:

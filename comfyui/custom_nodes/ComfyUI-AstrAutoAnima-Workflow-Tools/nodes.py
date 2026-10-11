@@ -1386,6 +1386,36 @@ class AnimaReverseCompiler:
         return anima_prompt, structured_json, safety, summary
 
 
+def _checked_reverse_path(value):
+    path = Path(str(value)).expanduser()
+    if not path.is_absolute():
+        raise ValueError("反推存储目录必须为本机绝对路径")
+    path = Path(os.path.abspath(path))
+    for part in (path, *path.parents):
+        try:
+            linked = part.is_symlink() or bool(getattr(part.lstat(), "st_file_attributes", 0) & 0x400)
+        except FileNotFoundError:
+            continue
+        if linked:
+            raise ValueError("反推存储目录包含符号链接或目录联接")
+    if path == Path(path.anchor) or path == Path.home().resolve():
+        raise ValueError("请选择专用反推存储目录，不要使用磁盘根目录或用户主目录")
+    return path
+
+
+def _reverse_storage_root(value):
+    raw = str(value).strip()
+    legacy = "/workspace/astrbot-runtime/data/plugin_data/astrbot_plugin_comfy_bridge/reverse_history"
+    if not raw or (os.name == "nt" and raw == legacy):
+        configured = os.getenv("AAH_PLUGIN_DATA_DIR", "").strip()
+        if configured:
+            raw = str(Path(configured).expanduser() / "reverse_history")
+        else:
+            import folder_paths
+            raw = str(Path(folder_paths.get_output_directory()) / "AstrAutoAnima/reverse_history")
+    return _checked_reverse_path(raw)
+
+
 class AnimaReverseResultSaver:
     CATEGORY = "AstrAutoAnima/Reverse"
     FUNCTION = "save"
@@ -1400,7 +1430,7 @@ class AnimaReverseResultSaver:
                 "image": ("IMAGE", {"forceInput": True}),
                 "structured_json": ("STRING", {"forceInput": True}),
                 "anima_prompt": ("STRING", {"forceInput": True}),
-                "storage_root": ("STRING", {"default": "/workspace/astrbot-runtime/data/plugin_data/astrbot_plugin_comfy_bridge/reverse_history"}),
+                "storage_root": ("STRING", {"default": ""}),
                 "qq_user_id": ("STRING", {"default": ""}),
                 "session_type": (["unknown", "private", "group"], {"default": "unknown"}),
                 "session_id": ("STRING", {"default": ""}),
@@ -1423,12 +1453,7 @@ class AnimaReverseResultSaver:
         style_preset,
         save_thumbnail,
     ):
-        root = Path(str(storage_root)).expanduser().resolve()
-        workspace = Path("/workspace").resolve()
-        try:
-            root.relative_to(workspace)
-        except ValueError as exc:
-            raise ValueError(f"storage_root must stay under /workspace: {root}") from exc
+        root = _reverse_storage_root(storage_root)
 
         tensor = image[0].detach().cpu().numpy() if hasattr(image[0], "detach") else np.asarray(image[0])
         array = np.clip(tensor * 255.0, 0, 255).astype(np.uint8)
@@ -1436,8 +1461,8 @@ class AnimaReverseResultSaver:
 
         now = datetime.now(timezone.utc)
         reverse_id = f"{now.strftime('%Y%m%dT%H%M%S')}_{uuid.uuid4().hex[:10]}"
-        records_dir = root / "records" / now.strftime("%Y") / now.strftime("%m")
-        index_dir = root / "index"
+        records_dir = _checked_reverse_path(root / "records" / now.strftime("%Y") / now.strftime("%m"))
+        index_dir = _checked_reverse_path(root / "index")
         records_dir.mkdir(parents=True, exist_ok=True)
         index_dir.mkdir(parents=True, exist_ok=True)
 
@@ -1469,7 +1494,7 @@ class AnimaReverseResultSaver:
         )
 
         if bool(save_thumbnail):
-            thumbnail_dir = root / "thumbnails"
+            thumbnail_dir = _checked_reverse_path(root / "thumbnails")
             thumbnail_dir.mkdir(parents=True, exist_ok=True)
             thumbnail = Image.fromarray(array)
             thumbnail.thumbnail((512, 512), Image.Resampling.LANCZOS)
@@ -1498,7 +1523,7 @@ class AnimaReverseResultSaver:
             "safety_level": record.get("compiled", {}).get("safety", {}).get("level", "unknown"),
             "pool_state": "pending_review",
         }
-        with (index_dir / "reverse_history.jsonl").open("a", encoding="utf-8") as handle:
+        with _checked_reverse_path(index_dir / "reverse_history.jsonl").open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(index_entry, ensure_ascii=False) + "\n")
 
         return {

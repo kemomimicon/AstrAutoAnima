@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+import os
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -18,6 +19,21 @@ class CleanupReport:
     failed: int
 
 
+def checked_output_path(value: Path) -> Path:
+    """Check original spelling before resolve(), including Windows reparse points."""
+    path = Path(os.path.abspath(Path(value).expanduser()))
+    for part in (path, *path.parents):
+        try:
+            linked = part.is_symlink() or bool(getattr(part.lstat(), "st_file_attributes", 0) & 0x400)
+        except FileNotFoundError:
+            continue
+        if linked:
+            raise ValueError("图片清理目录包含符号链接或目录联接，拒绝操作")
+    if path == Path(path.anchor) or path == Path.home().resolve():
+        raise ValueError("图片清理目录不能是磁盘根目录或用户主目录")
+    return path
+
+
 def cleanup_old_output_images(
     output_dir: Path,
     retention_hours: float = 48.0,
@@ -31,7 +47,10 @@ def cleanup_old_output_images(
     ComfyUI output directory.
     """
 
-    root = Path(output_dir).expanduser()
+    try:
+        root = checked_output_path(output_dir)
+    except (OSError, ValueError):
+        return CleanupReport(scanned=0, deleted=0, deleted_bytes=0, failed=1)
     retention = max(1.0, float(retention_hours))
     cutoff = (time.time() if now is None else float(now)) - retention * 3600
 
@@ -43,8 +62,24 @@ def cleanup_old_output_images(
     deleted_bytes = 0
     failed = 0
 
-    for path in root.rglob("*"):
+    def images():
+        for current, directories, files in os.walk(root, followlinks=False):
+            safe_directories = []
+            for name in directories:
+                try:
+                    checked_output_path(Path(current) / name)
+                    safe_directories.append(name)
+                except (OSError, ValueError):
+                    pass
+            directories[:] = safe_directories
+            for name in files:
+                yield Path(current) / name
+
+    for path in images():
         try:
+            checked_output_path(path)
+            if not path.resolve().is_relative_to(root.resolve()):
+                continue
             if path.is_symlink() or not path.is_file():
                 continue
             if path.suffix.lower() not in IMAGE_SUFFIXES:
@@ -56,7 +91,7 @@ def cleanup_old_output_images(
             path.unlink()
             deleted += 1
             deleted_bytes += stat.st_size
-        except (FileNotFoundError, OSError):
+        except (OSError, ValueError):
             failed += 1
 
     return CleanupReport(

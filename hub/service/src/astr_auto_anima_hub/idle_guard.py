@@ -1,6 +1,7 @@
 """Cross-process admission lock for opt-in idle shutdown (Linux only)."""
 import json
 import os
+import sys
 from pathlib import Path
 
 DEFAULT_ROOT = '/workspace/astrbot-runtime/data/plugin_data/astrbot_plugin_comfy_bridge'
@@ -11,9 +12,14 @@ def boot_id():
 
 
 def root_path(root=None):
-    path = Path(root or os.getenv('AAH_PLUGIN_DATA_DIR', DEFAULT_ROOT))
-    if path.resolve() != path:
-        raise RuntimeError('休眠状态路径包含链接')
+    path = Path(os.path.abspath(Path(root or os.getenv('AAH_PLUGIN_DATA_DIR', DEFAULT_ROOT)).expanduser()))
+    for part in (path, *path.parents):
+        try:
+            linked = part.is_symlink() or bool(getattr(part.lstat(), 'st_file_attributes', 0) & 0x400)
+        except FileNotFoundError:
+            continue
+        if linked:
+            raise RuntimeError('休眠状态路径包含链接')
     return path
 
 
@@ -29,6 +35,10 @@ def blocked(root=None):
 
 def admission(root=None):
     """Return a held shared lock; fail immediately, never block an event loop."""
+    # The optional controller uses Linux boot IDs and flock. Never interpret
+    # copied Linux state as a Windows shutdown request.
+    if sys.platform != 'linux':
+        return None
     root = root_path(root)
     # Before opt-in creates the lock, there is no shutdown controller.
     path = root / 'idle_shutdown.lock'
