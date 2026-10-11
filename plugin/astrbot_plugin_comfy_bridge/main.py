@@ -96,6 +96,7 @@ from .image_runtime import EventImageResolver
 from .job_runtime import JobStore
 from .llm_runtime import reverse_image_prompt, translate_chinese_prompt
 from .cleanup_runtime import CleanupReport, cleanup_old_output_images, checked_output_path
+from .lora_name_runtime import prepare_lora_workflow
 from .character_dictionary_runtime import resolve_character
 from .multi_person_runtime import parse_scene, plan_scene, render_scene, strip_standard_loras
 from .llm_runtime import current_text_provider_id
@@ -823,7 +824,10 @@ class ComfyWorkflowBridge(SafetyBridge, Star):
     async def _submit_workflow(
         self, session: aiohttp.ClientSession, workflow: dict[str, Any]
     ) -> str:
-        payload = {"prompt": workflow, "client_id": uuid.uuid4().hex}
+        prepared = await prepare_lora_workflow(
+            session, workflow, self._base_url(), self._response_json
+        )
+        payload = {"prompt": prepared, "client_id": uuid.uuid4().hex}
         async with session.post(f"{self._base_url()}/prompt", json=payload) as response:
             data = await self._response_json(response)
 

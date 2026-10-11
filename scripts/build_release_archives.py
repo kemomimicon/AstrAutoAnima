@@ -126,10 +126,10 @@ def main() -> int:
             prefix=f"Anima_Workflow_Pack-{WORKFLOW_VERSION}",
         ),
     }
-    if args.deployment_revision == 'windows.1':
+    if args.deployment_revision in {'windows.1', 'windows.2'}:
         hotfix = [(ROOT / 'docs/WINDOWS_COMPAT_HOTFIX.md', 'README.md')]
         for relative in ('main.py', 'preset_runtime.py', 'cleanup_runtime.py',
-                         'idle_guard_runtime.py', 'metadata.yaml', 'tools/install_character_dictionary.py'):
+                         'idle_guard_runtime.py', 'lora_name_runtime.py', 'metadata.yaml', 'tools/install_character_dictionary.py'):
             hotfix.append((plugin_root / relative, 'plugin_files/' + relative))
         for relative in ('__init__.py', 'nodes.py', 'idle_guard.py', 'idle_admission.py'):
             hotfix.append((workflow_root / 'custom_nodes/ComfyUI-AstrAutoAnima-Workflow-Tools' / relative,

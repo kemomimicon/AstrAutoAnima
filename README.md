@@ -1,6 +1,6 @@
 # AstrAutoAnima
 
-> Windows 紧急补丁：**0.5.0-beta.2-windows.1**。修复假休眠 HTTP 503、反推保存、角色词典覆盖层路径及图片清理目录联接保护；包含此前 Quick 动态画风修复。已部署用户请按 [最小补丁说明](docs/WINDOWS_COMPAT_HOTFIX.md) 更新，不要覆盖个人数据。
+> Windows 紧急补丁：**0.5.0-beta.2-windows.2**。新增按目标 ComfyUI 枚举匹配 LoRA 路径，修复“列表中有但 Value not in list”；包含 windows.1 的假休眠、反推保存、词典和清理保护及此前 Quick 动态画风修复。已部署用户请按 [最小补丁说明](docs/WINDOWS_COMPAT_HOTFIX.md) 更新，不要覆盖个人数据。
 
 面向 AstrBot + QQ/NapCat + ComfyUI/Anima 的完整跑图桥接套件。它把 QQ 指令、动态角色/画风
 LoRA、分级随机提示词、图片反推、HQ/放大精修、远程 Hub 和 Windows/Android 客户端组合为

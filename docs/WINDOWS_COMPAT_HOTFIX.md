@@ -1,7 +1,25 @@
-# Windows 紧急兼容补丁：0.5.0-beta.2-windows.1
+# Windows 紧急兼容补丁：0.5.0-beta.2-windows.2
 
-适用于公开 0.5.0-beta.2、network.1、lora.1 部署。包含此前 Quick 动态画风修复。
+适用于公开 0.5.0-beta.2、network.1、lora.1、windows.1 部署。包含此前所有紧急修复。
 其它版本或修改过源码的部署，请先比较文件，不要盲目覆盖。
+
+## 已安装 windows.1：本次只需更新插件
+
+正常退出 AstrBot，备份插件代码和个人配置，将最小补丁内 plugin_files 的文件按相同结构复制到实际插件目录，再启动 AstrBot。
+必须带上新增的 lora_name_runtime.py；不要只更新 main.py，否则会缺模块。
+Hub、自定义节点、客户端和模型无需再次安装。
+不要删除真实 loras 子目录，不用批量修改已存预设中的正反斜杠。
+
+## windows.2 新增：LoRA 列表中存在却 not in list
+
+插件会向实际目标 ComfyUI 查询标准 LoRA 节点的可选名称，不使用 Hub 操作系统猜测分隔符。
+例如预设 loras/example.safetensors 会匹配服务端返回的 loras\example.safetensors。
+优先准确匹配，其次只转换分隔符；存在多义、无匹配、网络错误、超时或枚举异常时不提交任务，
+并返回可读错误。不删除目录、不忽略大小写、不按 basename 猜模型、不静默跳过 LoRA。
+仅修改本次提交的工作流副本，已存角色/画风预设及工作流文件保持不变。
+
+适用于标准 LoraLoader 和 LoraLoaderModelOnly；第三方 LoRA 堆及由其它节点动态输出的字符串仍由对应节点负责，未宣称通用适配所有自定义加载器。
+模型列表每次提交按节点类型读取一次，无跨实例/跨任务缓存；无 LoRA 任务不增加请求。
 
 ## 修复内容
 
@@ -15,7 +33,7 @@
 
 ## 已部署用户：最小热修复包（推荐）
 
-下载 AAA_Windows_Compatibility_Hotfix_0.5.0-beta.2-windows.1.zip。
+下载 AAA_Windows_Compatibility_Hotfix_0.5.0-beta.2-windows.2.zip。
 它只含本轮所需源码和说明，不含用户词库、角色预设、令牌、模型或个人工作流配置。
 
 1. 等正在运行的任务结束，正常退出 ComfyUI、AstrBot 和 Hub。不要只刷新网页。
@@ -52,13 +70,13 @@
 
 ## 新用户
 
-使用带 windows.1 的 Windows 懒人包；Linux 用户选 Linux 包。
+使用带 windows.2 的 Windows 懒人包；Linux 用户选 Linux 包。
 不要再从旧 complete 包中重新部署旧组件。此次不重编 App，继续使用现有公开客户端。
 完整插件组件包包含空的公开示例库，老用户请优先使用最小补丁，避免覆盖自己的库。
 
 ## 验收顺序
 
-1. /aimg_status 确认插件为 0.5.0-beta.2-windows.1；Hub 健康接口返回同版本后缀。
+1. /aimg_status 确认插件为 0.5.0-beta.2-windows.2；Hub 健康接口仍显示 windows.1（本次 Hub 没有版本变更）。
 2. 普通生图一张，再选一个已安装画风、最后加角色；Quick 无槽位图保留 dynamic、槽位留空。
 3. 使用已安装的反推模型测试“仅反推”；确认返回提示词，并在配置的 reverse_history/records 中生成记录。
 4. 在管理端修改一个测试角色别名，确认插件可识别；测试后可还原。
