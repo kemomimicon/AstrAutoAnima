@@ -19,7 +19,9 @@ jobs:
       - name: Install Windows runtime test dependencies
         run: |
           python -m pip install "pytest>=8,<10" -r plugin/astrbot_plugin_comfy_bridge/requirements.txt
-          python -m pip install ./hub/service
+          $hubTestSource = Join-Path $env:RUNNER_TEMP 'aaa-hub-test-src'
+          Copy-Item -LiteralPath hub/service -Destination $hubTestSource -Recurse
+          python -m pip install $hubTestSource
       - name: Windows plugin and Hub runtime regression
         run: |
           python scripts/run_public_tests.py plugin --pytest
