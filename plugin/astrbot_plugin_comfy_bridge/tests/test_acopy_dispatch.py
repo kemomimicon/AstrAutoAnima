@@ -49,4 +49,4 @@ class CopyDispatchTests(unittest.IsolatedAsyncioTestCase):
         args=bridge._deliver_generation.await_args.kwargs
         self.assertEqual(args['options']['character'],'new')
         self.assertEqual(args['options']['style'],'ink')
-        self.assertEqual(args['options']['steps'],30)
+        self.assertEqual(args['options']['sampler_steps'],30)

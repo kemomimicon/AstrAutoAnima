@@ -109,7 +109,8 @@ class _RemakeOptionsDialogState extends State<RemakeOptionsDialog> {
                             maxLength: 4000,
                             decoration: const InputDecoration(
                                 labelText: '补充调整提示词',
-                                helperText: '文字修改需服务端已配置文本模型')),
+                                helperText: '新版服务端默认直接追加；AI改写：开头才调用文本模型',
+                                helperMaxLines: 3)),
                         const Text('以上修改仅本次有效，不保存为个人设置。'),
                       ]);
                     }))),

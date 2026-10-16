@@ -1,5 +1,12 @@
 # 0.5.0-beta.2 公开测试版
 
+## remake.1 重跑热修复（2026-10-16）
+
+修复重跑时步数/CFG/采样器恢复字段不一致；补充提示词默认直接追加到原工作流快照，
+仅明确使用 AI改写：前缀时调用文本模型。保留固定/随机种子、权限、安全检查和合批限制。
+Windows、Linux 通用。升级与边界见 [重跑补丁说明](docs/REMAKE_HOTFIX.md)。
+已有用户只需更新插件代码；不需重新安装客户端、Hub、模型。
+
 ## windows.2 LoRA 路径紧急补丁（2026-10-11）
 
 标准 LoraLoader / LoraLoaderModelOnly 在提交前读取目标 ComfyUI 的 object_info，

@@ -138,6 +138,17 @@ def main() -> int:
             hotfix.append((hub_root / relative, 'hub_files/' + relative))
         archives[f'AAA_Windows_Compatibility_Hotfix_{VERSION}.zip'] = hotfix
 
+    if args.deployment_revision == 'remake.1':
+        # Code-only update: never replace an existing user's corpus/configuration.
+        archives[f'AAA_Remake_Hotfix_{VERSION}.zip'] = [
+            (ROOT / 'docs/REMAKE_HOTFIX.md', 'README.md'),
+            (ROOT / 'docs/WINDOWS_COMPAT_HOTFIX.md', 'WINDOWS_COMPAT_HOTFIX.md'),
+        ] + relative_entries(
+            [p for p in files if p.is_relative_to(plugin_root)
+             and (p.suffix == '.py' or p.name == 'metadata.yaml')],
+            plugin_root, prefix='plugin_files', exclude_parts={'tests'},
+        )
+
     tool_paths = [
         path
         for path in files
@@ -205,7 +216,7 @@ def main() -> int:
                      if name.startswith('Anima_Workflow_Pack-') else
                      name.replace(VERSION, VERSION + '-' + args.deployment_revision)): entries
                     for name, entries in archives.items()
-                    if 'lazy-bundle' in name or name.endswith('-source.zip') or name.startswith(('AAA_Windows_Compatibility_Hotfix_', 'AstrAutoAnima-tools-', 'astrbot_plugin_comfy_bridge-', 'astr_auto_anima_hub_service-', 'Anima_Workflow_Pack-'))}
+                    if 'lazy-bundle' in name or name.endswith('-source.zip') or name.startswith(('AAA_Remake_Hotfix_', 'AAA_Windows_Compatibility_Hotfix_', 'AstrAutoAnima-tools-', 'astrbot_plugin_comfy_bridge-', 'astr_auto_anima_hub_service-', 'Anima_Workflow_Pack-'))}
         for name in archives:
             if (output / name).exists():
                 raise ValueError('Revision archive already exists; choose a new revision/output: ' + name)

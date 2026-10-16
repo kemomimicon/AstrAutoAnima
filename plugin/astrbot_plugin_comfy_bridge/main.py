@@ -637,7 +637,10 @@ class ComfyWorkflowBridge(SafetyBridge, Star):
         requested = str(options.get("sampler_preset", "")).strip().casefold()
         if not requested:
             requested = str(self.config.get("default_sampler_name", "er_sde")).strip().casefold()
-        if requested in {
+        if options.get("_replay_sampler_name"):
+            preset = str(options["_replay_sampler_name"])
+            overrides = {"sampler_name": preset}
+        elif requested in {
             "", "default", "current", "original", "原始", "原有", "现有"
         }:
             preset = "original"
@@ -735,6 +738,8 @@ class ComfyWorkflowBridge(SafetyBridge, Star):
                 overrides["cfg"] = float(str(options["sampler_cfg"]).strip())
             except (TypeError, ValueError) as exc:
                 raise WorkflowError("CFG 必须是数字。") from exc
+        if "_replay_denoise" in options:
+            overrides["denoise"] = options["_replay_denoise"]
         return preset, overrides
 
     def _five_draw_cooldown_seconds(self) -> int:
@@ -2996,7 +3001,15 @@ class ComfyWorkflowBridge(SafetyBridge, Star):
                 blocked = {str(item.get("id")) for item in pool.get("prompts", []) if item.get("safety_level") == "sexual" or item.get("safety_code") == "S"}
                 if any(str(item.get("id")) in blocked or item.get("safety_level") == "sexual" for item in entries):
                     await self._safety_reject(event, "selection", [{"rule": "S_GROUP", "term": "S"}])
-            if edit_text or edit_options:
+            ai_rewrite = bool(re.match(r'^AI改写[:：]', edit_text, re.I))
+            if edit_text and not edit_options and not ai_rewrite:
+                from .replay_runtime import append_snapshot_prompt
+                await self._safety_input(event, edit_text)
+                parent, workflow = append_snapshot_prompt(parent, workflow, index, edit_text)
+                for text in positive_texts(workflow):
+                    await self._safety_input(event, text)
+                await event.send(event.plain_result('补充内容已直接追加到原工作流正向提示词；未调用 AI 改写，原采样参数和负面提示词保持不变。'))
+            elif edit_text or edit_options:
                 await self._remake_modified(event, parent, index, body, seed)
                 return
             input_data = copy.deepcopy(parent.get("input", {}))
@@ -3061,8 +3074,17 @@ class ComfyWorkflowBridge(SafetyBridge, Star):
             from .task_suite_runtime import bind_qq_suite
             overrides = bind_qq_suite(self, event, overrides)
         prompt, options = copy_context(parent, index, overrides)
-        if instruction:
+        ai_rewrite = re.match(r'^AI改写[:：]\s*(.+)$', instruction, re.I | re.S)
+        if re.match(r'^AI改写[:：]', instruction, re.I) and not ai_rewrite:
+            raise WorkflowError('AI 改写内容不能为空')
+        if instruction and not ai_rewrite:
+            from .replay_runtime import append_prompt
             await self._safety_input(event, instruction)
+            prompt = append_prompt(prompt, instruction)
+        if ai_rewrite:
+            instruction = ai_rewrite.group(1)
+            await self._safety_input(event, instruction)
+            await event.send(event.plain_result('已明确选择 AI 改写：模型会重写整段提示词，可能改变未指定细节；这不是局部修图或精确复现。'))
             provider = await current_text_provider_id(self.context, event, str(self.config.get('text_provider_id', '')))
             if not provider:
                 raise WorkflowError('文字修改需要 AstrBot 文本Provider；只改角色、画风和比例不需要 LLM')
@@ -3109,7 +3131,7 @@ class ComfyWorkflowBridge(SafetyBridge, Star):
             if options.get('character') or options.get('style'):
                 raise WorkflowError('裸模多人图不支持全局角色/画风覆盖')
         prompt = compile_prompt(prompt, self._character_dictionary_path(), strip_identity='character' in overrides)
-        await event.send(event.plain_result('已读取原任务配置；覆盖指定参数并' + ('沿用原种子' if overrides.get('fixed_seed') else '使用新种子') + '。未指定的预设沿用快照。'))
+        await event.send(event.plain_result('已读取原任务配置；覆盖指定参数并' + ('沿用原种子' if overrides.get('fixed_seed') else '使用新种子') + '。未指定的预设沿用快照；角色/画风/比例或 AI 修改使用当前模板重建，不保证原图构图。'))
         await self._deliver_generation(event, prompt=prompt, options=options,
             workflow_type=kind, profile=profile, source_image_path=source_path,
             parent_job_id=parent['job_id'], allow_character_text_fallback=True,

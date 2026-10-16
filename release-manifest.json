@@ -2,7 +2,7 @@
   "release": "0.5.0-beta.2",
   "status": "prerelease",
   "components": {
-    "astrbot_plugin_comfy_bridge": "0.5.0-beta.2-windows.2",
+    "astrbot_plugin_comfy_bridge": "0.5.0-beta.2-remake.1",
     "astr_auto_anima_hub_service": "0.5.0b2.post1",
     "astr_auto_anima_hub_client": "0.5.0-beta.2+36",
     "workflow_pack": "0.8.0-beta.1-public-windows.1"
