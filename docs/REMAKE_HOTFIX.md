@@ -1,5 +1,7 @@
 # 重跑修正补丁：0.5.0-beta.2-remake.2
 
+> **2026-10-16：本页仅保留历史说明，暂勿执行下方安装步骤。** remake.1 / remake.2 已撤回为草稿；收到 Windows KSampler `hostbuf_file_reader_read failed` 且普通生图也失败的反馈，因果尚未确认。保留现场、完整日志和更新前备份，先比较 ComfyUI 直接运行与 AAA 提交；不要同时重装依赖或删除模型。代码与标签保留用于调查，不代表仍推荐安装。
+
 取代 remake.1，仅修 bug，Windows/Linux 通用。
 不增加指令前缀、按钮、模式、设置或模型检测页面；保持原有客户端和 QQ 操作方式。
 
