@@ -138,7 +138,7 @@ def main() -> int:
             hotfix.append((hub_root / relative, 'hub_files/' + relative))
         archives[f'AAA_Windows_Compatibility_Hotfix_{VERSION}.zip'] = hotfix
 
-    if args.deployment_revision == 'remake.1':
+    if args.deployment_revision in {'remake.1', 'remake.2'}:
         # Code-only update: never replace an existing user's corpus/configuration.
         archives[f'AAA_Remake_Hotfix_{VERSION}.zip'] = [
             (ROOT / 'docs/REMAKE_HOTFIX.md', 'README.md'),

@@ -1,6 +1,6 @@
 # AstrAutoAnima
 
-> 最新重跑补丁：**0.5.0-beta.2-remake.1**（Windows/Linux 通用）。修复带修改重跑时步数/CFG 退回默认值、隐式 AI 改写丢失提示词的问题。[下载发布包](https://github.com/kemomimicon/AstrAutoAnima/releases/tag/v0.5.0-beta.2-remake.1) · [升级与使用说明](docs/REMAKE_HOTFIX.md)。已安装用户优先使用代码补丁，不覆盖个人词库与配置；旧完整整合包安装后也请补上此更新。
+> 最新重跑补丁：**0.5.0-beta.2-remake.2**（Windows/Linux 通用）。仅修参数继承和提示词整段覆盖问题，保持原有输入方式，不增加前缀、模式或按钮。[下载发布包](https://github.com/kemomimicon/AstrAutoAnima/releases/tag/v0.5.0-beta.2-remake.2) · [升级说明](docs/REMAKE_HOTFIX.md)。取代 remake.1，已有用户优先使用代码补丁，不覆盖个人词库与配置。
 
 > Windows 紧急补丁：**0.5.0-beta.2-windows.2**。新增按目标 ComfyUI 枚举匹配 LoRA 路径，修复“列表中有但 Value not in list”；包含 windows.1 的假休眠、反推保存、词典和清理保护及此前 Quick 动态画风修复。已部署用户请按 [最小补丁说明](docs/WINDOWS_COMPAT_HOTFIX.md) 更新，不要覆盖个人数据。
 

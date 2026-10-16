@@ -12,7 +12,7 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 
 from astrbot_plugin_comfy_bridge.replay_runtime import (
-    append_snapshot_prompt, copy_context, replay_workflow,
+    apply_prompt_patch, prompt_parts, copy_context, replay_workflow,
 )
 from astrbot_plugin_comfy_bridge.preset_runtime import parse_generation_directives
 from astrbot_plugin_comfy_bridge.workflow_runtime import (
@@ -77,67 +77,63 @@ def test_actual_sampler_method_and_workflow_preserve_recorded_values(directive):
     assert job == parent()
 
 
-def test_append_snapshot_is_literal_and_repeatable():
-    job = parent()
-    graph, _, _ = replay_workflow(job, 0, fixed_seed=True)
-    changed, graph = append_snapshot_prompt(job, graph, 0, "blue bicycle")
-    assert graph["11"]["inputs"]["text"] == job["input"]["prompt"] + ", blue bicycle"
-    assert graph["12"] == job["workflow_snapshot"]["12"]
-    assert graph["19"] == job["workflow_snapshot"]["19"]
-    assert graph["28"] == job["workflow_snapshot"]["28"]
-    changed["workflow_snapshot"] = graph
-    child, again = append_snapshot_prompt(changed, graph, 0, "sunset")
-    assert child["input"]["prompt"].endswith(", blue bicycle, sunset")
-    assert again["11"]["inputs"]["text"] == child["input"]["compiled_prompt"]
-    assert job == parent()
+def test_prompt_patch_keeps_unmodified_parts_and_handles_weights():
+    original = "red bicycle, (stone wall, moss:1.2), rainy street"
+    assert prompt_parts(original) == ["red bicycle", "(stone wall, moss:1.2)", "rainy street"]
+    escaped = "bicycle" + chr(92) + ", red"
+    assert prompt_parts(escaped + ", street") == [escaped, "street"]
+    assert apply_prompt_patch(original, {"remove": [0], "add": ["blue bicycle"]}) == (
+        "(stone wall, moss:1.2), rainy street, blue bicycle")
+    assert apply_prompt_patch(original, {"remove": [], "add": []}) == original
 
 
-def test_batch_selected_image_and_unknown_or_shared_nodes_fail_closed():
-    job = parent()
-    job["input"].update(batch_prompts=["first bicycle", "second bicycle"],
-                        raw_batch_prompts=["first bicycle", "second bicycle"])
-    job["workflow_snapshot"]["11"] = {"class_type": "AnimaPromptBatchEncode",
-                                      "inputs": {"prompts_json": '["first bicycle", "second bicycle"]'}}
-    graph, _, output_index = replay_workflow(job, 1)
-    changed, graph = append_snapshot_prompt(job, graph, 1, "rain")
-    assert json.loads(graph["11"]["inputs"]["prompts_json"]) == ["second bicycle, rain"]
-    assert changed["input"]["raw_batch_prompts"] == ["first bicycle", "second bicycle, rain"]
-    assert output_index == 0
+@pytest.mark.parametrize("patch", [
+    {"prompt": "blue bicycle"},
+    {"remove": [0, 1], "add": ["blue bicycle"]},
+    {"remove": [10], "add": []},
+    {"remove": [True], "add": []},
+    {"remove": [0, 0], "add": []},
+    {"remove": [], "add": "blue bicycle"},
+    {"remove": [], "add": [""]},
+])
+def test_bad_or_wholesale_edits_fail_instead_of_losing_scene(patch):
     with pytest.raises(WorkflowError):
-        replay_workflow(job, 1, fixed_seed=True)
-    graph = parent()["workflow_snapshot"]
-    graph["19"]["inputs"]["negative"] = ["11", 0]
-    with pytest.raises(WorkflowError, match="共用"):
-        append_snapshot_prompt(parent(), graph, 0, "rain")
-    graph["11"]["class_type"] = "UnknownEncoder"
-    with pytest.raises(WorkflowError, match="未支持"):
-        append_snapshot_prompt(parent(), graph, 0, "rain")
+        apply_prompt_patch(parent()["input"]["prompt"], patch)
 
 
-def test_modified_default_append_needs_no_llm_and_explicit_ai_does(tmp_path):
+def test_modified_remake_keeps_existing_input_and_llm_contract(tmp_path):
     import asyncio
     async def run():
-        owner = SimpleNamespace(config={}, context=SimpleNamespace(llm_generate=AsyncMock()),
+        model = AsyncMock(return_value=SimpleNamespace(
+            completion_text='{"remove":[0],"add":["blue bicycle"]}'))
+        owner = SimpleNamespace(config={}, context=SimpleNamespace(llm_generate=model),
+                                _llm_max_tokens=lambda: 1000,
                                 _safety_input=AsyncMock(), _deliver_generation=AsyncMock(),
                                 _character_dictionary_path=lambda: tmp_path / "dict.json")
         event = SimpleNamespace(send=AsyncMock(), plain_result=lambda text: text)
-        method = bind("_remake_modified", owner, current_text_provider_id=AsyncMock(return_value=""))
+        provider = AsyncMock(return_value="configured")
+        method = bind("_remake_modified", owner, current_text_provider_id=provider)
         await method(event, parent(), 0, "固定种子 blue bicycle", 123)
         kwargs = owner._deliver_generation.await_args.kwargs
-        assert kwargs["prompt"] == parent()["input"]["prompt"] + ", blue bicycle"
+        assert kwargs["prompt"] == "stone wall, rainy street, blue bicycle"
         assert kwargs["options"]["sampler_steps"] == 40
         assert kwargs["options"]["sampler_cfg"] == 9
         assert kwargs["options"]["_fixed_seed"] == 123
-        owner.context.llm_generate.assert_not_awaited()
+        model.assert_awaited_once()
+        owner._deliver_generation.reset_mock()
+        model.return_value = SimpleNamespace(completion_text='{"prompt":"blue bicycle"}')
+        with pytest.raises(WorkflowError, match="原提示词未被覆盖"):
+            await method(event, parent(), 0, "blue bicycle", 123)
+        owner._deliver_generation.assert_not_awaited()
+        provider.return_value = ""
         with pytest.raises(WorkflowError, match="文本Provider"):
-            await method(event, parent(), 0, "AI改写：blue bicycle", 123)
-        with pytest.raises(WorkflowError, match="不能为空"):
-            await method(event, parent(), 0, "AI改写：", 123)
+            await method(event, parent(), 0, "blue bicycle", 123)
+        owner._deliver_generation.assert_not_awaited()
     asyncio.run(run())
 
 
 @pytest.mark.parametrize("fixed", [True, False])
-def test_aremake_final_submission_keeps_snapshot_and_prompt(tmp_path, fixed):
+def test_unmodified_aremake_final_submission_keeps_snapshot_and_prompt(tmp_path, fixed):
     import asyncio
     @asynccontextmanager
     async def slot(*args, **kwargs):
@@ -160,7 +156,7 @@ def test_aremake_final_submission_keeps_snapshot_and_prompt(tmp_path, fixed):
             _safety_outputs=AsyncMock(side_effect=lambda e, paths: paths),
             _remake_modified=AsyncMock(), config={})
         event = SimpleNamespace(
-            message_str="/aremake " + ("固定种子 " if fixed else "") + "blue bicycle",
+            message_str="/aremake " + ("固定种子 " if fixed else "") + "",
             should_call_llm=Mock(), stop_event=Mock(), plain_result=lambda x: x, send=AsyncMock())
         logger = Mock()
         method = bind("aremake", owner, logger=logger,
@@ -171,7 +167,6 @@ def test_aremake_final_submission_keeps_snapshot_and_prompt(tmp_path, fixed):
         owner._remake_modified.assert_not_awaited()
         graph = owner._submit_workflow.await_args.args[1]
         expected = copy.deepcopy(job["workflow_snapshot"])
-        expected["11"]["inputs"]["text"] += ", blue bicycle"
         if fixed:
             assert graph == expected
         else:

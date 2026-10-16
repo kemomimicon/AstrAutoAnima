@@ -56,81 +56,47 @@ def copy_context(job: dict, index: int, overrides: dict):
     return prompt, options
 
 
-def append_prompt(original: str, addition: str) -> str:
-    """Literal addition: never ask a model to rewrite or discard the source."""
-    if not isinstance(original, str) or not original.strip():
-        raise WorkflowError("原任务未保存可编辑提示词")
-    result = original + (", " + addition.strip() if addition.strip() else "")
-    if len(result) > 16000:
-        raise WorkflowError("追加后的提示词超过 16000 字符，请缩短补充内容")
-    return result
-
-
-def append_snapshot_prompt(job: dict, graph: dict, index: int, addition: str):
-    """Patch supported positive encoders only; reject unknown/shared conditioning."""
-    graph = copy.deepcopy(graph)
-    positive, negative = set(), set()
-
-    def walk(value, seen):
-        if not (isinstance(value, list) and len(value) == 2 and str(value[0]) in graph):
-            return
-        key = str(value[0])
-        if key in seen:
-            return
-        seen.add(key)
-        for field, child in graph[key].get("inputs", {}).items():
-            if field not in {"model", "clip", "vae", "negative", "negative_prompt"}:
-                walk(child, seen)
-
-    for node in graph.values():
-        for field, value in node.get("inputs", {}).items():
-            if field in {"positive", "positive_prompt"}:
-                if isinstance(value, str):
-                    raise WorkflowError("原工作流使用内联提示词，暂不支持安全追加")
-                walk(value, positive)
-            elif field in {"negative", "negative_prompt"}:
-                walk(value, negative)
-    targets = []
-    for key in positive:
-        node = graph[key]
-        if node.get("class_type") == "CLIPTextEncode":
-            fields = ["text"]
-        elif node.get("class_type") == "AnimaPromptBatchEncode":
-            fields = ["prompts_json"]
-        else:
-            if any(field in node.get("inputs", {}) for field in ("text", "text_g", "text_l", "prompt", "prompts_json")):
-                raise WorkflowError("原工作流含未支持的正向文本节点，拒绝只修改部分提示词")
+def prompt_parts(prompt: str) -> list[str]:
+    """Split only top-level commas; keep weighted/escaped tag groups intact."""
+    parts, start, depth, escaped = [], 0, 0, False
+    for index, char in enumerate(prompt):
+        if escaped:
+            escaped = False
             continue
-        if key in negative:
-            raise WorkflowError("原工作流正负提示词共用节点，不能安全追加")
-        for field in fields:
-            value = node.get("inputs", {}).get(field)
-            if not isinstance(value, str):
-                raise WorkflowError("原提示词由动态节点提供，不能可靠追加；请使用无修改重跑")
-            if field == "prompts_json":
-                values = json.loads(value)
-                if not isinstance(values, list) or len(values) != 1:
-                    raise WorkflowError("重跑批次未收敛为一张，拒绝错配提示词")
-                node["inputs"][field] = json.dumps([append_prompt(values[0], addition)], ensure_ascii=False)
-            else:
-                node["inputs"][field] = append_prompt(value, addition)
-            targets.append((key, field))
-    if not targets:
-        raise WorkflowError("原工作流没有可安全追加的正向文本节点；不会退回默认工作流")
-    result = copy.deepcopy(job)
-    inputs = result.setdefault("input", {})
-    for field in ("prompt", "compiled_prompt"):
-        if isinstance(inputs.get(field), str) and inputs[field].strip():
-            inputs[field] = append_prompt(inputs[field], addition)
-    for field in ("batch_prompts", "raw_batch_prompts"):
-        values = inputs.get(field)
-        if values:
-            if not 0 <= index < len(values):
-                raise WorkflowError("原批次提示词序号不一致")
-            values[index] = append_prompt(values[index], addition)
-    inputs["remake_edit_mode"] = "append_snapshot"
-    inputs["remake_addition"] = addition
-    return result, graph
+        if char == chr(92):
+            escaped = True
+        elif char in "([":
+            depth += 1
+        elif char in ")]":
+            depth = max(0, depth - 1)
+        elif char == "," and depth == 0:
+            parts.append(prompt[start:index].strip())
+            start = index + 1
+    parts.append(prompt[start:].strip())
+    return parts
+
+
+def apply_prompt_patch(original: str, patch: dict) -> str:
+    """Apply explicit indexed edits; never replace the prompt with an LLM summary."""
+    parts = prompt_parts(original)
+    if not isinstance(patch, dict) or set(patch) != {"remove", "add"}:
+        raise WorkflowError("文本模型返回了无效修改结果，已停止重跑，原提示词未被覆盖")
+    remove, add = patch["remove"], patch["add"]
+    if (not isinstance(remove, list) or not isinstance(add, list)
+            or any(type(i) is not int or not 0 <= i < len(parts) for i in remove)
+            or len(set(remove)) != len(remove)
+            or any(not isinstance(item, str) or not item.strip() for item in add)):
+        raise WorkflowError("文本模型返回的修改位置或内容无效，已停止重跑")
+    # Fail closed on wholesale deletion instead of silently losing the scene.
+    if remove and len(remove) * 2 >= len(parts):
+        raise WorkflowError("文本模型试图删除过多原提示词，已停止重跑；请缩小调整范围")
+    if not remove and not add:
+        return original
+    result = ", ".join([part for i, part in enumerate(parts) if i not in remove]
+                       + [item.strip() for item in add])
+    if not result.strip() or len(result) > 16000:
+        raise WorkflowError("修改后的提示词为空或过长，已停止重跑")
+    return result
 
 
 def quoted_style_preset(job):

@@ -77,7 +77,7 @@ class QuoteUpdateTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(call['parent_job_id'], 'original')
         self.assertEqual(original['input']['generation_options']['character'], 'A')
         with self.assertRaisesRegex(WorkflowError, '文本Provider'):
-            await method(event, original, 0, 'AI改写：把场景改成雨夜', 987)
+            await method(event, original, 0, '把场景改成雨夜', 987)
 
     async def test_hq_chain_preserved_and_seedvr_not_silently_rebuilt(self):
         event = SimpleNamespace(plain_result=lambda t: t, send=AsyncMock())
