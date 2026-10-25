@@ -35,7 +35,7 @@ def main():
     manifest=json.loads((IMAGE/'payload-manifest.json').read_text())
     archive=IMAGE/'runtime.tar.gz'
     if sha256(archive)!=manifest['sha256']:raise ValueError('Archive SHA mismatch')
-    secrets=known_secrets();count=0;scanned=0;last=time.monotonic();virtual={};names=set()
+    secrets=known_secrets();count=0;scanned=0;last=time.monotonic();virtual={};names=set();catalog_hash=None
     with tarfile.open(archive,'r|gz') as tar:
         for member in tar:
             count+=1;name=member.name
@@ -48,9 +48,14 @@ def main():
                 data=tar.extractfile(member).read();scanned+=1
                 if any(secret in data for secret in secrets):raise ValueError('Known credential found; private content not printed')
                 if name.endswith(('/.image-defaults/templates.json','/studio_data/secrets.json')):virtual[name]=json.loads(data)
+            if name=='autodl-tmp/aaa-install/hub/resources/gufeng/cards.sqlite3':
+                if not member.isfile():raise ValueError('V catalog is not a regular file')
+                catalog_hash=hashlib.file_digest(tar.extractfile(member),'sha256').hexdigest()
             if time.monotonic()-last>=15:
                 print('VERIFY_PROGRESS',count,'small_files_scanned',scanned,flush=True);last=time.monotonic()
     if count!=manifest['entries']:raise ValueError('Archive entry count mismatch')
+    if 'autodl-tmp/aaa-install/astrbot/.astrbot' not in names:raise ValueError('AstrBot root marker missing')
+    if manifest.get('V_version')!='0.4.2' or catalog_hash!=manifest.get('V_catalog_sha256'):raise ValueError('V 0.4.2 catalog mismatch')
     defaults=virtual['autodl-tmp/aaa-install/.image-defaults/templates.json']
     for kind in ['env_full','env_local']:
         if defaults[kind].get('AAH_ADMIN_TOKEN'):raise ValueError('Template has fixed token')
