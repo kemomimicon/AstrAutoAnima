@@ -170,6 +170,17 @@ def launch(root, image):
     result = subprocess.run(command, env=env, check=False)
     if result.returncode:
         raise ValueError('Core startup did not complete; inspect private runtime logs')
+    for attempt in range(60):
+        try:
+            with urllib.request.urlopen('http://127.0.0.1:6185/api/auth/setup-status', timeout=2) as response:
+                status = json.load(response)
+            if response.status == 200 and status.get('status') == 'ok':
+                break
+        except (OSError, ValueError):
+            pass
+        time.sleep(1)
+    else:
+        raise ValueError('AstrBot 启动信息见运行目录 AstrBot.log')
     studio = BASE / 'apps/Start-Studio.sh'
     if studio.is_file():
         def ready():

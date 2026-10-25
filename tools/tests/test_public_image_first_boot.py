@@ -7,12 +7,21 @@ import tempfile
 import unittest
 import tarfile
 import hashlib
+from unittest.mock import patch, Mock
 
 spec=importlib.util.spec_from_file_location('image_first_boot',Path(__file__).resolve().parents[1] / 'autodl_image_052144/first_boot.py')
 boot=importlib.util.module_from_spec(spec);spec.loader.exec_module(boot)
 
 
 class FirstBootTests(unittest.TestCase):
+    def test_launch_rejects_missing_astrbot_even_when_launcher_returns_zero(self):
+        with tempfile.TemporaryDirectory() as temp,contextlib.redirect_stdout(io.StringIO()):
+            base=Path(temp);root,nap=self.create(base);boot.initialize(root,base,nap)
+            with patch.object(boot,'BASE',base),patch.object(boot.subprocess,'run',return_value=Mock(returncode=0)), \
+                 patch.object(boot.urllib.request,'urlopen',side_effect=OSError('no listener')),patch.object(boot.time,'sleep'):
+                with self.assertRaisesRegex(ValueError,'AstrBot.log'):
+                    boot.launch(root,base)
+
     def layers(self, temp):
         base=Path(temp)/'autodl-tmp';base.mkdir();image=Path(temp)/'image';image.mkdir()
         data=b'public-resource-fixture'

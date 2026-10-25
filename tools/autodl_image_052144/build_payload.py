@@ -50,6 +50,7 @@ def selected():
         tree(paths, ROOT/'ComfyUI/models'/name)
     tree(paths, ROOT/'ComfyUI/user/default/workflows')
     tree(paths, ROOT/'astrbot/.venv')
+    paths.add(ROOT/'astrbot/.astrbot')
     for name in ('astrbot_plugin_comfy_bridge','astrbot_plugin_anima_master'):
         tree(paths, ROOT/'astrbot/data/plugins'/name)
     tree(paths, ROOT/'hub')
@@ -126,7 +127,7 @@ def virtual():
 
 def build():
     if IMAGE.exists():raise ValueError('Image directory already exists')
-    if shutil.disk_usage('/').free < 20*2**30:raise ValueError('System disk space')
+    if shutil.disk_usage('/').free < 16*2**30:raise ValueError('System disk space')
     IMAGE.mkdir(mode=0o755)
     paths=selected();files=virtual()
     archive=IMAGE/'runtime.tar.gz'
@@ -177,7 +178,8 @@ def build():
     manifest={'schema':1,'image':'0.5.2-1.44-image.1','sha256':digest(archive),'compressed_bytes':archive.stat().st_size,
         'unique_bytes':total,'entries':count,'top_roots':['aaa-install','apps/AnimaLoraStudio','apps/node-v22.20.0-linux-x64','apps/Start-Studio.sh','aaa-bootstrap-py312'],
         'optional_downloads':['SeedVR2 weights','JoyCaption','CL Tagger','NapCat/QQ'],
-        'software_source_commit':'29882ba009719f1707ac0bb2690b04df1763dff7'}
+        'software_source_commit':'29882ba009719f1707ac0bb2690b04df1763dff7',
+        'V_version':'0.4.2','V_catalog_sha256':digest(ROOT/'hub/resources/gufeng/cards.sqlite3')}
     (IMAGE/'payload-manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')
     print('PAYLOAD_BUILT',json.dumps(manifest),flush=True)
 

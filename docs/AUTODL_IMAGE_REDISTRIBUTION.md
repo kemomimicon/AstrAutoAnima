@@ -13,6 +13,7 @@
 | WD 模型 | SmilingWolf/wd-eva02-large-tagger-v3，b25b82a03f7282e41aa2f257a52c7583b710bd1c | Apache-2.0 模型卡与词表 |
 | SeedVR2 节点 | numz/ComfyUI-SeedVR2_VideoUpscaler，4490bd1f482e026674543386bb2a4d176da245b9 | 节点源码、许可证；权重按需下载 |
 | G/V 与角色词典 | 项目公共资源 | 维护者确认的分发记录、原始来源与署名 |
+| V 国风古韵 | ComfyUI-GuFengPromptCards 0.4.2；数据 SHA256 af413e4d27710b0802840e3d2ee8c29cf70b1a52acceb38384c54b6f468d39cd | 原始 catalog_manifest、README、SOURCES |
 | Python / Torch / Node 等 | 已安装发行包 | 保留各安装包的 LICENSE / NOTICE / dist-info |
 | NapCat / QQ | 官方安装入口 | 由使用者按需安装和扫码配置 |
 
