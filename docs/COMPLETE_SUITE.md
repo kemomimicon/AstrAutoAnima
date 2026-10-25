@@ -2,6 +2,9 @@
 
 本整合包提供 **0.5.2-1.44 / build44 / install.2** 完整软件和中文安装向导。
 
+首次下载可以直接选择 [Windows / Linux 独立全量总包](PLATFORM_FULL_PACKAGES.md)，
+各自已展开对应安装器，根目录有独立安装入口和可复制代码的中文 HTML 说明。
+
 ## 从这里开始
 
 先完整解压外层 `AstrAutoAnima-0.5.2-1.44-install.2-complete.zip`，再按以下用途选择内部 ZIP。**不要全部安装，也不要直接在压缩包里启动程序。**

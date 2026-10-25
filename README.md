@@ -90,6 +90,9 @@ scripts/                发布前检查与辅助脚本
 
 ## 快速开始
 
+Windows 与 Linux 用户可直接下载各自的 [0.5.2-1.44 独立全量总包](docs/PLATFORM_FULL_PACKAGES.md)。
+每个包均包含平台安装器、全套组件与客户端、工具、源码和中文 HTML 指引；解压后从 `00_安装与使用说明.html` 开始。
+
 1. 新手先看 [新版懒人包说明](docs/EASY_INSTALL.md)，双击一键部署入口；已有环境也可按 [手动安装教程](docs/INSTALL.md) 更新。
 2. 安装 AstrBot 插件、自定义节点和所需的工作流 JSON。
 3. 在工作流中把 `YOUR_ANIMA_*`、`YOUR_STYLE_LORA_*` 替换成自己实际存在的模型。
