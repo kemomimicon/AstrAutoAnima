@@ -27,7 +27,7 @@ class ProbeTests(unittest.TestCase):
         }
         self.write_manifest()
         (self.image / "runtime.tar.gz").write_bytes(b"abc")
-        for name in ("image_first_boot.py", "Start-Image.sh", "Show-Credentials.sh"):
+        for name in ("first_boot.py", "Start-Image.sh", "Show-Credentials.sh"):
             (self.image / name).write_text("not executed", encoding="utf-8")
         self.bytes_patch = patch.object(probe, "EXPECTED_BYTES", 3)
         self.bytes_patch.start()

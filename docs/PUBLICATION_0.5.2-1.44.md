@@ -44,3 +44,14 @@ Windows 管理端与个人服务端分开提供；Android 提供管理端和个�
 
 AutoDL 公开镜像按 [镜像发布步骤](AUTODL_IMAGE_PUBLISH.md) 导入平台。
 既有原实例和已保存镜像保留，新的软件包通过 GitHub 发行页提供。
+
+## AutoDL image.1 / V 0.4.2
+
+公开镜像母版 `AstrAutoAnima-0.5.2-1.44-V042` 含 G 组 4,000 条、V 国风完整卡 193,339 条、
+角色词典 21,051 条，以及 Studio 0.25.0。2026-10-25 的 RTX 5090 全新实例通过一键恢复、
+独立应用凭据、首次登录改密与重启、OpenAPI、1024×1536 基础生图及 Hub 图片下载验收。
+首次恢复到完成基础首图约 3.5 分钟。
+
+镜像源码提交 `6bb7d6d81f8de1585885f5fc72ce6dd99ba4249e`；
+载荷 SHA256 `416ca962fc1c78c024dce0396775f1991184dc630d60e783e7a4b5cefa61dbf9`。
+完整验收记录位于 `docs/acceptance/AUTODL_0.5.2-1.44_IMAGE1.json`。

@@ -130,3 +130,7 @@ scripts/                发布前检查与辅助脚本
 
 本仓库自有代码使用 [MIT License](LICENSE)。第三方软件、模型、LoRA、提示词和生成内容不因
 本仓库许可证而改变其原有授权；请逐项检查 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+
+## 反馈与交流
+
+使用中遇到问题，欢迎在 bilibili 联系 **ケモミミロリコン**，附上组件版本、操作步骤和报错截图。

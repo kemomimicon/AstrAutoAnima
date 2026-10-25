@@ -17,6 +17,7 @@ class MaterialsTests(unittest.TestCase):
         self.root = Path(self.temp.name)
         names = list(materials.DOCS) + [
             "docs/PUBLICATION_0.5.2-1.44.md",
+            "tools/autodl_image_052144/README.zh-CN.md",
             "examples/autodl_image_acceptance.pending.json",
             "tools/autodl_public_image_20261025/public_probe.py",
             "tools/autodl_public_image_20261025/Open-AAA-Tunnel.ps1",
