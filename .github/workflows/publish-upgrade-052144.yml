@@ -1,0 +1,62 @@
+name: publish-upgrade-052144
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: 0547052e13370177c7ae478cb8484aef145c13cb
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Download the published pinned component baseline
+        run: |
+          mkdir -p "$RUNNER_TEMP/input" "$RUNNER_TEMP/output"
+          gh release download v0.5.2-1.44 --repo kemomimicon/AstrAutoAnima --dir "$RUNNER_TEMP/input" --pattern 'AstrAutoAnima-0.5.2-1.44-install.2-complete.zip'
+      - name: Build preserving-data Windows and Linux upgrade patches
+        run: |
+          python -B scripts/build_upgrade_patches.py --baseline "$RUNNER_TEMP/input/AstrAutoAnima-0.5.2-1.44-install.2-complete.zip" --output "$RUNNER_TEMP/output"
+          python -B scripts/verify_release_archives.py "$RUNNER_TEMP/output"
+      - name: Extract and verify real patch payloads
+        run: |
+          python -B - <<'PY'
+          import importlib.util,json,os,sys
+          from pathlib import Path
+          sys.path.insert(0,'scripts')
+          from build_platform_full_suites import read_zip
+          from verify_release_archives import check
+          temp=Path(os.environ['RUNNER_TEMP'])
+          for platform in ['Windows','Linux']:
+              root=temp/('patch-'+platform);root.mkdir()
+              entries=read_zip((temp/'output'/f'AstrAutoAnima-{platform}-Update-to-0.5.2-1.44.zip').read_bytes(),True)
+              for name,data in entries.items():
+                  p=root/name;p.parent.mkdir(parents=True,exist_ok=True);p.write_bytes(data)
+              spec=importlib.util.spec_from_file_location('patch_'+platform,root/'update.py');module=importlib.util.module_from_spec(spec);sys.modules[spec.name]=module;spec.loader.exec_module(module)
+              module.payload_files(root/'payload')
+              for p in root.rglob('*.zip'):assert not check(p)
+              print('PASS actual payload',platform)
+          PY
+          find "$RUNNER_TEMP/patch-Linux" -name '*.sh' -exec sh -n '{}' \;
+      - name: Real fixture upgrade, Hub startup, data preservation and rollback
+        run: |
+          python -B scripts/smoke_upgrade_patch.py --patch "$RUNNER_TEMP/patch-Linux" --work "$RUNNER_TEMP/upgrade-smoke"
+          cp "$RUNNER_TEMP/upgrade-smoke/upgrade-smoke-result.json" "$RUNNER_TEMP/output/UPDATE_PATCH_ACCEPTANCE.json"
+          cp docs/UPGRADE_0.5.2-1.44.md "$RUNNER_TEMP/output/UPGRADE_README.md"
+      - name: Publish upgrade patches and integrity records
+        working-directory: ${{ runner.temp }}/output
+        run: |
+          gh release upload v0.5.2-1.44 --repo kemomimicon/AstrAutoAnima --clobber ./*.zip ./*.sha256.txt ./UPDATE_SHA256SUMS.txt ./update-assets.json ./UPDATE_PATCH_ACCEPTANCE.json ./UPGRADE_README.md
