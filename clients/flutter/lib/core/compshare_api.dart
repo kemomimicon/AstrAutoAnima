@@ -28,6 +28,10 @@ class CompShareConfig {
 }
 
 class CompShareConfigStore {
+  CompShareConfigStore({this.scope = ''});
+  final String scope;
+  String _key(String value) =>
+      scope.isEmpty ? value : '${value}_${sha256.convert(utf8.encode(scope))}';
   static const _publicKey = 'compshare_public_key';
   static const _privateKey = 'compshare_private_key';
   static const _region = 'compshare_region';
@@ -38,21 +42,21 @@ class CompShareConfigStore {
   Future<CompShareConfig> load() async {
     final values = await _storage.readAll();
     return CompShareConfig(
-      publicKey: values[_publicKey] ?? '',
-      privateKey: values[_privateKey] ?? '',
-      region: values[_region] ?? '',
-      zone: values[_zone] ?? '',
-      uhostId: values[_uhostId] ?? '',
+      publicKey: values[_key(_publicKey)] ?? '',
+      privateKey: values[_key(_privateKey)] ?? '',
+      region: values[_key(_region)] ?? '',
+      zone: values[_key(_zone)] ?? '',
+      uhostId: values[_key(_uhostId)] ?? '',
     );
   }
 
   Future<void> save(CompShareConfig config) async {
     await Future.wait([
-      _storage.write(key: _publicKey, value: config.publicKey),
-      _storage.write(key: _privateKey, value: config.privateKey),
-      _storage.write(key: _region, value: config.region),
-      _storage.write(key: _zone, value: config.zone),
-      _storage.write(key: _uhostId, value: config.uhostId),
+      _storage.write(key: _key(_publicKey), value: config.publicKey),
+      _storage.write(key: _key(_privateKey), value: config.privateKey),
+      _storage.write(key: _key(_region), value: config.region),
+      _storage.write(key: _key(_zone), value: config.zone),
+      _storage.write(key: _key(_uhostId), value: config.uhostId),
     ]);
   }
 }

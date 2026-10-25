@@ -20,6 +20,7 @@ EMPTY_PRESETS: dict[str, Any] = {
 
 DIRECTIVE_NAMES = {
     "套组": "task_suite",
+    "起手": "random_subject_tag",
     "主光": "lighting_key",
     "效果光": "lighting_effect",
     "主材质": "material_primary",
@@ -92,9 +93,16 @@ def empty_presets() -> dict[str, Any]:
     return json.loads(json.dumps(EMPTY_PRESETS, ensure_ascii=False))
 
 
+class PresetDocument(dict):
+    def __init__(self, data):
+        import copy
+        super().__init__(data)
+        self.baseline = copy.deepcopy(data)
+
+
 def load_presets(path: Path) -> dict[str, Any]:
     if not path.exists():
-        return empty_presets()
+        return PresetDocument(empty_presets())
     try:
         with path.open("r", encoding="utf-8-sig") as file:
             data = json.load(file)
@@ -110,19 +118,45 @@ def load_presets(path: Path) -> dict[str, Any]:
         data["characters"], dict
     ):
         raise WorkflowError("LoRA 预设中的 styles/characters 必须是对象。")
-    return data
+    return PresetDocument(data)
 
 
 def save_presets(path: Path, data: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_suffix(path.suffix + ".tmp")
     try:
-        temporary.write_text(
-            json.dumps(data, ensure_ascii=False, indent=2) + "\n",
-            encoding="utf-8",
-        )
-        temporary.replace(path)
-    except OSError as exc:
+        from .preset_lock import preset_file_lock
+    except ImportError:  # standalone deployment/configuration utilities
+        from preset_lock import preset_file_lock
+    import copy
+    import secrets
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with preset_file_lock(path):
+            merged = copy.deepcopy(dict(data))
+            if isinstance(data, PresetDocument):
+                current = load_presets(path)
+                merged = copy.deepcopy(dict(current))
+                missing = object()
+                for section in ('styles', 'characters'):
+                    before, desired = data.baseline.get(section, {}), data.get(section, {})
+                    for name in before.keys() | desired.keys():
+                        old, new = before.get(name, missing), desired.get(name, missing)
+                        if old == new:
+                            continue
+                        now = current.get(section, {}).get(name, missing)
+                        if now != old and now != new:
+                            raise WorkflowError(f'预设 {name} 本身已被修改，未覆盖；请重新查看后提交')
+                        if new is missing:
+                            merged.setdefault(section, {}).pop(name, None)
+                        else:
+                            merged.setdefault(section, {})[name] = new
+            temporary = path.with_name('.' + path.name + '.' + secrets.token_hex(8) + '.tmp')
+            temporary.write_text(json.dumps(merged, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+            temporary.replace(path)
+            if isinstance(data, PresetDocument):
+                data.clear()
+                data.update(merged)
+                data.baseline = copy.deepcopy(merged)
+    except (OSError, TimeoutError) as exc:
         raise WorkflowError(f"无法保存 LoRA 预设：{exc}") from exc
 
 
@@ -360,11 +394,9 @@ def select_character_variant(character: dict[str, Any] | None, variant_id: str) 
         result["prompt"] = default_prompt
         result.pop("selected_variant", None)
         return result
-    if not isinstance(result.get("lora"), dict):
-        raise WorkflowError("角色造型仅适用于角色 LoRA 预设。")
     variants = result.get("variants", [])
     matches = [row for row in variants if isinstance(row, dict) and row.get("id") == variant_id] if isinstance(variants, list) else []
-    if len(matches) != 1 or not isinstance(matches[0].get("prompt"), str) or not matches[0]["prompt"].strip():
+    if len(matches) != 1 or not isinstance(matches[0].get("prompt"), str) or not matches[0]["prompt"].strip(" ,\n\t"):
         raise WorkflowError(f"角色造型不存在、重复或触发词为空：{variant_id}")
     result["_default_prompt"] = default_prompt
     result["prompt"] = matches[0]["prompt"].strip(" ,\n\t")
@@ -445,32 +477,6 @@ def _bypass_lora_node(workflow: dict[str, Any], node_id: str) -> None:
     del workflow[str(node_id)]
 
 
-def _slotless_style_sources(workflow, sampler_node_id, positive_node_id, negative_node_id):
-    """Resolve an unambiguous no-LoRA graph without assuming model node IDs."""
-    if any(isinstance(node, dict) and "lora" in str(node.get("class_type", "")).casefold()
-           for node in workflow.values()):
-        raise WorkflowError("工作流包含 LoRA 节点，但未配置与之匹配的旧槽位；请填写实际节点 ID。")
-
-    def inputs(node_id):
-        node = workflow.get(str(node_id))
-        values = node.get("inputs") if isinstance(node, dict) else None
-        if not isinstance(values, dict):
-            raise WorkflowError(f"动态画风无法定位节点 {node_id} 的 inputs，请核对采样器及提示词节点配置。")
-        return values
-
-    model = inputs(sampler_node_id).get("model")
-    clip = inputs(positive_node_id).get("clip")
-    for link in (model, clip):
-        if not (isinstance(link, list) and len(link) == 2
-                and isinstance(link[0], str) and link[0] in workflow
-                and isinstance(workflow[link[0]], dict)
-                and type(link[1]) is int and link[1] >= 0):
-            raise WorkflowError("动态画风无法从采样器和正向提示词节点定位基础 MODEL/CLIP 接线。")
-    if negative_node_id and inputs(negative_node_id).get("clip") != clip:
-        raise WorkflowError("正负提示词节点的 CLIP 接线不一致，无法安全插入动态画风；请先核对工作流。")
-    return list(model), list(clip)
-
-
 def apply_lora_plan(
     workflow: dict[str, Any],
     *,
@@ -511,9 +517,32 @@ def apply_lora_plan(
                 for node_id in reversed(style_slot_ids):
                     _bypass_lora_node(workflow, node_id)
             else:
-                base_model, base_clip = _slotless_style_sources(
-                    workflow, sampler_node_id, positive_node_id, negative_node_id
-                )
+                # Quick workflows have no legacy LoRA slots. Use their existing
+                # MODEL/CLIP connections as the head of the per-task dynamic chain.
+                if any(
+                    isinstance(node, dict) and "lora" in str(node.get("class_type", "")).casefold()
+                    for node in workflow.values()
+                ):
+                    raise WorkflowError("工作流包含 LoRA 节点，但未配置与之匹配的旧槽位；请填写实际节点 ID。")
+                sampler_inputs = workflow.get(str(sampler_node_id), {}).get("inputs", {})
+                positive_inputs = workflow.get(str(positive_node_id), {}).get("inputs", {})
+                base_model = sampler_inputs.get("model") if isinstance(sampler_inputs, dict) else None
+                base_clip = positive_inputs.get("clip") if isinstance(positive_inputs, dict) else None
+                if not all(
+                    isinstance(link, list)
+                    and len(link) == 2
+                    and isinstance(link[0], str) and link[0] in workflow
+                    and isinstance(workflow[link[0]], dict)
+                    and type(link[1]) is int and link[1] >= 0
+                    for link in (base_model, base_clip)
+                ):
+                    raise WorkflowError("动态画风无法从采样器和正向提示词节点定位基础 MODEL/CLIP 接线。")
+                base_model, base_clip = list(base_model), list(base_clip)
+                negative_inputs = workflow.get(str(negative_node_id), {}).get("inputs", {})
+                if negative_node_id and (
+                    not isinstance(negative_inputs, dict) or negative_inputs.get("clip") != base_clip
+                ):
+                    raise WorkflowError("正负提示词节点的 CLIP 连线不一致，无法安全插入动态画风；请先核对工作流。")
             tail_model, tail_clip = base_model, base_clip
             for index, lora in enumerate(loras):
                 node_id = str(dynamic_style_node_id_start + index)

@@ -1,44 +1,47 @@
 # AstrAutoAnima
 
-> **AutoDL 公开镜像准备中，尚未发布。** 候选镜像基线为 `0.5.2-beta.1/build44`，
-> 与下面现有 `0.5.0-beta.2` 下载包不同。本次仅准备镜像文档和只读检查工具，
-> 不升级本分支的运行时代码，也不表示克隆验收已通过。
+> **0.5.2-1.44 新版发布候选，计划与视频和 AutoDL 镜像同步发布，目前尚未上线。**
+> 内部版本为 `0.5.2-beta.1`、客户端 `+44`。本分支已整合完整 build44 候选源码与公开发布材料，
+> 保留既有兼容补丁；本地代码检查不能代替新实例恢复、真实首图和镜像隐私验收。
 > 见 [镜像使用说明](docs/AUTODL_IMAGE.md)、[公开发布检查表](docs/AUTODL_IMAGE_PUBLISH.md)
-> 和 [平台发布文案草稿](docs/AUTODL_ART_DESCRIPTION.md)。不要用本分支旧版安装器覆盖镜像恢复目录。
+> 和 [平台发布文案草稿](docs/AUTODL_ART_DESCRIPTION.md)。不要对镜像恢复目录重复运行安装器。
 
-> **2026-10-17 恢复发布：0.5.0-beta.2-remake.2。** 据维护者最新反馈，此前 Windows `hostbuf_file_reader_read failed` 问题未复现为补丁缺陷，目前无证据将其归因于本补丁；恢复原版本及附件，不宣称已修复该 ComfyUI 错误。保持 Beta 验证边界。已被替代的 remake.1 继续保留为草稿。[下载发布包](https://github.com/kemomimicon/AstrAutoAnima/releases/tag/v0.5.0-beta.2-remake.2) · [升级说明](docs/REMAKE_HOTFIX.md)。已有用户优先使用代码补丁，不覆盖个人词库与配置；已经安装 remake.2 的用户无需重复更新。
+> 历史补丁：0.5.0-beta.2-remake.2 的恢复发布与 `hostbuf_file_reader_read failed` 排查边界见
+> [原说明](docs/REMAKE_HOTFIX.md)；不宣称本项目已修复该 ComfyUI 后端错误。
 
-> Windows 紧急补丁：**0.5.0-beta.2-windows.2**。新增按目标 ComfyUI 枚举匹配 LoRA 路径，修复“列表中有但 Value not in list”；包含 windows.1 的假休眠、反推保存、词典和清理保护及此前 Quick 动态画风修复。已部署用户请按 [最小补丁说明](docs/WINDOWS_COMPAT_HOTFIX.md) 更新，不要覆盖个人数据。
+> 旧 Windows 兼容补丁来源见 [历史说明](docs/WINDOWS_COMPAT_HOTFIX.md)。本候选继续保留
+> LoRA 枚举路径匹配、Windows 休眠隔离、反推路径、词典和图片清理保护，不覆盖个人数据。
 
 面向 AstrBot + QQ/NapCat + ComfyUI/Anima 的完整跑图桥接套件。它把 QQ 指令、动态角色/画风
 LoRA、分级随机提示词、图片反推、HQ/放大精修、远程 Hub 和 Windows/Android 客户端组合为
 一套可在云服务器或本地计算机部署的方案。
 
-> 当前为 `0.5.0-beta.2` 公开测试版（不是正式稳定版）。不含炼丹炉 / LoRA Studio 扩展接口、代理、会话或客户端入口。
+> 当前本地候选为 `0.5.2-1.44`（内部 `0.5.2-beta.1/build44`），不是正式稳定版或已发布版本。
+> 包含 AnimaLoraStudio 0.25.0 的可选接入；上游项目及连接器适用独立许可，不是 AAA 自研训练引擎。
 > HQ、Refine、Reverse 等高级工作流仍为实验性组件，
 > 请先在测试群和备份配置上验证，再迁移生产环境。
 
 ## 完整发行整合包
 
-需要一次下载全部组件，请在 [0.5.0-beta.2 发布页](https://github.com/kemomimicon/AstrAutoAnima/releases/tag/v0.5.0-beta.2)
-选择 `AstrAutoAnima-0.5.0-beta.2-complete.zip`。完整包按用途分类收录 Windows/Linux 懒人包、
-各端客户端、服务组件、工具、源码、授权美术和中文文档；原有分包保持不变。
-使用前阅读 [完整包导航](docs/COMPLETE_SUITE.md)，完整解压后按自己的平台选择内部包，**无需全部安装**。
-包内附离线校验脚本，不包含模型权重、第三方环境或私人配置，仍按 Beta 验证边界发布。
+新版完整包、视频与公开镜像将一起发布；候选未验收前不提供虚假的新版本下载链接。
+已有 [0.5.0-beta.2 发布页](https://github.com/kemomimicon/AstrAutoAnima/releases/tag/v0.5.0-beta.2)
+属于历史版本，不能用作本候选镜像的完整对应源码或新版下载入口。
+软件发行包保持模型、私人词库和配置不入包；云镜像预装的第三方环境/公共资源另按授权核对，
+两者内容不同。阅读 [完整包导航](docs/COMPLETE_SUITE.md) 和 [候选镜像说明](docs/AUTODL_IMAGE.md)。
 
 ## 组件版本
 
 **安装后不会配置？** 使用独立的 [首张图启动向导 1.1](https://github.com/kemomimicon/AstrAutoAnima/releases/tag/first-run-wizard-v1.1)：
 Windows 双击运行，九步完成 Key 验证、投递目标、用户令牌、词库、可选角色词典装配，以及通过现有 Hub 提交/查询/预览第一张图。
 含离线中文工具说明；不含密钥、私人词库、模型或训练接口。先阅读 [新手操作说明](docs/FIRST_RUN_WIZARD.md)。
-它是已有 0.5.0-beta.2 安装的补充工具，不替换原客户端和完整包；无桌面 Linux 仍使用原管理方式。
+该链接为历史 0.5.0-beta.2 的补充工具，不是本次新版向导下载；无桌面 Linux 使用终端/浏览器流程。
 
-| 组件 | 公开包版本 | 作用 |
+| 组件 | 本地候选版本 | 作用 |
 | --- | --- | --- |
-| AstrBot 插件 | `0.5.0-beta.2` | QQ 指令、工作流调度、预设、提示词池、任务记录 |
-| Hub 服务 | `0.5.0b2` | 令牌鉴权、远程任务、预设/提示词/图片记录 API |
-| Flutter 客户端 | `0.5.0-beta.2+36` | Web/Windows/Android 管理和远程生图 |
-| 工作流包 | `0.8.0-beta.1-public` | 最新模板脱敏导出，不含独立训练服务 |
+| AstrBot 插件 | `0.5.2-beta.1` | QQ 指令、工作流调度、预设、提示词池、任务记录 |
+| Hub 服务 | `0.5.2b1` | 令牌鉴权、远程任务、预设/提示词/图片记录 API |
+| Flutter 客户端 | `0.5.2-beta.1+44` | Web/Windows/Android 管理和远程生图 |
+| 工作流包 | `0.8.0-beta.1-public` | 模板脱敏导出；模型和独立 Studio 按需配置 |
 | 自定义节点 | Workflow Tools | 训练数据质检、反推编译与记录保存 |
 | 工作流 | HQ / Refine / Reverse / Training Beta | 多工作流模板；安装前必须填写模型占位符 |
 

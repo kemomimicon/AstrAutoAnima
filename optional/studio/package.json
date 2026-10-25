@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "id": "anima-lora-studio",
+  "optional": true,
+  "default_enabled": false,
+  "repository": "https://github.com/WalkingMeatAxolotl/AnimaLoraStudio",
+  "upstream_commit": "d049ccfafbd3ce19cb65570e7172f84ae2195e61",
+  "studio_compatibility": ">=0.25,<0.26",
+  "connector_version": "0.1.1",
+  "connector_sha256": "18aba43f6c9fc07a62c7a1e63d8964ea90d5fdd689e31bb1a0615334d9c3ba53",
+  "license": "GPL-3.0; component-specific Apache-2.0",
+  "models_included": false,
+  "automatic_start": false
+}

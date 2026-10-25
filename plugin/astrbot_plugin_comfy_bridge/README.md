@@ -615,7 +615,7 @@ max_dynamic_style_loras=16
 
 动态模式会在每次任务的内存工作流中创建标准 `LoraLoader` 链，不受原四槽数量限制，也不会修改磁盘上的工作流 JSON。
 
-`style_lora_node_ids` 用于已有槽位工作流的基础 MODEL/CLIP 定位。自 `0.5.0-beta.2-lora.1` 起，无 LoRA 节点的 Quick 在 dynamic 模式可留空，插件从采样器 MODEL 与提示词 CLIP 接线创建动态链；固定模式仍需真实槽位。存在未配置旧 LoRA 或接线不一致时会报错，避免重复叠加。更新方法见仓库 `docs/QUICK_LORA_HOTFIX.md`。
+旧工作流若确实包含 LoRA 槽位，可在 `style_lora_node_ids` 中填写实际节点 ID；插件会在本次任务中旁路旧槽，再接入动态链。懒人包生成的 `AAA_Quick_Local_api.json` 没有 LoRA 槽位，应将该配置留空；动态模式会直接从采样器的 MODEL 和正向提示词编码节点的 CLIP 接线创建链。不要给 Quick 工作流填写不存在的 `46,47,48,49`。固定槽位模式仍要求真实槽位节点。
 
 如需完全沿用旧四槽工作流，可设置：
 

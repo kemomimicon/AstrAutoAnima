@@ -1,7 +1,10 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'features/gallery/gallery_page.dart';
+import 'features/extensions/extension_management_page.dart';
+import 'features/platforms/platform_switchboard_page.dart';
 
 import 'core/app_edition.dart';
 import 'core/admin_navigation.dart';
@@ -12,6 +15,9 @@ import 'core/notification_service.dart';
 import 'core/server_online_tracker.dart';
 import 'core/session_store.dart';
 import 'features/connection/connection_page.dart';
+import 'features/connection/workstation_choice_page.dart';
+import 'features/connection/instance_connections_page.dart';
+import 'features/users/chat_groups_page.dart';
 import 'features/characters/character_dictionary_page.dart';
 import 'features/cloud/compshare_instance_page.dart';
 import 'features/dashboard/dashboard_page.dart';
@@ -35,6 +41,7 @@ class AstrAutoAnimaApp extends StatefulWidget {
     required this.notificationService,
     required this.initialSession,
     this.edition = AppEdition.unified,
+    this.apiFactory,
     super.key,
   });
 
@@ -42,6 +49,7 @@ class AstrAutoAnimaApp extends StatefulWidget {
   final NotificationService notificationService;
   final HubSession initialSession;
   final AppEdition edition;
+  final HubApi Function(HubSession)? apiFactory;
 
   @override
   State<AstrAutoAnimaApp> createState() => _AstrAutoAnimaAppState();
@@ -49,6 +57,42 @@ class AstrAutoAnimaApp extends StatefulWidget {
 
 class _AstrAutoAnimaAppState extends State<AstrAutoAnimaApp> {
   late HubSession _session = widget.initialSession;
+  HubSession? _connectionDraft;
+  WindowsWorkspaceMode? _selectedWorkspace;
+  String? _selectionError;
+  bool _choosing = false;
+  int _sessionEpoch = 0;
+
+  Future<void> _activateProfile(HubSession session) async {
+    if (widget.edition.isService ||
+        (!_showChoice && widget.edition.isAdmin && !session.isAdmin) ||
+        (session.deployment == HubDeploymentMode.local && !_showChoice)) {
+      throw const HubApiException('此客户端模式不允许切换到该连接；当前连接未修改。');
+    }
+    final workspace = session.deployment == HubDeploymentMode.local
+        ? WindowsWorkspaceMode.local
+        : session.isAdmin
+            ? WindowsWorkspaceMode.onlineAdmin
+            : WindowsWorkspaceMode.onlineService;
+    if (_showChoice) {
+      await widget.store.saveForWorkspace(workspace, session);
+    } else {
+      await widget.store.save(session);
+    }
+    if (!mounted) return;
+    setState(() {
+      _selectedWorkspace = _showChoice ? workspace : null;
+      _session = session;
+      _connectionDraft = null;
+      _selectionError = null;
+      _sessionEpoch++;
+    });
+  }
+
+  bool get _showChoice =>
+      !kIsWeb &&
+      defaultTargetPlatform == TargetPlatform.windows &&
+      !widget.edition.isService;
 
   @override
   void initState() {
@@ -70,15 +114,97 @@ class _AstrAutoAnimaAppState extends State<AstrAutoAnimaApp> {
   }
 
   Future<void> _connected(HubSession session) async {
-    await widget.store.save(session);
-    if (mounted) setState(() => _session = session);
+    if (_showChoice && _selectedWorkspace != null) {
+      await widget.store.saveForWorkspace(_selectedWorkspace!, session);
+    } else {
+      await widget.store.save(session);
+    }
+    if (mounted) {
+      setState(() {
+        _session = session;
+        _connectionDraft = null;
+        _selectionError = null;
+        _sessionEpoch++;
+      });
+    }
   }
 
   Future<void> _disconnect() async {
-    await widget.store.clear();
-    if (mounted) {
-      setState(() => _session = const HubSession(baseUrl: '', token: ''));
+    if (_showChoice && _selectedWorkspace != null) {
+      await widget.store.clearForWorkspace(_selectedWorkspace!);
+    } else {
+      await widget.store.clearForDeployment(_session.deployment);
     }
+    if (mounted) {
+      setState(() {
+        _sessionEpoch++;
+        _session = HubSession(
+            baseUrl: '',
+            token: '',
+            mode: _selectedWorkspace?.access ?? _session.mode,
+            deployment: _selectedWorkspace?.deployment ?? _session.deployment);
+      });
+    }
+  }
+
+  Future<void> _selectWorkspace(WindowsWorkspaceMode workspace) async {
+    if (_choosing) return;
+    setState(() => _choosing = true);
+    String? error;
+    HubSession session;
+    try {
+      session = await widget.store.loadForWorkspace(workspace);
+    } catch (_) {
+      session = HubSession(
+          baseUrl: '',
+          token: '',
+          mode: workspace.access,
+          deployment: workspace.deployment);
+      error = '读取已保存的连接失败，请重新填写地址和令牌。';
+    }
+    if (session.isConfigured) {
+      final api = HubApi(baseUrl: session.baseUrl, token: session.token);
+      try {
+        final mode = await api.getExecutionMode();
+        if (mode != workspace.deployment.name) {
+          error = '地址当前运行 $mode 模式，请核对所选工作站。';
+        } else if (session.isAdmin) {
+          await api.getWorkstationStatus();
+        } else {
+          await api.getLitePresets();
+        }
+      } on HubApiException catch (exc) {
+        error = '已保存的连接暂不可用：${exc.message}';
+      } finally {
+        api.dispose();
+      }
+    }
+    if (mounted) {
+      setState(() {
+        _choosing = false;
+        _selectedWorkspace = workspace;
+        _selectionError = error;
+        _connectionDraft = error == null ? null : session;
+        _session = error == null
+            ? session
+            : HubSession(
+                baseUrl: '',
+                token: '',
+                mode: workspace.access,
+                deployment: workspace.deployment);
+        _sessionEpoch++;
+      });
+    }
+  }
+
+  void _switchWorkspace() {
+    setState(() {
+      _selectedWorkspace = null;
+      _selectionError = null;
+      _connectionDraft = null;
+      _session = const HubSession(baseUrl: '', token: '');
+      _sessionEpoch++;
+    });
   }
 
   @override
@@ -87,34 +213,69 @@ class _AstrAutoAnimaAppState extends State<AstrAutoAnimaApp> {
       seedColor: const Color(0xFF5B6CFF),
       brightness: Brightness.light,
     );
-    final requiredMode = switch (widget.edition) {
-      AppEdition.admin => HubAccessMode.admin,
-      AppEdition.service => HubAccessMode.lite,
-      AppEdition.unified => null,
-    };
+    final requiredMode = _showChoice && _selectedWorkspace != null
+        ? _selectedWorkspace!.access
+        : switch (widget.edition) {
+            AppEdition.admin => HubAccessMode.admin,
+            AppEdition.service => HubAccessMode.lite,
+            AppEdition.unified => null,
+          };
     final sessionAllowed = _session.isConfigured &&
-        (requiredMode == null || _session.mode == requiredMode);
-    final home = sessionAllowed
-        ? _session.isAdmin
-            ? HubShell(
-                session: _session,
-                store: widget.store,
-                notificationService: widget.notificationService,
-                onDisconnect: _disconnect,
-              )
-            : LiteShell(
-                session: _session,
-                store: widget.store,
-                notificationService: widget.notificationService,
-                onDisconnect: _disconnect,
-              )
-        : ConnectionPage(
-            onConnected: _connected,
-            fixedMode: requiredMode,
-            offlineTool:
-                widget.edition.isAdmin ? const CompShareInstancePage() : null,
-          );
+        (requiredMode == null || _session.mode == requiredMode) &&
+        (_selectedWorkspace == null ||
+            _session.deployment == _selectedWorkspace!.deployment);
+    final home = _showChoice && _selectedWorkspace == null
+        ? WorkstationChoicePage(onSelect: _selectWorkspace, loading: _choosing)
+        : sessionAllowed
+            ? _session.deployment == HubDeploymentMode.local
+                ? LiteShell(
+                    session: _session,
+                    store: widget.store,
+                    notificationService: widget.notificationService,
+                    onDisconnect: _disconnect,
+                    onActivateProfile:
+                        widget.edition.isService ? null : _activateProfile,
+                    apiFactory: widget.apiFactory,
+                    onSwitch: _showChoice ? _switchWorkspace : null,
+                  )
+                : _session.isAdmin
+                    ? HubShell(
+                        session: _session,
+                        store: widget.store,
+                        notificationService: widget.notificationService,
+                        onDisconnect: _disconnect,
+                        onActivateProfile:
+                            widget.edition.isService ? null : _activateProfile,
+                        apiFactory: widget.apiFactory,
+                        onSwitch: _showChoice ? _switchWorkspace : null,
+                      )
+                    : LiteShell(
+                        session: _session,
+                        store: widget.store,
+                        notificationService: widget.notificationService,
+                        onDisconnect: _disconnect,
+                        onActivateProfile:
+                            widget.edition.isService ? null : _activateProfile,
+                        apiFactory: widget.apiFactory,
+                        onSwitch: _showChoice ? _switchWorkspace : null,
+                      )
+            : ConnectionPage(
+                onConnected: _connected,
+                fixedMode: requiredMode,
+                fixedDeployment:
+                    _showChoice ? _selectedWorkspace?.deployment : null,
+                onBack: _showChoice ? _switchWorkspace : null,
+                initialSession: _connectionDraft,
+                initialError: _selectionError,
+                offlineTool:
+                    widget.edition.isAdmin && requiredMode != HubAccessMode.lite
+                        ? const CompShareInstancePage()
+                        : null,
+              );
     return MaterialApp(
+      // Recreate navigator AND shell on switch. Old dialogs, routes, IndexedStack
+      // histories, polling timers and late responses cannot survive into B.
+      key: ValueKey('hub-session-$_sessionEpoch'),
       themeMode: appThemeMode.value,
       debugShowCheckedModeBanner: false,
       title: widget.edition.title,
@@ -159,6 +320,9 @@ class LiteShell extends StatefulWidget {
     required this.store,
     required this.notificationService,
     required this.onDisconnect,
+    this.onSwitch,
+    this.onActivateProfile,
+    this.apiFactory,
     super.key,
   });
 
@@ -166,6 +330,9 @@ class LiteShell extends StatefulWidget {
   final SessionStore store;
   final NotificationService notificationService;
   final Future<void> Function() onDisconnect;
+  final VoidCallback? onSwitch;
+  final Future<void> Function(HubSession)? onActivateProfile;
+  final HubApi Function(HubSession)? apiFactory;
 
   @override
   State<LiteShell> createState() => _LiteShellState();
@@ -186,13 +353,15 @@ class _LiteShellState extends State<LiteShell> {
   @override
   void initState() {
     super.initState();
-    _api = HubApi(baseUrl: widget.session.baseUrl, token: widget.session.token);
+    _api = widget.apiFactory?.call(widget.session) ??
+        HubApi(baseUrl: widget.session.baseUrl, token: widget.session.token);
     unawaited(_loadServerOnlineReminder());
   }
 
   @override
   void dispose() {
     _serverMonitorTimer?.cancel();
+    _api.dispose();
     _characterRequest.dispose();
     super.dispose();
   }
@@ -263,6 +432,7 @@ class _LiteShellState extends State<LiteShell> {
       _checkingServer = false;
     }
     final shouldNotify = _serverTracker.update(online);
+    if (!mounted) return;
     if (mounted && _serverReachable != online) {
       setState(() => _serverReachable = online);
     }
@@ -283,16 +453,21 @@ class _LiteShellState extends State<LiteShell> {
 
   @override
   Widget build(BuildContext context) {
+    final localMode = widget.session.deployment == HubDeploymentMode.local;
     final pages = [
       LiteGeneratePage(
         api: _api,
+        localMode: localMode,
         characterRequest: _characterRequest,
         serverOnlineReminderEnabled: _serverOnlineReminderEnabled,
         serverReachable: _serverReachable,
         onServerOnlineReminderChanged: _setServerOnlineReminder,
       ),
-      LiteJobHistoryPage(api: _api),
-      PresetSections(api: _api, presets: PersonalPresetsPage(api: _api)),
+      LiteJobHistoryPage(api: _api, localMode: localMode),
+      localMode
+          ? PresetsPage(api: _api)
+          : PresetSections(api: _api, presets: PersonalPresetsPage(api: _api)),
+      if (localMode) LoraLibraryPage(api: _api),
       LitePromptLibraryPage(api: _api),
       CharacterDictionaryPage(
         api: _api,
@@ -309,7 +484,7 @@ class _LiteShellState extends State<LiteShell> {
         },
       ),
     ];
-    const destinations = [
+    final destinations = [
       NavigationDestination(
         icon: CourtyardIcon(Icons.auto_awesome_outlined),
         selectedIcon: CourtyardIcon(Icons.auto_awesome),
@@ -325,6 +500,11 @@ class _LiteShellState extends State<LiteShell> {
         selectedIcon: CourtyardIcon(Icons.tune),
         label: '预设',
       ),
+      if (localMode)
+        const NavigationDestination(
+          icon: CourtyardIcon(Icons.extension_outlined),
+          label: 'LoRA',
+        ),
       NavigationDestination(
         icon: CourtyardIcon(Icons.library_books_outlined),
         selectedIcon: CourtyardIcon(Icons.library_books),
@@ -343,6 +523,20 @@ class _LiteShellState extends State<LiteShell> {
         return Scaffold(
           drawer: SettingsDrawer(
               onDisconnect: widget.onDisconnect,
+              onSwitch: widget.onSwitch,
+              onConnections: widget.onActivateProfile == null
+                  ? null
+                  : () {
+                      Navigator.pop(context);
+                      Navigator.push(
+                          context,
+                          MaterialPageRoute<void>(
+                              builder: (_) => InstanceConnectionsPage(
+                                  store: widget.store,
+                                  current: widget.session,
+                                  onActivate: widget.onActivateProfile!)));
+                    },
+              localMode: localMode,
               onGallery: () {
                 Navigator.pop(context);
                 Navigator.push(
@@ -351,8 +545,14 @@ class _LiteShellState extends State<LiteShell> {
                         builder: (_) => GalleryPage(api: _api)));
               }),
           appBar: AppBar(
-            title: const Text('AstrAutoAnima Lite'),
+            title: Text(localMode ? '本机工作站' : 'AstrAutoAnima Lite'),
             actions: [
+              if (widget.onSwitch != null)
+                IconButton(
+                  tooltip: '切换工作站',
+                  onPressed: widget.onSwitch,
+                  icon: const Icon(Icons.swap_horiz),
+                ),
               if (wide)
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 8),
@@ -416,6 +616,9 @@ class HubShell extends StatefulWidget {
     required this.store,
     required this.notificationService,
     required this.onDisconnect,
+    this.onSwitch,
+    this.onActivateProfile,
+    this.apiFactory,
     super.key,
   });
 
@@ -423,12 +626,95 @@ class HubShell extends StatefulWidget {
   final SessionStore store;
   final NotificationService notificationService;
   final Future<void> Function() onDisconnect;
+  final VoidCallback? onSwitch;
+  final Future<void> Function(HubSession)? onActivateProfile;
+  final HubApi Function(HubSession)? apiFactory;
 
   @override
   State<HubShell> createState() => _HubShellState();
 }
 
 class _HubShellState extends State<HubShell> {
+  bool _chatGroupsAvailable = false;
+  Future<void> _loadCapabilities() async {
+    try {
+      final caps = await _api.capabilities();
+      if (mounted) {
+        setState(() {
+          _chatGroupsAvailable = caps['execution_mode'] == 'remote' &&
+              (caps['features'] as Map?)?['chat_groups'] == true;
+          _navigation.includeChatGroups = _chatGroupsAvailable;
+        });
+      }
+    } catch (_) {/* Older servers retain all existing basic navigation. */}
+  }
+
+  List<Map<String, dynamic>> _extensions = [];
+  bool _loadingExtensions = false;
+
+  Future<void> _refreshExtensions({bool notify = false}) async {
+    if (_loadingExtensions) return;
+    _loadingExtensions = true;
+    try {
+      final response = await _api.extensions();
+      final rows = (response['extensions'] as List? ?? [])
+          .whereType<Map>()
+          .map((e) => Map<String, dynamic>.from(e))
+          .where((e) =>
+              e['enabled'] == true &&
+              e['state'] != 'broken_package' &&
+              RegExp(r'^[a-z0-9]+(?:-[a-z0-9]+)*$').hasMatch('${e['id']}'))
+          .toList();
+      rows.sort((a, b) => '${a['id']}'.compareTo('${b['id']}'));
+      if (mounted) setState(() => _extensions = rows);
+    } catch (_) {
+      if (mounted) {
+        setState(() => _extensions = []);
+        if (notify) {
+          ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('扩展列表暂不可用；基础页面仍可使用。')));
+        }
+      }
+    } finally {
+      _loadingExtensions = false;
+    }
+  }
+
+  List<Widget> _extensionEntries() => [
+        if (widget.onActivateProfile != null)
+          ListTile(
+              key: const ValueKey('instances.connections'),
+              leading: const Icon(Icons.dns_outlined),
+              title: const Text('设备与实例连接'),
+              subtitle: const Text('切换当前 Hub · 不关闭远端任务'),
+              onTap: _openConnections),
+        ListTile(
+          key: const ValueKey('platform.switchboard'),
+          leading: const Icon(Icons.hub_outlined),
+          title: const Text('Bot 平台切换板'),
+          subtitle: const Text('QQ / Telegram / Discord'),
+          onTap: () {
+            _scaffoldKey.currentState?.closeDrawer();
+            Navigator.of(context).push(MaterialPageRoute<void>(
+                builder: (_) => PlatformSwitchboardPage(api: _api)));
+          },
+        ),
+        for (final extension in _extensions)
+          ListTile(
+            key: ValueKey('extension.${extension['id']}'),
+            leading: const Icon(Icons.science_outlined),
+            title: Text('${extension['name']}'),
+            subtitle: const Text('独立扩展'),
+            onTap: () {
+              _scaffoldKey.currentState?.closeDrawer();
+              Navigator.of(context).push(MaterialPageRoute<void>(
+                  builder: (_) => ExtensionManagementPage(
+                      api: _api,
+                      id: '${extension['id']}',
+                      name: '${extension['name']}')));
+            },
+          ),
+      ];
   final _navigation = AdminNavigation(includeStoragePreview: true);
   int get _index => _navigation.page;
   final _scaffoldKey = GlobalKey<ScaffoldState>();
@@ -436,6 +722,17 @@ class _HubShellState extends State<HubShell> {
   void _openSettings() {
     _scaffoldKey.currentState?.closeDrawer();
     _scaffoldKey.currentState?.openEndDrawer();
+  }
+
+  void _openConnections() {
+    _scaffoldKey.currentState?.closeDrawer();
+    _scaffoldKey.currentState?.closeEndDrawer();
+    Navigator.of(context).push(MaterialPageRoute<void>(
+        builder: (_) => InstanceConnectionsPage(
+            store: widget.store,
+            current: widget.session,
+            allowService: widget.onSwitch != null,
+            onActivate: widget.onActivateProfile!)));
   }
 
   final ServerOnlineTracker _serverTracker = ServerOnlineTracker();
@@ -449,16 +746,20 @@ class _HubShellState extends State<HubShell> {
   @override
   void initState() {
     super.initState();
-    _api = HubApi(
-      baseUrl: widget.session.baseUrl,
-      token: widget.session.token,
-    );
+    _api = widget.apiFactory?.call(widget.session) ??
+        HubApi(
+          baseUrl: widget.session.baseUrl,
+          token: widget.session.token,
+        );
     unawaited(_loadServerOnlineReminder());
+    unawaited(_refreshExtensions());
+    unawaited(_loadCapabilities());
   }
 
   @override
   void dispose() {
     _serverMonitorTimer?.cancel();
+    _api.dispose();
     super.dispose();
   }
 
@@ -530,6 +831,7 @@ class _HubShellState extends State<HubShell> {
     }
 
     final shouldNotify = _serverTracker.update(online);
+    if (!mounted) return;
     if (mounted && _serverReachable != online) {
       setState(() => _serverReachable = online);
     }
@@ -551,7 +853,7 @@ class _HubShellState extends State<HubShell> {
   @override
   Widget build(BuildContext context) {
     final pages = [
-      const CompShareInstancePage(),
+      CompShareInstancePage(api: _api),
       DashboardPage(
         api: _api,
         serverOnlineReminderEnabled: _serverOnlineReminderEnabled,
@@ -566,6 +868,7 @@ class _HubShellState extends State<HubShell> {
       CharacterDictionaryPage(api: _api, adminMode: true),
       PromptReportsPage(api: _api),
       StorageManagementPage(api: _api),
+      if (_chatGroupsAvailable) ChatGroupsPage(api: _api),
     ];
     final baseDestinations = const [
       // Keep destination order aligned with pages below.
@@ -619,6 +922,9 @@ class _HubShellState extends State<HubShell> {
               icon: CourtyardIcon(Icons.warning_amber_rounded), label: '举报'),
           const NavigationDestination(
               icon: CourtyardIcon(Icons.storage_outlined), label: '储存管理'),
+          if (_chatGroupsAvailable)
+            const NavigationDestination(
+                icon: Icon(Icons.groups_outlined), label: '群聊'),
         ];
         final content = IndexedStack(index: _index, children: pages);
         return Scaffold(
@@ -629,6 +935,8 @@ class _HubShellState extends State<HubShell> {
                   child: SafeArea(
                       child: HubNavigation(
                   destinations: destinations,
+                  extensionEntries: _extensionEntries(),
+                  onRefreshExtensions: () => _refreshExtensions(notify: true),
                   selectedIndex: _index,
                   onSettings: _openSettings,
                   onSelected: (value) {
@@ -638,6 +946,9 @@ class _HubShellState extends State<HubShell> {
                 ))),
           endDrawer: SettingsDrawer(
               onDisconnect: widget.onDisconnect,
+              onSwitch: widget.onSwitch,
+              onConnections:
+                  widget.onActivateProfile == null ? null : _openConnections,
               onGallery: () {
                 Navigator.pop(context);
                 Navigator.push(
@@ -648,6 +959,12 @@ class _HubShellState extends State<HubShell> {
           appBar: AppBar(
             title: Text('Hub · ${destinations[_index].label}'),
             actions: [
+              if (widget.onSwitch != null)
+                IconButton(
+                  tooltip: '切换工作站',
+                  onPressed: widget.onSwitch,
+                  icon: const Icon(Icons.swap_horiz),
+                ),
               Builder(
                   builder: (context) => IconButton(
                       tooltip: '设置',
@@ -678,6 +995,9 @@ class _HubShellState extends State<HubShell> {
                         width: 220,
                         child: HubNavigation(
                             destinations: destinations,
+                            extensionEntries: _extensionEntries(),
+                            onRefreshExtensions: () =>
+                                _refreshExtensions(notify: true),
                             selectedIndex: _index,
                             onSettings: _openSettings,
                             onSelected: (value) =>

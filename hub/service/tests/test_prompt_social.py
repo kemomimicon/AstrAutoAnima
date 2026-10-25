@@ -3,6 +3,7 @@ from types import SimpleNamespace
 import test_kp_lora_personal as fixtures
 from astr_auto_anima_hub.auth import AuthPrincipal
 from astr_auto_anima_hub.prompt_likes import promote_k_prompt, remove_prompt_favorite
+from astr_auto_anima_hub.prompt_favorites import list_favorites
 from astr_auto_anima_hub.prompt_reports import PromptReports
 from astr_auto_anima_hub.repositories import list_prompts, RepositoryError
 
@@ -37,14 +38,14 @@ class PromptSocialTests(fixtures.KpLoraPersonalTests):
 
     def test_general_favorite_private_and_remove(self):
         favorite = promote_k_prompt(self.settings, 'good-001', self.user)
-        own = list_prompts(self.settings.prompt_pool_path, source='P', owner=self.user.subject)
+        own = list_favorites(self.settings.prompt_favorites_path, self.user)
         self.assertEqual(len(own.items),1)
         other = AuthPrincipal(role='user',subject='other',qq='777777')
-        self.assertEqual(list_prompts(self.settings.prompt_pool_path,source='P',owner=other.subject).total,0)
+        self.assertEqual(list_favorites(self.settings.prompt_favorites_path, other).total,0)
         remove_prompt_favorite(self.settings, favorite.saved_prompt_id, other)
-        self.assertEqual(list_prompts(self.settings.prompt_pool_path,source='P',owner=self.user.subject).total,1)
+        self.assertEqual(list_favorites(self.settings.prompt_favorites_path, self.user).total,1)
         remove_prompt_favorite(self.settings, favorite.saved_prompt_id, self.user)
-        self.assertEqual(list_prompts(self.settings.prompt_pool_path,source='P',owner=self.user.subject).total,0)
+        self.assertEqual(list_favorites(self.settings.prompt_favorites_path, self.user).total,0)
         self.assertEqual(list_prompts(self.settings.prompt_pool_path,source='B').total,1)
 
     def test_report_evidence_dedup_and_admin_decision(self):

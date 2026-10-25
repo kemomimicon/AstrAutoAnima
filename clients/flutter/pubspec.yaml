@@ -1,8 +1,7 @@
 name: astr_auto_anima_hub_client
 description: AstrAutoAnima Hub client for Web, Windows and Android
 publish_to: "none"
-version: 0.5.0-beta.2+36
-
+version: 0.5.2-beta.1+44
 environment:
   sdk: ">=3.3.0 <4.0.0"
 
@@ -19,6 +18,8 @@ dependencies:
   path_provider: ^2.1.5
   public_file_saver: ^1.1.0
   saf: ^2.1.0
+  webview_flutter: ^4.14.1
+  webview_flutter_android: ^4.0.0
   web: ^1.1.1
 
 dev_dependencies:
@@ -29,6 +30,8 @@ dev_dependencies:
 flutter:
   uses-material-design: true
   assets:
+    - assets/tag_dict/zh_en_top50000.json
+    - assets/tag_dict/LICENSE
     - assets/splash/oc_greeting_layered_atlas.png
     - assets/courtyard/light/
     - assets/courtyard/dark/

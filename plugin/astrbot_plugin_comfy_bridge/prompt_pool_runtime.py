@@ -18,7 +18,7 @@ except ImportError:  # pragma: no cover - direct local tests
 
 
 VALID_SAFETY_LABELS = {"normal", "nsfw", "sexual"}
-SOURCE_CODES = ("B", "G", "D", "C", "R", "K", "P")
+SOURCE_CODES = ("B", "G", "D", "C", "R", "K", "P", "V")
 MANAGEABLE_SOURCE_CODES = ("B", "G", "D", "C", "R", "P")
 SAFETY_CODES = ("N", "H", "S")
 DEFAULT_SOURCE_CODES = ("B", "G", "D", "P")
@@ -527,8 +527,28 @@ def quality_prompt(pool: dict[str, Any], preset_name: str = "general") -> str:
     return str(preset.get("prompt", "")).strip(" ,\n\t")
 
 
-def compose_random_body(user_prompt: str, item: dict[str, Any]) -> str:
-    return build_prompt_text("", user_prompt, str(item.get("prompt", "")))
+RANDOM_SUBJECT_TAGS = {"", "1girl", "1boy", "1woman", "1man", "none"}
+
+
+def compose_random_body(
+    user_prompt: str, item: dict[str, Any], *, subject_tag: str = ""
+) -> str:
+    """Override only a catalog entry's leading 1girl tag, never its stored text."""
+    if subject_tag not in RANDOM_SUBJECT_TAGS:
+        raise WorkflowError("起手只能是 1girl、1boy、1woman、1man 或 无")
+    catalog_prompt = str(item.get("prompt", ""))
+    if str(item.get("source_code", "")).upper() == "V":
+        prefix = "solo" if subject_tag == "none" else f"{subject_tag or '1girl'}, solo"
+        return build_prompt_text("", user_prompt, prefix + ", " + catalog_prompt)
+    if subject_tag and str(item.get("source_code", "")).upper() != "K":
+        match = re.match(r"^\s*1girl(?:\s*,\s*|\s*$)", catalog_prompt, re.I)
+        if match:
+            remainder = catalog_prompt[match.end():]
+            catalog_prompt = (
+                remainder if subject_tag == "none"
+                else f"{subject_tag}, {remainder}" if remainder else subject_tag
+            )
+    return build_prompt_text("", user_prompt, catalog_prompt)
 
 
 def prompt_pool_stats(pool: dict[str, Any]) -> dict[str, Any]:

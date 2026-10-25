@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "guide_revision": "2026-10-20-notile.1",
+  "items": [
+    {"id":"hardware","title":"最低 / 推荐配置与量化取舍","category":"起步","availability":"规划建议，非全机型实测","action":"guide","components":[],"apis":[],"summary":"JoyCaption Q4/Q6、SeedVR2 3B Q4/Q8、内存/显存/空间、低配参数及质量代价；模型大小不等于显存峰值。"},
+    {"id":"reverse_joy_low","title":"JoyCaption 低显存 Q4_K_M（可选）","category":"图像工作流","availability":"量化模型可选下载，工作流需手动选择","action":"deploy","components":["booru_tagger_node","wd_eva02_model","joycaption_node","joycaption_models_q4"],"apis":[],"summary":"8GB显存/32GB内存尝试档；WD+Q4/mmproj约7.06GB。不同时下载Q6，不自动更改现有反推配置。"},
+    {"id":"refine_low","title":"SeedVR2 整图 3B Q4试配（可选）","category":"图像工作流","availability":"模型可选下载，最低显存尚未实测","action":"deploy","components":["seedvr2_node","seedvr2_models_q4"],"apis":[],"summary":"Q4+VAE约2.50GB；关闭图像/VAE分块，CPU卸载、单图小尺寸诊断；不再将8GB列作最低档。"},
+    {"id":"refine_balanced","title":"SeedVR2 整图 3B Q8（可选）","category":"图像工作流","availability":"模型可选下载，需兼容节点及参数验收","action":"deploy","components":["seedvr2_node","seedvr2_models_q8"],"apis":[],"summary":"建议16–24GB显存/32–64GB内存试配；Q8+VAE约4.16GB，先1024长边单图、CPU卸载；不分块。"},
+    {"id":"quick","title":"基础生图与首次验收","category":"起步","availability":"本包已有","action":"first_run","components":[],"apis":[],"summary":"先完成模型、授权和单图取回；不要第一步就装齐所有扩展。"},
+    {"id":"napcat","title":"NapCat / QQ / OneBot","category":"平台","availability":"本包引导 + 外部官方安装","action":"napcat","components":[],"apis":[],"summary":"已有安装可跳过；准备入口、扫码、OneBot和投递分别验收。"},
+    {"id":"reverse_wd","title":"WD-EVA02 反推标签","category":"图像工作流","availability":"可选下载","action":"deploy","components":["booru_tagger_node","wd_eva02_model"],"apis":[],"summary":"约1.26GB固定模型文件；只安装标签器并不等于完整JoyCaption反推链可运行。"},
+    {"id":"reverse_joy","title":"WD + JoyCaption 完整反推","category":"图像工作流","availability":"可选下载","action":"deploy","components":["booru_tagger_node","wd_eva02_model","joycaption_node","joycaption_models"],"apis":[],"summary":"默认反推链含WD与JoyCaption Q6_K/mmproj；模型约8.73GB十进制，不含Python/GPU依赖。"},
+    {"id":"reverse_cl","title":"CL Tagger 可选反推","category":"图像工作流","availability":"手工装配","action":"guide","components":[],"apis":[],"summary":"节点支持不等于模型到位；ONNX主体、外置权重和词表必须成套。此包不猜测模型下载地址。"},
+    {"id":"hq","title":"HQ 与局部修复","category":"图像工作流","availability":"本包模板 + 可选节点","action":"deploy","components":["impact_pack","impact_subpack"],"apis":[],"summary":"先普通HQ，再启用人脸/手脚检测修复；检测器模型另外配置，节点清单未锁提交需谨慎升级。"},
+    {"id":"refine","title":"精修与 SeedVR2 整图放大","category":"图像工作流","availability":"本包模板 + 可选原生节点","action":"deploy","components":["seedvr2_node"],"apis":[],"summary":"扩展默认不启用；只装原生节点，不提供Tiling下载入口。模板关闭图像及VAE分块；模型另选。"},
+    {"id":"chinese","title":"中文转换 / LLM Provider","category":"提示词与预设","availability":"本包功能，需自行配置模型服务","action":"guide","components":[],"apis":[],"summary":"中文转英文与图像反推不是同一条模型链；没有Provider时先用英文测试。"},
+    {"id":"presets","title":"角色词典 / LoRA / 光影材质 / 任务套组","category":"提示词与预设","availability":"按插件及客户端版本","action":"first_run","components":[],"apis":[["get","/api/v1/lite/task-suites"]],"summary":"词典不等于模型，个人与全局预设不能混用；套组要匹配客户端与服务版本。"},
+    {"id":"offline_pool","title":"离线随机词库编辑与导出","category":"提示词与预设","availability":"本包已有","action":"pool","components":[],"apis":[],"summary":"不依赖服务器；自定义组、筛选、编辑、导入导出，推荐先编辑工作副本。"},
+    {"id":"online_pool","title":"新版在线词库导入器","category":"提示词与预设","availability":"工具随包；服务须有分组API","action":"importer","components":[],"apis":[["get","/api/v1/prompts/groups"],["put","/api/v1/prompts/groups"],["post","/api/v1/prompts/import"]],"summary":"JSON/CSV/TXT预览去重后手动同步；不改写已有分组权限，不保存管理令牌。"},
+    {"id":"users","title":"管理令牌 / 普通用户 / 投递目标","category":"管理与客户端","availability":"本包已有","action":"users","components":[],"apis":[],"summary":"先自己的私聊；普通用户不得共享管理令牌；三种API凭据不能混填。"},
+    {"id":"local_mode","title":"新版本机工作站与轻量部署","category":"新版功能","availability":"需0.5.2候选对应整套服务","action":"guide","components":[],"apis":[],"summary":"本机执行与AstrBot远程执行是不同启动档位；本包旧基线不会因打开说明就升级。"},
+    {"id":"multi_instance","title":"多实例连接与网络接入","category":"新版功能","availability":"需对应新版客户端","action":"guide","components":[],"apis":[],"summary":"每个实例独立地址和令牌；切换不迁移任务。网络说明不自动建隧道或开放端口。"},
+    {"id":"group_admin","title":"QQ 群管理 / 等级 / 配额","category":"新版功能","availability":"需0.5.2候选插件+Hub+客户端","action":"guide","components":[],"apis":[],"summary":"默认关闭，按群单独配置；先测试群，不把群4级当全局管理员。"},
+    {"id":"platforms","title":"Telegram / Discord 接入","category":"平台","availability":"需适配器及对应新版平台功能","action":"guide","components":[],"apis":[["get","/api/v1/admin/platform-switchboard"]],"summary":"平台Token自行创建并填入AstrBot；不需要NapCat，也不与QQ身份混用。"},
+    {"id":"history","title":"收藏 / 图片保存 / 缓存管理","category":"新版功能","availability":"按服务与客户端版本","action":"guide","components":[],"apis":[],"summary":"收藏提示词不等于下载图片；存储清理先预览，默认不开自动清理。"},
+    {"id":"studio","title":"AnimaLoraStudio 可选接入","category":"第三方扩展","availability":"独立外部项目；需匹配接入包","action":"guide","components":[],"apis":[],"summary":"AAA只提供接入。0.25.x是已有连接器验证基线，不代表上游最新版；不降级现有训练环境。"},
+    {"id":"resource_packs","title":"古风等独立资源模块","category":"第三方扩展","availability":"需对应授权模块和新版能力","action":"guide","components":[],"apis":[["get","/api/v1/lite/local-capabilities"]],"summary":"导入前核对许可、模块身份、文件清单和版本；不随主包泄露私人词库，不执行资源包脚本。"},
+    {"id":"idle","title":"云端自动休眠（可选）","category":"管理与客户端","availability":"仅匹配云端部署，默认关闭","action":"guide","components":[],"apis":[],"summary":"本地电脑不要启用云实例控制；不收集或自动配置云密钥，不用真关机代替检查。"}
+  ]
+}

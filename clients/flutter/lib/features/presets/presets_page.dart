@@ -71,6 +71,8 @@ class _PresetsPageState extends State<PresetsPage> {
         error: true,
       );
       if (error.statusCode == 409) _refresh();
+    } on FormatException catch (error) {
+      _notice(error.message, error: true);
     }
   }
 
@@ -78,36 +80,23 @@ class _PresetsPageState extends State<PresetsPage> {
     final kind = _kind;
     final value = await showPresetEditor(context, kind: kind, api: widget.api,
         onSave: (value) async {
-      // Creation does not overwrite an existing preset. Read a fresh revision
-      // on every explicit save attempt, rather than capturing the page's old
-      // revision for the entire lifetime of this dialog. The server still
-      // checks both duplicate names and writes racing this GET.
-      final latest = await widget.api.getPresets();
-      final items = kind == 'style' ? latest.styles : latest.characters;
-      if (items.any((item) => item.name == value['name'])) {
-        throw const FormatException('同名预设已存在，请更换名称或取消后编辑原预设；未覆盖原内容');
-      }
-      await widget.api
-          .createPreset(kind: kind, revision: latest.revision, value: value);
+      await widget.api.submitPreset(action: 'create', kind: kind, value: value);
       await _verifySaved(kind, value);
     });
     if (value != null) _notice('保存并回读确认成功：${value['name']}');
   }
 
-  Future<void> _edit(PresetSummary item, String revision) async {
+  Future<void> _edit(PresetSummary item) async {
     final value = await showPresetEditor(context,
         kind: item.kind, initial: item, api: widget.api, onSave: (value) async {
-      await widget.api.updatePreset(
-          kind: item.kind,
-          originalName: item.name,
-          revision: revision,
-          value: value);
+      await widget.api.submitPreset(
+          action: 'update', kind: item.kind, original: item, value: value);
       await _verifySaved(item.kind, value);
     });
     if (value != null) _notice('保存并回读确认成功：${value['name']}');
   }
 
-  Future<void> _delete(PresetSummary item, String revision) async {
+  Future<void> _delete(PresetSummary item) async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -125,13 +114,8 @@ class _PresetsPageState extends State<PresetsPage> {
       ),
     );
     if (confirmed != true) return;
-    await _runMutation(
-      () => widget.api.deletePreset(
-        kind: item.kind,
-        name: item.name,
-        revision: revision,
-      ),
-    );
+    await _runMutation(() => widget.api
+        .submitPreset(action: 'delete', kind: item.kind, original: item));
   }
 
   @override
@@ -236,8 +220,8 @@ class _PresetsPageState extends State<PresetsPage> {
                                 width: width,
                                 child: _PresetCard(
                                   item: item,
-                                  onEdit: () => _edit(item, data.revision),
-                                  onDelete: () => _delete(item, data.revision),
+                                  onEdit: () => _edit(item),
+                                  onDelete: () => _delete(item),
                                 ),
                               ),
                             )

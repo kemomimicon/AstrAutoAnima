@@ -9,7 +9,10 @@ from pathlib import Path
 from .auth import AuthPrincipal
 from .lite_users import load_lite_users
 from .prompt_likes import promote_k_prompt, remove_prompt_favorite
+from .prompt_favorites import favorite_id, full_prompt
 from .repositories import RepositoryError
+from .image_prompts import read_store_record, save_image_prompt
+from .prompt_snapshots import image_prompt_snapshot
 
 
 def handle_qq_action(settings, reports, jobs, token):
@@ -50,14 +53,21 @@ def handle_qq_action(settings, reports, jobs, token):
     index = outputs.index(asset_id)
     source = entries[0] if len(entries) == 1 else (entries[index] if len(entries) == len(outputs) else {})
     prompt_id = str(source.get('id', ''))
-    if action != 'report' and not prompt_id:
-        raise RepositoryError('该图没有可靠的抽取词库编号，不能收藏预设或猜测提示词')
+    try:
+        snapshot = image_prompt_snapshot(job, index, lambda value: read_store_record(store, 'jobs', value)) if action != 'report' else {}
+    except (ValueError, TypeError) as exc:
+        raise RepositoryError(str(exc)) from exc
     if action == 'favorite':
-        result = promote_k_prompt(settings, prompt_id, principal)
-        return {'message': ('已经收藏' if result.action == 'already_liked' else '已收藏') + f'提示词 {prompt_id}，可在客户端个人收藏中查看'}
+        result = save_image_prompt(settings, principal, snapshot, f'{job_id}-{index + 1}')
+        jobs.refresh_likes(principal)
+        label = '当次提示词' if snapshot['kind'] == 'compiled' else '旧任务原串与附加内容（非完整参数）'
+        return {'message': ('已经收藏' if result.action == 'already_liked' else '已收藏') + label + '；仅保存文本，不保存图片，可在客户端个人收藏中查看'}
     if action == 'unfavorite':
-        remove_prompt_favorite(settings, prompt_id, principal)
-        jobs.unmark_liked(prompt_id, principal)
+        if not snapshot.get('available'):
+            raise RepositoryError('旧任务缺少完整提示词快照，无法确定要取消哪条收藏')
+        saved_id = favorite_id(principal.subject, snapshot['positive'])
+        remove_prompt_favorite(settings, saved_id, principal)
+        jobs.unmark_liked(saved_id, principal)
         return {'message': f'已取消收藏提示词 {prompt_id}（仅影响你的收藏）'}
     path = Path(asset.get('path', ''))
     if not path.is_file() or path.stat().st_size > 64 * 1024**2:

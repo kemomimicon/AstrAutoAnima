@@ -1,0 +1,16 @@
+{
+  "destination": "/workspace/aaa-install",
+  "deployment_profile": "full",
+  "platform": "linux",
+  "astrbot_mode": "cli",
+  "install_astrbot": true,
+  "install_comfyui": true,
+  "install_dependencies": true,
+  "gpu": true,
+  "install_am": false,
+  "download_models": false,
+  "accept_model_license": false,
+  "external": "",
+  "download_mode": "official",
+  "fallback_official": false
+}

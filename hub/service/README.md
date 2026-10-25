@@ -1,3 +1,6 @@
+本目录为 0.5.2-beta.1 源码候选；请优先阅读根目录 RELEASE_NOTES.md。
+以下旧版本说明保留供参考。Windows 编译建议使用短路径（如 C:/aaa-build），避免 MSVC 路径限制。
+
 # AstrAutoAnima Hub
 
 当前公开测试版：`Hub 0.5.0-beta.2 / Client 0.5.0-beta.2 / Web App`

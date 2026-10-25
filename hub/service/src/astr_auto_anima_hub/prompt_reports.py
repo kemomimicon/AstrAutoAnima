@@ -18,13 +18,12 @@ class PromptReports:
 
     @contextmanager
     def connect(self):
-        # Importing the ASGI app must not create files or require write access.
+        # App construction and optional-feature discovery must be read-only.
         self.root.mkdir(parents=True, exist_ok=True)
         db = sqlite3.connect(self.root / 'reports.sqlite3', timeout=15)
         try:
-            with db:
-                db.execute('CREATE TABLE IF NOT EXISTS reports(id TEXT PRIMARY KEY, owner TEXT, job TEXT, image TEXT, prompt_id TEXT, snapshot TEXT, status TEXT, created REAL, UNIQUE(owner,job,image))')
-                yield db
+            db.execute('CREATE TABLE IF NOT EXISTS reports(id TEXT PRIMARY KEY, owner TEXT, job TEXT, image TEXT, prompt_id TEXT, snapshot TEXT, status TEXT, created REAL, UNIQUE(owner,job,image))')
+            with db: yield db
         finally:
             db.close()
 

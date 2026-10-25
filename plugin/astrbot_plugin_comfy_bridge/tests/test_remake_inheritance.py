@@ -19,6 +19,7 @@ from astrbot_plugin_comfy_bridge.workflow_runtime import (
     WorkflowError, prepare_workflow, extract_command_body,
 )
 from astrbot_plugin_comfy_bridge.safety_runtime import positive_texts
+from astrbot_plugin_comfy_bridge.delivery_runtime import qq_official_reply_ids, qq_official_quote_markers, log_qq_official_quote_diagnostic
 
 
 def parent():
@@ -146,7 +147,7 @@ def test_unmodified_aremake_final_submission_keeps_snapshot_and_prompt(tmp_path,
         owner = SimpleNamespace(
             _job_store=lambda: store, _safety_guard=Mock(),
             _quoted_job=AsyncMock(return_value=(job, 0)),
-            _safety_policy=lambda: SimpleNamespace(fingerprint="same"),
+            _safety_policy=lambda event=None: SimpleNamespace(fingerprint="same"),
             _safety_input=AsyncMock(), _safety_applies=lambda e: False,
             _event_source=lambda e: {}, _generation_slot=slot,
             _timeout_seconds=lambda: 1, _submit_workflow=AsyncMock(return_value="id"),

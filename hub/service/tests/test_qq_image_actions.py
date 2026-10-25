@@ -10,6 +10,7 @@ import test_kp_lora_personal as fixtures
 from astr_auto_anima_hub.qq_image_actions import handle_qq_action
 from astr_auto_anima_hub.prompt_reports import PromptReports
 from astr_auto_anima_hub.repositories import RepositoryError, list_prompts
+from astr_auto_anima_hub.prompt_favorites import list_favorites
 from astr_auto_anima_hub.auth import AuthPrincipal
 
 
@@ -27,11 +28,11 @@ class QQImageActionTests(unittest.TestCase):
         image.write_bytes(b'original-output')
         (root / 'job_store' / 'jobs' / 'job_test.json').write_text(json.dumps({
             'result': {'assets': ['img_other', 'img_test']},
-            'input': {'source_entries': [{'id': 'wrong', 'prompt': 'wrong'}, {'id': 'good-001', 'prompt': 'actual snapshot'}]}}))
+            'input': {'source_entries': [{'id': 'wrong', 'prompt': 'wrong', 'safety_level': 'normal'}, {'id': 'good-001', 'prompt': 'actual snapshot', 'user_addition': 'rainy night', 'safety_level': 'normal'}]}}))
         (root / 'job_store' / 'assets' / 'img_test.json').write_text(json.dumps({
             'job_id': 'job_test', 'asset_id': 'img_test', 'type': 'result', 'path': str(image),
             'sha256': hashlib.sha256(image.read_bytes()).hexdigest()}))
-        self.jobs = SimpleNamespace(unmark_liked=Mock(), _require_approved=lambda content: None)
+        self.jobs = SimpleNamespace(unmark_liked=Mock(), refresh_likes=Mock(), _require_approved=lambda content: None)
         self.reports = PromptReports(self.settings, self.jobs)
         return image
 
@@ -49,10 +50,13 @@ class QQImageActionTests(unittest.TestCase):
         self.prepare()
         self.assertIn('已收藏', self.call('favorite')['message'])
         self.assertIn('已经收藏', self.call('favorite')['message'])
-        self.assertEqual(list_prompts(self.settings.prompt_pool_path, source='P', owner='qq-user').total, 1)
-        self.assertEqual(list_prompts(self.settings.prompt_pool_path, source='P', owner='someone-else').total, 0)
+        owner = AuthPrincipal(role='user', subject='qq-user')
+        stranger = AuthPrincipal(role='user', subject='someone-else')
+        self.assertEqual(list_favorites(self.settings.prompt_favorites_path, owner).total, 1)
+        self.assertEqual(list_favorites(self.settings.prompt_favorites_path, owner).items[0].prompt, 'rainy night, actual snapshot')
+        self.assertEqual(list_favorites(self.settings.prompt_favorites_path, stranger).total, 0)
         self.call('unfavorite')
-        self.assertEqual(list_prompts(self.settings.prompt_pool_path, source='P', owner='qq-user').total, 0)
+        self.assertEqual(list_favorites(self.settings.prompt_favorites_path, owner).total, 0)
         self.assertEqual(list_prompts(self.settings.prompt_pool_path, source='B').total, 1)
         self.jobs.unmark_liked.assert_called_once()
 
@@ -79,6 +83,22 @@ class QQImageActionTests(unittest.TestCase):
         self.call('favorite')
         with self.assertRaises(RepositoryError):
             handle_qq_action(self.settings, self.reports, self.jobs, self.last_token)
+
+    def test_qq_favorite_and_cancel_use_real_manager_and_trusted_classification(self):
+        from astr_auto_anima_hub.remote_jobs import RemoteJobManager
+        self.prepare()
+        self.jobs = RemoteJobManager(self.settings)
+        owner = AuthPrincipal(role='user', subject='qq-user')
+        self.assertIn('已收藏', self.call('favorite')['message'])
+        self.assertIn('已取消', self.call('unfavorite')['message'])
+        self.assertEqual(list_favorites(self.settings.prompt_favorites_path, owner).total, 0)
+        path = self.settings.plugin_data_dir / 'job_store' / 'jobs' / 'job_test.json'
+        data = json.loads(path.read_text())
+        del data['input']['source_entries'][1]['safety_level']
+        path.write_text(json.dumps(data))
+        with self.assertRaisesRegex(RepositoryError, '分级'):
+            self.call('favorite')
+        self.assertEqual(list_favorites(self.settings.prompt_favorites_path, owner).total, 0)
 
     def test_no_prompt_can_report_but_not_favorite_or_trash(self):
         self.prepare()

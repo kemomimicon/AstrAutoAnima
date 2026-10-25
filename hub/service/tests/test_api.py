@@ -21,6 +21,23 @@ from astr_auto_anima_hub.schemas import (
 
 
 class ApiTests(unittest.TestCase):
+    def test_platform_switchboard_is_admin_only_and_preserves_other_switches(self):
+        endpoint = '/api/v1/admin/platform-switchboard'
+        self.assertIn(self.client.get(endpoint).status_code, (401, 403))
+        first = self.client.get(endpoint, headers=self.headers)
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(first.json()['accept_new'],
+                         {'qq': True, 'telegram': False, 'discord': False})
+        self.assertNotIn('token', json.dumps(first.json()).casefold())
+        saved = self.client.put(endpoint, headers=self.revision_headers(first.json()['revision']),
+                                json={'qq': True, 'telegram': True, 'discord': False})
+        self.assertEqual(saved.status_code, 200)
+        self.assertTrue(saved.json()['accept_new']['telegram'])
+        stale = self.client.put(endpoint, headers=self.revision_headers(first.json()['revision']),
+                                json={'qq': False, 'telegram': False, 'discord': False})
+        self.assertEqual(stale.status_code, 409)
+        self.assertEqual(self.client.get(endpoint, headers=self.headers).json()['accept_new']['qq'], True)
+
     def test_recovery_requires_admin_and_confirmation(self):
         with patch('astr_auto_anima_hub.service_recovery.submit', return_value={'state': 'submitted'}) as submit:
             for headers in ({}, self.user_headers, self.lite_headers):
@@ -146,6 +163,51 @@ class ApiTests(unittest.TestCase):
         response = self.client.get("/api/v1/health")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["status"], "ok")
+
+    def test_custom_prompt_group_registry_and_deduplicated_import(self) -> None:
+        self.assertIn(self.client.get('/api/v1/prompts/groups').status_code, (401, 403))
+        first = self.client.get('/api/v1/prompts/groups', headers=self.headers).json()
+        self.assertEqual(first['groups'], [])
+        group = {'id': 'night_scene', 'name': '夜景', 'allow_private': False}
+        saved = self.client.put('/api/v1/prompts/groups', headers=self.revision_headers(first['revision']),
+                                json={'groups': [group]})
+        self.assertEqual(saved.status_code, 200, saved.text)
+        self.assertEqual(saved.json()['groups'], [{**group, 'enabled': True,
+                                                  'allow_group': True, 'safety_codes': ['N', 'H', 'S']}])
+        prompt = {'prompt': 'a moonlit harbor', 'custom_groups': ['night_scene'],
+                  'source_code': 'B', 'safety_code': 'N'}
+        original = self.client.get('/api/v1/prompts', headers=self.headers).json()
+        imported = self.client.post('/api/v1/prompts/import',
+                                    headers=self.revision_headers(original['revision']),
+                                    json={'prompts': [prompt, prompt]})
+        self.assertEqual(imported.status_code, 200, imported.text)
+        self.assertEqual(imported.json()['count'], 1)
+        reread = self.client.get('/api/v1/prompts', headers=self.headers).json()
+        self.assertEqual(reread['total'], original['total'] + 1)
+        self.assertEqual(next(i for i in reread['items'] if i['prompt'] == prompt['prompt'])['custom_groups'],
+                         ['night_scene'])
+        repeated = self.client.post('/api/v1/prompts/import',
+                                    headers=self.revision_headers(reread['revision']),
+                                    json={'prompts': [prompt]})
+        self.assertEqual(repeated.status_code, 200, repeated.text)
+        self.assertEqual(repeated.json()['count'], 0)
+
+    def test_personal_prompts_are_separate_from_main_catalog(self):
+        before = self.settings.prompt_pool_path.read_bytes()
+        liked = self.client.post(
+            "/api/v1/lite/prompt-favorites/discord-0001", headers=self.user_headers,
+        )
+        self.assertEqual(liked.status_code, 200)
+        personal = self.client.get(
+            "/api/v1/lite/prompts?source=P", headers=self.user_headers,
+        )
+        self.assertEqual(personal.status_code, 200)
+        self.assertEqual(personal.json()["total"], 1)
+        self.assertEqual(personal.json()["items"][0]["original_id"], "discord-0001")
+        self.assertEqual(self.settings.prompt_pool_path.read_bytes(), before)
+        other = self.client.get("/api/v1/lite/prompts?source=P", headers=self.lite_headers)
+        self.assertEqual(other.status_code, 200)
+        self.assertEqual(other.json()["total"], 0)
 
     def test_image_storage_is_admin_only(self):
         self.assertEqual(self.client.get('/api/v1/admin/storage', headers=self.lite_headers).status_code, 401)
@@ -595,9 +657,13 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         del payload["variants"]
         payload["prompt"] = "identity, new default"
+        # Removing a LoRA must not force removal of existing outfits, including
+        # updates from older clients that do not send the variants field.
+        payload["loras"] = []
         response = self.client.put("/api/v1/presets/character/A", headers=self.revision_headers(current()["revision"]), json=payload)
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(current()["characters"][0]["variants"][0]["id"], "hanfu")
+        self.assertTrue(current()["characters"][0]["text_only"])
         payload["variants"] = []
         response = self.client.put("/api/v1/presets/character/A", headers=self.revision_headers(current()["revision"]), json=payload)
         self.assertEqual(response.status_code, 200, response.text)

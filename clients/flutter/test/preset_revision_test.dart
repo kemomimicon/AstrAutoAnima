@@ -16,30 +16,32 @@ class PresetApi extends HubApi {
       styles: const [], characters: List.of(rows), revision: revision);
 
   @override
-  Future<MutationResult> createPreset({required String kind,
-      required String revision, required Map<String, dynamic> value}) async {
+  Future<MutationResult> submitPreset(
+      {required String action,
+      required String kind,
+      Map<String, dynamic>? value,
+      PresetSummary? original}) async {
+    final submitted = value!;
+    if (rows.any((r) => r.name == submitted['name'])) {
+      throw const HubApiException('同名预设已存在', statusCode: 409);
+    }
     writes++;
     if (race) {
       race = false;
-      this.revision = 'raced';
+      revision = 'raced';
     }
-    if (revision != this.revision) {
-      throw const HubApiException('resource changed since it was loaded', statusCode: 409);
-    }
-    if (rows.any((r) => r.name == value['name'])) {
-      throw const HubApiException('preset already exists', statusCode: 409);
-    }
-    rows.add(PresetSummary.fromJson({...value, 'kind': kind}));
-    this.revision = 'saved';
-    return const MutationResult(action: 'created', resource: 'character',
-        revision: 'saved', count: 1);
+    rows.add(PresetSummary.fromJson({...submitted, 'kind': kind}));
+    revision = 'saved';
+    return const MutationResult(
+        action: 'created', resource: 'character', revision: 'saved', count: 1);
   }
 }
 
 Future<void> openEditor(WidgetTester tester, PresetApi api) async {
   await tester.binding.setSurfaceSize(const Size(1000, 1600));
   addTearDown(() => tester.binding.setSurfaceSize(null));
-  await tester.pumpWidget(MaterialApp(home: Scaffold(body: PresetsPage(api: api))));
+  await tester
+      .pumpWidget(MaterialApp(home: Scaffold(body: PresetsPage(api: api))));
   await tester.pumpAndSettle();
   await tester.tap(find.text('角色'));
   await tester.pumpAndSettle();
@@ -50,7 +52,8 @@ Future<void> openEditor(WidgetTester tester, PresetApi api) async {
 }
 
 void main() {
-  testWidgets('create refreshes revision after dialog was opened', (tester) async {
+  testWidgets('create refreshes revision after dialog was opened',
+      (tester) async {
     final api = PresetApi();
     await openEditor(tester, api);
     api.revision = 'external-change';
@@ -62,19 +65,14 @@ void main() {
     expect(find.text('梅娅'), findsOneWidget);
   });
 
-  testWidgets('race retains input; explicit retry obtains new revision', (tester) async {
+  testWidgets('unrelated revision changes use one queued submission',
+      (tester) async {
     final api = PresetApi();
     await openEditor(tester, api);
     api.race = true;
     await tester.tap(find.text('保存'));
     await tester.pumpAndSettle();
-    expect(api.rows, isEmpty);
-    expect(api.writes, 1); // Never silently retries a write.
-    expect(find.textContaining('resource changed'), findsOneWidget);
-    expect(find.text('梅娅'), findsOneWidget);
-    await tester.tap(find.text('保存'));
-    await tester.pumpAndSettle();
-    expect(api.writes, 2);
+    expect(api.writes, 1);
     expect(api.rows.single.name, '梅娅');
     expect(find.byType(AlertDialog), findsNothing);
   });
@@ -83,7 +81,9 @@ void main() {
     final api = PresetApi();
     await openEditor(tester, api);
     api.rows.add(PresetSummary.fromJson({
-      'name': '梅娅', 'kind': 'character', 'prompt': 'original',
+      'name': '梅娅',
+      'kind': 'character',
+      'prompt': 'original',
     }));
     api.revision = 'external-change';
     await tester.tap(find.text('保存'));

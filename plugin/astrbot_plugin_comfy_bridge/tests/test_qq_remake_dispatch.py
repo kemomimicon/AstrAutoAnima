@@ -11,7 +11,7 @@ from PIL import Image
 from test_delivery_tracking import DeliveryTests
 from astrbot_plugin_comfy_bridge.workflow_runtime import WorkflowError, extract_command_body
 from astrbot_plugin_comfy_bridge.replay_runtime import replay_workflow
-from astrbot_plugin_comfy_bridge.delivery_runtime import send_tracked_image, delivery_scope
+from astrbot_plugin_comfy_bridge.delivery_runtime import send_tracked_image, delivery_scope, qq_official_reply_ids, qq_official_quote_markers, log_qq_official_quote_diagnostic
 from astrbot_plugin_comfy_bridge.safety_runtime import positive_texts
 
 
@@ -48,7 +48,7 @@ class QQRemakeTests(DeliveryTests):
         bridge = SimpleNamespace(
             config={}, _job_store=lambda: self.store, _event_source=lambda event: self.source,
             _image_resolver=SimpleNamespace(_raw_segments=lambda event: [], resolve=AsyncMock()),
-            _safety_guard=Mock(), _safety_policy=lambda: SimpleNamespace(fingerprint='same'),
+            _safety_guard=Mock(), _safety_policy=lambda event=None: SimpleNamespace(fingerprint='same'),
             _safety_input=AsyncMock(), _safety_applies=lambda event: False,
             _safety_outputs=AsyncMock(side_effect=lambda event, paths: paths),
             _generation_slot=lambda event: context(), _timeout_seconds=lambda: 5,

@@ -28,7 +28,8 @@ class LitePromptDetailsDialog extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final title = item.name.isEmpty ? item.id : '${item.id} · ${item.name}';
+    final displayId = item.originalId.isEmpty ? item.id : item.originalId;
+    final title = item.name.isEmpty ? displayId : '$displayId · ${item.name}';
     final screenHeight = MediaQuery.sizeOf(context).height;
 
     return AlertDialog(
@@ -46,12 +47,25 @@ class LitePromptDetailsDialog extends StatelessWidget {
                 runSpacing: 8,
                 children: [
                   Chip(label: Text('来源 ${item.sourceCode}')),
-                  Chip(label: Text('分级 ${item.safetyCode}')),
+                  if (item.originalId.isNotEmpty)
+                    Chip(label: Text('原词库编号 ${item.originalId}')),
+                  Chip(
+                      label: Text(item.isUnreviewedOfflineScene
+                          ? '未人工逐条审核'
+                          : '分级 ${item.safetyCode}')),
                   if (item.categories.isNotEmpty)
                     ...item.categories.map((value) => Chip(label: Text(value))),
                 ],
               ),
               const SizedBox(height: 12),
+              if (item.isUnreviewedOfflineScene) ...[
+                Text('本机 V 离线场景库未人工逐条审核；${item.safetyCode} 为保守存储标记，不代表逐条内容评级。'),
+                const SizedBox(height: 8),
+              ],
+              if (item.userAddition.isNotEmpty) ...[
+                Text('附加内容：${item.userAddition}'),
+                const SizedBox(height: 8),
+              ],
               Text('完整提示词', style: Theme.of(context).textTheme.titleMedium),
               const SizedBox(height: 8),
               Flexible(

@@ -1,0 +1,15 @@
+{
+  "id": "gufeng",
+  "name": "V · 国风古韵",
+  "version": "0.4.0",
+  "optional": true,
+  "enabled_by_default": false,
+  "payload_included": false,
+  "profiles": ["local", "full"],
+  "activation": "local-workstation-only",
+  "catalog_path": "hub/resources/gufeng/cards.sqlite3",
+  "environment": "AAH_LOCAL_GUFENG_CATALOG_PATH",
+  "catalog_sha256": "2ce071962a67e97b0d60874dc6be033dfaf849f39c455bcd58ed3caf8aacea07",
+  "redistribution_status": "pending-source-review",
+  "note": "公开代码只包含可选安装入口；未核对资源不进入正式公开成品。来源 README/SOURCES 必须随私有候选资源保留。"
+}

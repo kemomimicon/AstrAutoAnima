@@ -266,6 +266,18 @@ class SetupSession:
     def changes(self) -> list[str]:
         return [key for key, value in self.payloads().items() if value != self.original[key]]
 
+    def discard(self, section: str) -> None:
+        """Revert one staged section to the last loaded/saved snapshot; never touch disk."""
+        attributes = {'服务连接': 'env', '投递目标': 'targets', '用户注册表': 'users',
+                      '提示词库': 'pool', '角色词典': 'dictionary'}
+        if section not in attributes:
+            raise SetupError('该页面没有可撤销的配置。')
+        setattr(self, attributes[section], copy.deepcopy(self.original[section]))
+        if section == '用户注册表':
+            # Preserve plaintext delivery for users already committed this session.
+            saved = {row['qq'] for row in self.original[section]['users']}
+            self.pending_tokens = {qq: token for qq, token in self.pending_tokens.items() if qq in saved}
+
     def summary(self) -> str:
         lines = ['待保存变更（令牌和 API Key 不在这里显示）：']
         for key in self.changes():

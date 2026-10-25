@@ -1402,7 +1402,6 @@ def _checked_reverse_path(value):
         raise ValueError("请选择专用反推存储目录，不要使用磁盘根目录或用户主目录")
     return path
 
-
 def _reverse_storage_root(value):
     raw = str(value).strip()
     legacy = "/workspace/astrbot-runtime/data/plugin_data/astrbot_plugin_comfy_bridge/reverse_history"

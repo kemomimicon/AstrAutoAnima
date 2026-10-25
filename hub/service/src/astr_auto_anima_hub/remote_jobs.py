@@ -32,6 +32,7 @@ from .schemas import (
 )
 from .personal_styles import resolve_personal_style_key, list_personal_styles
 from .repositories import RepositoryError
+from .prompt_groups import validate_selected_groups
 
 
 class RemoteJobError(RuntimeError):
@@ -41,7 +42,7 @@ class RemoteJobError(RuntimeError):
 _UMO_PATTERN = re.compile(
     r"^[A-Za-z0-9_.-]+:(?P<message_type>GroupMessage|FriendMessage):[A-Za-z0-9_.-]+$"
 )
-_POOL_PATTERN = re.compile(r"^[BGDCRKPNHS](?:[BGDCRKPNHS,/]*[BGDCRKPNHS])?$")
+_POOL_PATTERN = re.compile(r"^[BGDCRKPVNHS](?:[BGDCRKPVNHS,/]*[BGDCRKPVNHS])?$")
 _PROMPT_ID_PATTERN = re.compile(r"\b(?:kp|liked|good|generate|discord|codex|reverse)-[A-Za-z0-9_.-]+\b")
 _MAX_MEDIA_BYTES = 64 * 1024 * 1024
 _MAX_SOURCE_IMAGE_BYTES = 20 * 1024 * 1024
@@ -57,6 +58,7 @@ class _TargetRecord:
     public: DeliveryTarget
     umo: str
     allow_safety: frozenset[str]
+    platform: str = "qq"
 
 
 def _now() -> datetime:
@@ -101,7 +103,10 @@ def load_delivery_targets(path: Path) -> list[_TargetRecord]:
         )
         if not allow_safety:
             raise RemoteJobError(f"delivery target has no allowed safety levels: {public.id}")
-        records.append(_TargetRecord(public=public, umo=umo, allow_safety=allow_safety))
+        platform = str(raw.get("platform", "qq")).lower()
+        if platform not in {"qq", "telegram", "discord"}:
+            raise RemoteJobError(f"invalid delivery target platform: {target_id}")
+        records.append(_TargetRecord(public=public, umo=umo, allow_safety=allow_safety, platform=platform))
     return records
 
 
@@ -148,7 +153,7 @@ def _filter_safety(value: str) -> set[str]:
 
 
 def _filter_sources(value: str) -> set[str]:
-    return {char for char in value if char in {"B", "G", "D", "C", "R", "K", "P"}}
+    return {char for char in value if char in {"B", "G", "D", "C", "R", "K", "P", "V"}}
 
 
 def _prompt_ids_from_plain(messages: list[str]) -> list[str]:
@@ -157,7 +162,7 @@ def _prompt_ids_from_plain(messages: list[str]) -> list[str]:
         # Explicit ID fields support imported IDs without hard-coded source prefixes.
         for group in re.findall(r"条目=([^｜\s]+)", message):
             for ident in group.split(','):
-                if re.fullmatch(r"[A-Za-z0-9_.-]{1,300}", ident) and ident not in found:
+                if re.fullmatch(r"[A-Za-z0-9_.:-]{1,300}", ident) and ident not in found:
                     found.append(ident)
         for prompt_id in _PROMPT_ID_PATTERN.findall(message):
             if prompt_id not in found:
@@ -166,7 +171,7 @@ def _prompt_ids_from_plain(messages: list[str]) -> list[str]:
 
 
 def build_remote_command(
-    payload: RemoteJobCreateRequest, target: _TargetRecord
+    payload: RemoteJobCreateRequest, target: _TargetRecord, *, v_safety: str = "N"
 ) -> tuple[str, str]:
     if payload.character_variant and (not payload.character.strip() or payload.kind in {"chaos", "multi", "remake"}):
         raise RemoteJobError("角色造型需要指定单个角色预设，不适用于混沌、多人或原图重跑")
@@ -176,6 +181,14 @@ def build_remote_command(
     effective_safety = payload.safety_code
     selected_safety = _filter_safety(pool_filter)
     selected_sources = _filter_sources(pool_filter)
+    if "V" in selected_sources:
+        if (selected_sources != {"V"} or payload.kind != "random"
+                or payload.custom_groups
+                or (selected_safety and selected_safety not in ({v_safety}, {"S"}))):
+            raise RemoteJobError("独立通常库仅支持当前服务器登记的级别，不叠加混沌或自定义分组")
+        # V/S was a restrictive UI label in older clients, never an NSFW
+        # catalog mode. Normalize this exact source only; other S rules stay.
+        pool_filter, selected_safety, effective_safety = "V/" + v_safety, {v_safety}, v_safety
     if "K" in selected_sources and selected_sources != {"K"}:
         raise RemoteJobError("K prompt pool must be selected on its own")
     if selected_sources == {"K"} and selected_safety == {"H"}:
@@ -190,6 +203,10 @@ def build_remote_command(
         effective_safety = "N"
 
     random_kind = payload.kind in {"random", "chaos"}
+    if payload.custom_groups and (not random_kind or 'K' in selected_sources):
+        raise RemoteJobError('自定义分组仅支持非K库的随机抽取')
+    if payload.random_subject_tag and not random_kind:
+        raise RemoteJobError("起手选择仅适用于随机抽卡")
     if random_kind:
         if not pool_filter:
             pool_filter = effective_safety
@@ -294,6 +311,11 @@ def build_remote_command(
             parts.append(f"模式={payload.reverse_preset}")
     if random_kind and pool_filter:
         parts.append(pool_filter)
+    if random_kind and payload.custom_groups:
+        from .prompt_group_ids import normalize_group_ids
+        parts.append('@' + '+'.join(normalize_group_ids(payload.custom_groups)))
+    if random_kind and payload.random_subject_tag:
+        parts.append("起手=" + ("无" if payload.random_subject_tag == "none" else payload.random_subject_tag))
     # Positional selectors/profiles must precede every key=value directive.
     if payload.camera_extreme_lora or any((payload.camera_distance, payload.camera_yaw,
             payload.camera_pitch, payload.camera_lens, payload.camera_roll)):
@@ -461,6 +483,7 @@ class RemoteJobManager:
         self._transport = transport
         self._jobs: dict[str, RemoteJobResponse] = {}
         self._owners: dict[str, str] = {}
+        self._favorite_owners: dict[str, str] = {}
         self._tasks: set[asyncio.Task[None]] = set()
         self._suite_image_index: dict[str, int] = {}
         self._semaphore = asyncio.Semaphore(1)
@@ -468,6 +491,7 @@ class RemoteJobManager:
         self._safety_gate = PriorityGate(1)
         self._safety_users = {}
         self._admin_exempt_jobs = set()
+        self._group_contexts: dict[str, dict] = {}
         self._stream_targets = {}
         self._stream_sent = {}
         self._records_dir = self.settings.remote_job_store_dir / "records"
@@ -479,12 +503,51 @@ class RemoteJobManager:
         from .safety_runtime import load_policy
         return load_policy(self.settings.plugin_data_dir / "safety")
 
+    def _effective_safety_policy(self, group_context):
+        """Group safety overrides only the switch, retaining audited rule settings."""
+        override = group_context.get("safety_mode") if group_context.get("enabled") else None
+        if override is None:
+            return self._safety_policy()
+        from .safety_runtime import Policy
+        path = self.settings.plugin_data_dir / "safety/policy.json"
+        config = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+        return Policy({**config, "safety_mode_enabled": override})
+
+    def _job_safety_policy(self, job_id):
+        return self._effective_safety_policy(self._group_contexts.get(job_id, {}))
+
+    def _group_admission(self, target, principal, request_id=""):
+        from .chat_groups import group_store
+        from .group_policy_runtime import GroupPolicyError
+        bot_id, _, target_id = target.umo.split(":", 2)
+        group_key = f"{target.platform}:{bot_id}:{target_id}" if target.public.kind == "group" else ""
+        try:
+            store = group_store(self.settings)
+            scope = f"{target.platform}:{bot_id}"
+            decision = store.policy(group_key, principal.qq, is_admin=principal.is_admin, scope=scope)
+            if decision.get("enabled") and not principal.is_admin and target.platform != "qq":
+                raise RemoteJobError("当前客户端身份绑定为 QQ；跨平台目标需管理员操作，不能将 QQ 号冒充 TG/DC 用户")
+            resolved_key = str(decision.get("group_key", group_key))
+            if (decision.get("enabled") and not principal.is_admin and resolved_key
+                    and not resolved_key.startswith(f"{target.platform}:{bot_id}:")):
+                raise RemoteJobError("主要跑图群与目标平台/机器人不一致，请联系管理员修正归属")
+            if not decision.get("allowed", False):
+                raise RemoteJobError(str(decision.get("reason") or "当前群聊权限不允许此任务"))
+            if request_id:
+                decision = store.reserve(group_key, principal.qq, request_id, is_admin=principal.is_admin, scope=scope)
+                if not decision.get("allowed", False):
+                    raise RemoteJobError(str(decision.get("reason") or "当前群聊额度或冷却限制不允许此任务"))
+            return {**decision, "request_id": request_id,
+                    "group_key": decision.get("group_key", group_key)}
+        except GroupPolicyError as exc:
+            raise RemoteJobError(str(exc)) from exc
+
     def _credit_store(self):
         from .safety_runtime import CreditStore
         return CreditStore(self.settings.plugin_data_dir / "safety")
 
     def _safety_priority(self, job_id):
-        if job_id in self._admin_exempt_jobs or not self._safety_policy().enabled:
+        if job_id in self._admin_exempt_jobs or not self._job_safety_policy(job_id).enabled:
             return 0
         qq = self._safety_users.get(job_id, "")
         return int(not qq or self._credit_store().score(qq) < 5)
@@ -492,7 +555,7 @@ class RemoteJobManager:
     def _require_approved(self, content, job_id=None):
         if job_id is not None and job_id in self._admin_exempt_jobs:
             return
-        policy = self._safety_policy()
+        policy = self._job_safety_policy(job_id)
         if policy.enabled and not self._credit_store().approved(content, policy.fingerprint):
             raise RemoteJobError("图片未通过当前安全审核，不予提供")
 
@@ -500,7 +563,7 @@ class RemoteJobManager:
         from contextlib import asynccontextmanager
         @asynccontextmanager
         async def slot():
-            if self._safety_policy().enabled:
+            if self._job_safety_policy(job_id).enabled:
                 # Share the plugin queue with QQ; do not hold a Hub serial gate.
                 yield
             else:
@@ -518,6 +581,7 @@ class RemoteJobManager:
             "schema_version": "1.0",
             "owner": owner,
             "admin_exempt": job_id in self._admin_exempt_jobs,
+            "group_context": self._group_contexts.get(job_id, {}),
             "job": job.model_dump(mode="json"),
         }
         path = self._record_path(job_id)
@@ -553,6 +617,9 @@ class RemoteJobManager:
                 interrupted.append(job.id)
             self._jobs[job.id] = job
             self._owners[job.id] = owner
+            context = payload.get("group_context", {})
+            if isinstance(context, dict):
+                self._group_contexts[job.id] = context
             if payload.get("admin_exempt") is True:
                 self._admin_exempt_jobs.add(job.id)
         for job_id in interrupted:
@@ -578,8 +645,25 @@ class RemoteJobManager:
         payload: RemoteJobCreateRequest,
         principal: AuthPrincipal = SYSTEM_ADMIN,
     ) -> RemoteJobResponse:
+        from .prompt_catalog import validate_request, source_policy
+        original_sources = _filter_sources(_normalize_pool_filter(payload.pool_filter))
+        # Policy applies to every caller, including old clients without catalog support.
+        visible = {r.public.id: r for r in visible_delivery_targets(self.settings, principal)}
+        policy_target = visible.get(payload.target_id)
+        if policy_target is None:
+            raise RemoteJobError("unknown or disabled delivery target")
+        try:
+            payload = validate_request(self.settings, payload, policy_target.public.kind)
+        except RepositoryError as exc:
+            raise RemoteJobError(str(exc)) from exc
         suite = None
         suite_id = ''
+        requested_sources = _filter_sources(_normalize_pool_filter(payload.pool_filter))
+        personal_draw = (payload.kind in {"random", "chaos"}
+                         and (not requested_sources or "P" in requested_sources))
+        if personal_draw and principal.role == "legacy_lite" and "P" in original_sources:
+            raise RemoteJobError("共享令牌不能抽取个人收藏，请使用个人令牌")
+        personal_draw = personal_draw and principal.role != "legacy_lite"
         if payload.task_suite_id:
             if payload.kind not in {'direct', 'chinese', 'reverse', 'remake'} or payload.five_draw or payload.reverse_only:
                 raise RemoteJobError('套组仅支持直接/中文/反推生图/重跑，不支持五连抽或仅反推')
@@ -597,11 +681,6 @@ class RemoteJobManager:
             policy_path = self.settings.plugin_data_dir / "safety/policy.json"
             if policy_path.is_file():
                 qq = str(json.loads(policy_path.read_text(encoding="utf-8")).get("safety_admin_qq", ""))
-        if self._safety_policy().enabled and not principal.is_admin:
-            if not re.fullmatch(r"[1-9][0-9]{4,14}", qq):
-                raise RemoteJobError("安全模式需要绑定真实 QQ；管理员请配置 safety_admin_qq")
-            if self._credit_store().score(qq) <= 0:
-                raise RemoteJobError("信用为0，生成失败；请联系管理员")
         personal_style_slot = payload.personal_style_slot
         random_id = ''
         random_keys = []
@@ -642,7 +721,28 @@ class RemoteJobManager:
         target = targets.get(payload.target_id)
         if target is None:
             raise RemoteJobError("unknown or disabled delivery target")
-        command, effective_safety = build_remote_command(payload, target)
+        group_context = self._group_admission(target, principal)
+        if self._effective_safety_policy(group_context).enabled and not principal.is_admin:
+            if not re.fullmatch(r"[1-9][0-9]{4,14}", qq):
+                raise RemoteJobError("安全模式需要绑定真实 QQ；管理员请配置 safety_admin_qq")
+            if self._credit_store().score(qq) <= 0:
+                raise RemoteJobError("信用为0，生成失败；请联系管理员")
+        try:
+            validate_selected_groups(self.settings, payload.custom_groups, private=target.public.kind == 'private')
+        except RepositoryError as exc:
+            raise RemoteJobError(str(exc)) from exc
+        command, effective_safety = build_remote_command(
+            payload, target, v_safety=source_policy(self.settings, "V")["default_safety"])
+        try:
+            validate_selected_groups(self.settings, payload.custom_groups,
+                                     private=target.public.kind == "private",
+                                     for_generation=True, safety=effective_safety)
+        except RepositoryError as exc:
+            raise RemoteJobError(str(exc)) from exc
+        if "V" in _filter_sources(_normalize_pool_filter(payload.pool_filter)):
+            from .local_gufeng import gufeng_available
+            if not gufeng_available(self.settings.plugin_data_dir / "resources/gufeng/cards.sqlite3"):
+                raise RemoteJobError("V 国风古韵通常词库尚未安装或不可用")
         command_preview = command
         if random_id:
             command_preview = command_preview.replace('__hub_random_' + random_id, '随机模式')
@@ -671,11 +771,16 @@ class RemoteJobManager:
             created_at=now,
             updated_at=now,
         )
+        # Atomic reservation is after input validation and before any scheduling.
+        # The plugin receives this same request id in a trusted filesystem ticket.
+        self._group_contexts[job.id] = self._group_admission(target, principal, "hub:" + job.id)
         self._jobs[job.id] = job
         if principal.is_admin:
             self._admin_exempt_jobs.add(job.id)
         self._safety_users[job.id] = qq
         self._owners[job.id] = principal.subject
+        if personal_draw:
+            self._favorite_owners[job.id] = principal.subject
         self._persist(job.id)
         if suite is not None:
             suite_root = self.settings.plugin_data_dir / 'hub_state' / 'task_suite_runs'
@@ -741,7 +846,39 @@ class RemoteJobManager:
         if not principal.is_admin and self._owners.get(job_id) != principal.subject:
             return None
         job = self._jobs.get(job_id)
-        return self._suite_progress(job) if job else None
+        return self._liked_view(self._suite_progress(job), principal, self._favorite_ids_for_view(principal)) if job else None
+
+    def _favorite_ids_for_view(self, principal):
+        from .prompt_favorites import owned_favorite_ids
+        try:
+            return owned_favorite_ids(self.settings.prompt_favorites_path, principal)
+        except RepositoryError:
+            # Favorites are secondary UI data; their failure must never prevent
+            # generation status, images or remake from being read.
+            return set()
+
+    def _liked_view(self, job, principal, saved):
+        from .prompt_favorites import favorite_id, full_prompt
+        if saved and job.bridge_job_ids:
+            from .image_prompts import resolve_image_prompt
+            for image in job.images:
+                if image.final_prompt:
+                    continue
+                try:
+                    snapshot = resolve_image_prompt(self.settings, job, image)
+                    if snapshot.get('kind') == 'compiled':
+                        image.final_prompt = snapshot['positive']
+                        image.negative_prompt = snapshot.get('negative', '')
+                        image.prompt_stage = snapshot['stage']
+                except (OSError, ValueError, RepositoryError):
+                    pass
+        images = [image for image in job.images if (image.final_prompt or image.source_prompt) and
+                  favorite_id(principal.subject, image.final_prompt or full_prompt(
+                      image.source_prompt, image.user_addition)) in saved]
+        return job.model_copy(update={
+            "liked_image_ids": [image.id for image in images],
+            "liked_prompt_ids": list(dict.fromkeys(image.prompt_id for image in images if image.prompt_id)),
+        })
 
     def _suite_progress(self, job):
         if not job.task_suite_id:
@@ -781,7 +918,7 @@ class RemoteJobManager:
         normalized_kind = str(kind or "").strip().casefold()
         normalized_status = str(status or "").strip().casefold()
         allowed_kinds = {
-            "direct", "chinese", "reverse", "random", "chaos", "hq", "refine"
+            "direct", "chinese", "reverse", "random", "chaos", "hq", "refine", "remake", "multi"
         }
         allowed_statuses = {"queued", "running", "succeeded", "failed"}
         if normalized_kind and normalized_kind not in allowed_kinds:
@@ -801,8 +938,10 @@ class RemoteJobManager:
         if page > pages:
             raise RemoteJobError("remote job page out of range")
         start = (page - 1) * page_size
+        saved = self._favorite_ids_for_view(principal)
         return RemoteJobPage(
-            items=[self._suite_progress(job) for job in jobs[start : start + page_size]],
+            items=[self._liked_view(self._suite_progress(job), principal, saved)
+                   for job in jobs[start : start + page_size]],
             page=page,
             pages=pages,
             total=total,
@@ -839,20 +978,17 @@ class RemoteJobManager:
         job = self.get(job_id, principal)
         if job is None or prompt_id not in job.prompt_ids:
             return None
-        liked = list(job.liked_prompt_ids)
-        if prompt_id not in liked:
-            liked.append(prompt_id)
-            self._update(job_id, liked_prompt_ids=liked)
-        return self._jobs[job_id]
+        return job
 
     def unmark_liked(self, prompt_id, principal):
-        from .prompt_likes import _saved_id
-        for job_id, job in list(self._jobs.items()):
-            if self._owners.get(job_id) != principal.subject:
-                continue
-            liked = [p for p in job.liked_prompt_ids if p != prompt_id and _saved_id(principal, p) != prompt_id]
-            if liked != job.liked_prompt_ids:
-                self._update(job_id, liked_prompt_ids=liked)
+        # Compatibility hook: DB content is authoritative; views reconcile it.
+        # Never couple a successful collection transaction to task JSON writes.
+        return None
+
+    def refresh_likes(self, principal):
+        # Older QQ callers invoke this after committing. There is no secondary
+        # task state to refresh: get/list derive owner flags without disk writes.
+        return None
 
     def remake_image(self, job_id: str, image_id: str, principal: AuthPrincipal, options=None):
         original = self.get(job_id, principal)
@@ -916,9 +1052,12 @@ class RemoteJobManager:
             self._update(job_id, status="running", message="AstrBot 正在生成")
             suite_rows = self._suite_progress(self._jobs[job_id]).task_suite_rows
             run_timeout = self.settings.remote_job_timeout_seconds * max(1, min(20, len(suite_rows)))
+            favorite_owner = self._favorite_owners.get(job_id, "")
+            favorite_ticket = None
             try:
-                policy = self._safety_policy()
-                if policy.enabled or job_id in self._admin_exempt_jobs:
+                policy = self._job_safety_policy(job_id)
+                group_context = self._group_contexts.get(job_id, {})
+                if policy.enabled or job_id in self._admin_exempt_jobs or group_context.get("enabled") or favorite_owner:
                     qq = self._safety_users.get(job_id, "")
                     admin_exempt = job_id in self._admin_exempt_jobs
                     if policy.enabled and not admin_exempt and (not re.fullmatch(r"[1-9][0-9]{4,14}", qq) or self._credit_store().score(qq) <= 0):
@@ -926,9 +1065,17 @@ class RemoteJobManager:
                     token = uuid.uuid4().hex
                     tickets = self.settings.plugin_data_dir / "safety/tickets"
                     tickets.mkdir(parents=True, exist_ok=True)
-                    with (tickets / f"{token}.json").open("x", encoding="utf-8") as stream:
+                    ticket_path = tickets / f"{token}.json"
+                    with ticket_path.open("x", encoding="utf-8") as stream:
+                        os.chmod(ticket_path, 0o600)
                         json.dump({"qq": qq, "root": job_id, "admin_exempt": admin_exempt,
+                                   "favorites_owner": favorite_owner,
+                                   "favorites_scope": "prompt-favorites:read" if favorite_owner else "",
+                                   "group_key": group_context.get("group_key", ""),
+                                   "group_request_id": group_context.get("request_id", ""),
                                    "expires": time.time()+run_timeout+120}, stream)
+                    if favorite_owner:
+                        favorite_ticket = ticket_path
                     username = f"aaa_safe_{token}"
                     if policy.enabled:
                         self._stream_targets[job_id] = target
@@ -945,17 +1092,41 @@ class RemoteJobManager:
                 )
                 message = plain[-1] if plain else "生成完成"
                 deliver = self._jobs[job_id].deliver_to_im
-                if deliver and (job_id not in self._stream_targets or not attachments):
-                    await self._send_im(target.umo, message, attachments, job_id=job_id,
-                        bridge_ids=re.findall(r"任务=(job_[A-Za-z0-9_]+)", "\n".join(plain)))
-                self._update(
-                    job_id,
-                    status="succeeded",
-                    message=f"已发送到 {target.public.label}" if deliver else "生成完成，仅保存在跑图记录；未发送 QQ",
-                    images=images,
-                    prompt_ids=list(dict.fromkeys([*_prompt_ids_from_plain(plain), *(image.prompt_id for image in images if image.prompt_id)]))[:20],
-                    bridge_job_ids=list(dict.fromkeys(re.findall(r"任务=(job_[A-Za-z0-9_]+)", "\n".join(plain))))[:20],
-                )
+                prompt_ids = list(dict.fromkeys([*_prompt_ids_from_plain(plain), *(image.prompt_id for image in images if image.prompt_id)]))[:20]
+                bridge_ids = list(dict.fromkeys(re.findall(r"任务=(job_[A-Za-z0-9_]+)", "\n".join(plain))))[:20]
+                from .image_prompts import resolve_image_prompt
+                prompt_job = self._suite_progress(self._jobs[job_id]).model_copy(update={'bridge_job_ids': bridge_ids})
+                for image in images:
+                    try:
+                        snapshot = resolve_image_prompt(self.settings, prompt_job, image)
+                        if snapshot.get('kind') == 'compiled':
+                            image.final_prompt = snapshot['positive']
+                            image.negative_prompt = snapshot.get('negative', '')
+                            image.prompt_stage = snapshot['stage']
+                    except (OSError, ValueError, RepositoryError):
+                        # An optional text read must never mark a generated image failed.
+                        pass
+                stream_delivery_failed = self._jobs[job_id].delivery_status == "failed"
+                # Persist the generated assets before attempting an external IM send.
+                # A NapCat timeout must not turn successful generation into failure.
+                self._update(job_id, status="running" if deliver else "succeeded", message="生成完成，等待 QQ 投递" if deliver else "生成完成，仅保存在跑图记录；未发送 QQ",
+                             images=images, prompt_ids=prompt_ids, bridge_job_ids=bridge_ids,
+                             delivery_status=("failed" if stream_delivery_failed else "pending") if deliver else "not_requested")
+                if deliver and stream_delivery_failed:
+                    self._update(job_id, status="succeeded", delivery_status="failed",
+                                 message="图片已生成并保存在记录中；QQ 投递失败，请检查 NapCat 状态")
+                elif deliver and (job_id not in self._stream_targets or not attachments):
+                    try:
+                        await self._send_im(target.umo, message, attachments, job_id=job_id,
+                            bridge_ids=bridge_ids)
+                    except Exception as exc:
+                        self._update(job_id, status="succeeded", delivery_status="failed",
+                                     delivery_error=f"{type(exc).__name__}: {str(exc)[:200]}",
+                                     message="图片已生成并保存在记录中；QQ 投递失败，请检查 NapCat 状态")
+                    else:
+                        self._update(job_id, status="succeeded", delivery_status="sent", message=f"已发送到 {target.public.label}")
+                elif deliver:
+                    self._update(job_id, status="succeeded", delivery_status="sent", message=f"已发送到 {target.public.label}")
                 if self._jobs[job_id].task_suite_id:
                     suite_job = self._suite_progress(self._jobs[job_id])
                     if any(row['status'] != 'succeeded' for row in suite_job.task_suite_rows):
@@ -963,6 +1134,16 @@ class RemoteJobManager:
             except Exception as exc:
                 self._update(job_id, status="failed", message=str(exc)[:500])
             finally:
+                self._favorite_owners.pop(job_id, None)
+                if favorite_ticket is not None:
+                    # Remove only this job's newly created capability, never a
+                    # directory sweep or a collection/image file.
+                    try:
+                        if (favorite_ticket.resolve() == favorite_ticket
+                                and favorite_ticket.is_file() and not favorite_ticket.is_symlink()):
+                            favorite_ticket.unlink()
+                    except OSError:
+                        pass  # Expiry still fails closed; generation is unaffected.
                 if self._jobs[job_id].task_suite_id:
                     # A timeout/shutdown must not leave later rows submitting behind the UI.
                     try:
@@ -995,7 +1176,7 @@ class RemoteJobManager:
         plain: list[str] = []
         attachments: list[str] = []
         images: list[RemoteJobImage] = []
-        image_sources: dict[str, str] = {}
+        image_sources: dict[str, tuple[str, str, str, str]] = {}
         async with self._client() as client:
             message: str | list[dict[str, str]] = command
             if source_image is not None:
@@ -1030,7 +1211,14 @@ class RemoteJobManager:
                     stored = None
                     attachment_id = None
                     if event_type == "plain" and isinstance(data, str):
-                        if data.startswith('AAA_IMAGE_SUITE=') and self._jobs[job_id].task_suite_id:
+                        if data.startswith('AAA_REVERSE_PROMPT=') and allow_text_only:
+                            try:
+                                positive = json.loads(data.split('=', 1)[1])['positive']
+                                if isinstance(positive, str) and len(positive) <= 100000:
+                                    self._update(job_id, converted_prompt=positive, final_prompt=positive)
+                            except (ValueError, TypeError, KeyError):
+                                pass
+                        elif data.startswith('AAA_IMAGE_SUITE=') and self._jobs[job_id].task_suite_id:
                             try:
                                 index = int(json.loads(data.split('=', 1)[1])['index'])
                                 if 1 <= index <= 20:
@@ -1041,8 +1229,18 @@ class RemoteJobManager:
                             try:
                                 mapping = json.loads(data.split('=', 1)[1])
                                 digest, ident = mapping['sha256'], mapping['prompt_id']
-                                if re.fullmatch(r'[0-9a-f]{64}', digest) and re.fullmatch(r'[A-Za-z0-9_.-]{1,300}', ident):
-                                    image_sources[digest] = ident
+                                if re.fullmatch(r'[0-9a-f]{64}', digest) and re.fullmatch(r'[A-Za-z0-9_.:-]{1,300}', ident):
+                                    from .prompt_favorites import source_safety_code
+                                    try:
+                                        source_safety = source_safety_code(mapping, required=True)
+                                    except RepositoryError:
+                                        source_safety = ""  # old records cannot imply N
+                                    image_sources[digest] = (
+                                        ident,
+                                        str(mapping.get('source_prompt', ''))[:100_000],
+                                        str(mapping.get('user_addition', ''))[:100_000],
+                                        source_safety,
+                                    )
                             except (ValueError, KeyError, TypeError):
                                 pass
                         elif "已提交生成请求" not in data:
@@ -1063,7 +1261,7 @@ class RemoteJobManager:
                             stored = await self._store_attachment(
                                 job_id, client, attachment_id
                             )
-                            if self._safety_policy().enabled and stored is None:
+                            if self._job_safety_policy(job_id).enabled and stored is None:
                                 raise RemoteJobError("安全图片读取失败，不予投递")
                             if stored is not None and all(
                                 item.id != stored.id for item in images
@@ -1076,14 +1274,14 @@ class RemoteJobManager:
                             stored = await self._store_attachment(job_id, client, attachment_id)
                         else:
                             stored = await self._store_media_reference(job_id, reference)
-                        if self._safety_policy().enabled and stored is None:
+                        if self._job_safety_policy(job_id).enabled and stored is None:
                             raise RemoteJobError("安全图片读取失败，不予投递")
                         if stored is not None and all(
                             item.id != stored.id for item in images
                         ):
                             images.append(stored)
                         if not attachment_id:
-                            if self._safety_policy().enabled and stored is not None:
+                            if self._job_safety_policy(job_id).enabled and stored is not None:
                                 safe_path = self._media_dir / job_id / f"{stored.id}{Path(stored.filename).suffix.casefold()}"
                                 content = safe_path.read_bytes()
                                 self._require_approved(content, job_id)
@@ -1099,19 +1297,29 @@ class RemoteJobManager:
                     if attachment_id and stored is not None:
                         self._attachment_images[(job_id, attachment_id)] = stored
                     for image in images:
-                        image.prompt_id = image_sources.get(image.sha256, image.prompt_id)
+                        if image.sha256 in image_sources:
+                            (image.prompt_id, image.source_prompt, image.user_addition,
+                             image.source_safety_code) = image_sources[image.sha256]
                     if images:
                         self._update(job_id, images=list(images), prompt_ids=list(dict.fromkeys([*_prompt_ids_from_plain(plain), *(image.prompt_id for image in images if image.prompt_id)]))[:20])
                     if job_id in self._stream_targets and images:
                         self._update(job_id, images=list(images),
                                      prompt_ids=list(dict.fromkeys([*_prompt_ids_from_plain(plain), *(image.prompt_id for image in images if image.prompt_id)]))[:20],
                                      message=f"已通过安全审核 {len(images)} 张，任务仍在执行")
-                        if self._jobs[job_id].deliver_to_im:
+                        if self._jobs[job_id].deliver_to_im and self._jobs[job_id].delivery_status != "failed":
                             sent = self._stream_sent[job_id]
                             for attachment in attachments:
                                 if attachment not in sent:
-                                    await self._send_im(self._stream_targets[job_id].umo, plain[-1] if plain else "安全审核通过", [attachment],
-                                        job_id=job_id, bridge_ids=re.findall(r"任务=(job_[A-Za-z0-9_]+)", "\n".join(plain)))
+                                    try:
+                                        await self._send_im(self._stream_targets[job_id].umo, plain[-1] if plain else "安全审核通过", [attachment],
+                                            job_id=job_id, bridge_ids=re.findall(r"任务=(job_[A-Za-z0-9_]+)", "\n".join(plain)))
+                                    except Exception as exc:
+                                        # Sending may have succeeded before a timeout. Do not
+                                        # retry uncertain messages or stop consuming safe results.
+                                        self._update(job_id, delivery_status="failed",
+                                                     delivery_error=f"{type(exc).__name__}: {str(exc)[:200]}",
+                                                     message="QQ 投递失败；后续图片继续保存到记录，请检查 NapCat 状态")
+                                        break
                                     sent.add(attachment)
         if plain and plain[-1].startswith("生成失败"):
             raise RemoteJobError(plain[-1])

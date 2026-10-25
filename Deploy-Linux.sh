@@ -13,6 +13,7 @@ if [ "$#" -eq 0 ] && [ -z "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]; then
     echo 'Headless Linux: copy examples/deployment-plan.linux.json and edit local paths/options.'
     echo 'Preflight: sh Deploy-Linux.sh --plan /absolute/path/my-plan.json'
     echo 'Install:   sh Deploy-Linux.sh --plan /absolute/path/my-plan.json --apply'
+    echo 'NapCat: see docs/NAPCAT_SETUP.md (verified preparation, then interactive upstream installer).'
     exit 0
 fi
-exec "$PYTHON" tools/deploy_project.py --platform linux "$@"
+exec "$PYTHON" tools/setup_center.py --platform linux "$@"

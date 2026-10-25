@@ -9,6 +9,8 @@ import json
 import re
 import sys
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from public_resource_policy import unreviewed_gufeng_payload
 
 
 TEXT_SUFFIXES = {
@@ -22,7 +24,7 @@ FORBIDDEN_SUFFIXES = {
 }
 FORBIDDEN_NAMES = {
     ".env", "lite_users.json", "delivery_targets.json", "cmd_config.json",
-    "runtime-env.json", "last-plan.json", "services.json", "extension_host.py",
+    "runtime-env.json", "last-plan.json", "services.json",
 }
 FORBIDDEN_DIRS = {
     ".venv", "venv", "__pycache__", ".dart_tool", "build", ".gradle",
@@ -33,13 +35,12 @@ FORBIDDEN_DIRS = {
 TEXT_PATTERNS = {
     "private key block": re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----"),
     "provider API key": re.compile(r"\b(?:sk-proj-|sk-ant-|abk_)[A-Za-z0-9_-]{24,}\b"),
-    "excluded training connector route": re.compile(r"/extensions/anima-lora-studio(?:/|['\"])", re.I),
     "Windows user path": re.compile(r"[A-Za-z]:\\Users\\(?!YOUR_USER|username)", re.I),
     "private server account path": re.compile(r"/root/(?:\.config/QQ|\.local/share/QQ|Napcat)", re.I),
     "container instance id": re.compile(r"\bcpod-[a-z0-9-]+\b", re.I),
     "literal Hub bearer token": re.compile(r"\baah_(?:admin|lite|u)_[A-Za-z0-9_-]{24,}\b"),
     "GitHub token": re.compile(r"\b(?:ghp|github_pat)_[A-Za-z0-9_]{20,}\b"),
-    "generic API secret": re.compile(r"(?i)(?:api[_-]?key|secret|password)\s*[:=]\s*['\"]?(?!$|replace|your-|test-|example)[A-Za-z0-9_./+-]{24,}"),
+    "generic API secret": re.compile(r"(?i)(?:api[_-]?key|secret|password)[ \t]*[:=][ \t]*['\"]?(?!$|replace|your-|test-|example)[A-Za-z0-9_./+-]{24,}"),
 }
 
 
@@ -72,6 +73,9 @@ def scan(root: Path) -> list[str]:
                 findings.append(f"forbidden generated package directory: {relative}")
             continue
         if not path.is_file():
+            continue
+        if unreviewed_gufeng_payload(relative.as_posix()):
+            findings.append(f'unreviewed GuFeng resource payload: {relative}')
             continue
         if path.name in FORBIDDEN_NAMES and path.name != ".env.example":
             findings.append(f"forbidden private filename: {relative}")

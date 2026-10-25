@@ -221,6 +221,23 @@ def _gpu_probe() -> ProbeStatus:
 
 
 async def collect_workstation_status(settings: Settings) -> WorkstationStatus:
+    if settings.execution_mode == "local":
+        probes = await asyncio.gather(
+            asyncio.to_thread(
+                _http_probe, "comfyui", settings.comfyui_url, "/system_stats",
+                timeout=settings.request_timeout_seconds,
+            ),
+            asyncio.to_thread(_preset_probe, settings.preset_path),
+            asyncio.to_thread(_disk_probe, settings.comfyui_root, "comfyui_disk"),
+            asyncio.to_thread(_disk_probe, settings.output_dir, "output_disk"),
+            asyncio.to_thread(_gpu_probe),
+        )
+        comfy_status = probes[0].status
+        return WorkstationStatus(
+            status="ready" if comfy_status == "online" else "offline",
+            checked_at=datetime.now().astimezone(),
+            probes=list(probes),
+        )
     astrbot_headers = {}
     if settings.astrbot_api_key:
         astrbot_headers["Authorization"] = f"Bearer {settings.astrbot_api_key}"

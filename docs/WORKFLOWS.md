@@ -12,7 +12,7 @@
 | --- | --- | --- |
 | HQ / Refine | Anima 模型，基础 ComfyUI 节点 | 先替换 `YOUR_ANIMA_*` 模型；HQ 可沿用二次采样，SeedVR2 链路需额外启用 |
 | Detail Repair | Impact-Pack、Impact-Subpack、检测模型 / SAM | 不含检测模型权重，不能只装 JSON；脸部默认建议关闭 |
-| SeedVR2 Refine | SeedVR2 节点、DiT / VAE | 本版模板为原生整图放大 + VAE 分块，不是旧 Tiling 的同一拓扑；替换 `YOUR_SEEDVR2_*` |
+| SeedVR2 Refine | 原生 SeedVR2 节点、DiT / VAE | 关闭图像Tiling及VAE编码/解码分块；不需要Tiling节点；替换 `YOUR_SEEDVR2_*`，低显存先调小工作流与Registry目标 |
 | Reverse | Booru Tagger、JoyCaption GGUF + 配套 mmproj | 可选择场景、动作、角色等类别；只返回提示词与继续生图是两种模式 |
 | Safety Audit | CLTagger 模型、Booru Tagger | 审核默认关闭，需用户明确启用并校准；模型判断不是安全保证 |
 | Caption Train 辅助模板 | 用户自行提供训练系统与依赖 | 仅保留独立 caption 辅助工具，不包含 LoRA Studio 服务 / 代理 / 客户端入口 |

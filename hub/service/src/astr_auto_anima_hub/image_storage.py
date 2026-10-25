@@ -18,19 +18,41 @@ from typing import Literal
 from .auth import require_admin
 
 
+AUTO_AREAS = frozenset({
+    "attachments", "remote_media", "inputs", "cache", "prompt_backups",
+    "catalog_backups", "lora_backups", "preset_backups", "style_backups",
+    "user_backups", "logs",
+})
+ALL_AREAS = (
+    "attachments", "remote_media", "inputs", "cache", "random_style",
+    "output", "author", "prompt_backups", "catalog_backups", "lora_backups",
+    "preset_backups", "style_backups", "user_backups", "logs",
+)
+
+
+class RetentionPolicy(BaseModel):
+    enabled: bool = False
+    days: int = Field(default=14, ge=2, le=3650)
+
+
 class StorageConfig(BaseModel):
     grouping: Literal["original", "style", "character", "user"] = "original"
     strip_metadata: bool = False
     scheduled: bool = False
-    retention_days: int = Field(default=7, ge=1, le=3650)
+    retention_days: int = Field(default=7, ge=2, le=3650)
     cleanup_hour: int = Field(default=4, ge=0, le=23)
+    retention_policies: dict[str, RetentionPolicy] = Field(default_factory=dict)
     watermark: bool = False
     watermark_corner: Literal["top-left", "top-right", "bottom-left", "bottom-right"] = "bottom-right"
     watermark_folder: str = Field(default="Author Pictures", pattern=r"^[\w -]{1,80}$")
 
 
 class StorageAction(BaseModel):
-    area: Literal["cache", "random_style", "output", "author"]
+    area: Literal[
+        "attachments", "remote_media", "inputs", "cache", "random_style",
+        "output", "author", "prompt_backups", "catalog_backups", "lora_backups",
+        "preset_backups", "style_backups", "user_backups", "logs",
+    ]
     older_days: int = Field(default=0, ge=0, le=3650)
     snapshot: str = ""
     confirmed: bool = False
@@ -59,14 +81,23 @@ class ImageStorage:
         self.archived = set()
         self.task = None
         self.last_day = ""
+        self.last_days = {}
         self.last_cleanup = "尚未执行"
         self.lock = asyncio.Lock()
 
     def config(self):
         path = checked(self.config_path)
-        return StorageConfig.model_validate(json.loads(path.read_text("utf-8"))) if path.exists() else StorageConfig()
+        if not path.exists():
+            return StorageConfig()
+        raw = json.loads(path.read_text("utf-8"))
+        # Older installs allowed one day for the legacy cache policy.
+        if isinstance(raw, dict) and int(raw.get("retention_days", 7)) < 2:
+            raw["retention_days"] = 2
+        return StorageConfig.model_validate(raw)
 
     def save(self, config):
+        if set(config.retention_policies) - AUTO_AREAS:
+            raise ValueError("只有缓存和备份资源允许定期清理")
         if config.watermark_folder.casefold() in {"aaa-randomstyle", "aaa-style", "aaa-character", "aaa-user", "models", "workflows"}:
             raise ValueError("签名目录名称保留，请换一个目录名")
         if config.watermark and not checked(self.settings.plugin_data_dir / "signature.png").is_file():
@@ -81,10 +112,29 @@ class ImageStorage:
 
     def root(self, area):
         output = self.settings.output_dir
-        roots = {"cache": self.settings.plugin_data_dir / "outputs",
+        data_root = self.settings.plugin_data_dir.parent.parent
+        backup = self.settings.plugin_data_dir / "hub_state" / "backups"
+        roots = {"attachments": data_root / "attachments",
+                 "remote_media": self.settings.plugin_data_dir / "hub_state" / "remote_jobs" / "media",
+                 "inputs": self.settings.plugin_data_dir / "inputs",
+                 "cache": self.settings.plugin_data_dir / "outputs",
                  "random_style": output / "AAA-RandomStyle", "output": output,
-                 "author": output / self.config().watermark_folder}
+                 "author": output / self.config().watermark_folder,
+                 "prompt_backups": backup / "prompts",
+                 "catalog_backups": self.settings.plugin_data_dir / "prompt_pool_backups",
+                 "lora_backups": backup / "loras",
+                 "preset_backups": backup / "presets",
+                 "style_backups": backup / "personal_styles",
+                 "user_backups": backup / "lite_users",
+                 "logs": data_root / "logs"}
         return checked(roots[area])
+
+    def suffixes_for(self, area):
+        if area == "logs":
+            return {".log", ".txt"}
+        if area.endswith("backups"):
+            return {".json"}
+        return self.suffixes
 
     def inventory(self, area, older_days=0):
         root = self.root(area)
@@ -109,7 +159,7 @@ class ImageStorage:
             dirs[:] = allowed
             for name in names:
                 path = base / name
-                if path.suffix.lower() not in self.suffixes:
+                if path.suffix.lower() not in self.suffixes_for(area):
                     continue
                 if path.is_symlink():
                     skipped += 1
@@ -124,7 +174,7 @@ class ImageStorage:
 
     def view(self):
         areas = []
-        for area in ("cache", "random_style", "output", "author"):
+        for area in ALL_AREAS:
             rows, skipped = self.inventory(area)
             folders = {}
             for row in rows:
@@ -135,7 +185,8 @@ class ImageStorage:
             areas.append({"id": area, "path": str(self.root(area)), "count": len(rows),
                           "folders": [folders[name] for name in sorted(folders)],
                           "bytes": sum(r["size"] for r in rows), "skipped_links": skipped})
-        return {"config": self.config().model_dump(), "areas": areas, "last_cleanup": self.last_cleanup}
+        return {"config": self.config().model_dump(), "areas": areas,
+                "last_cleanup": self.last_cleanup, "auto_areas": sorted(AUTO_AREAS)}
 
     def preview(self, payload):
         rows, skipped = self.inventory(payload.area, payload.older_days)
@@ -150,8 +201,8 @@ class ImageStorage:
         self.snapshots = {k: v for k, v in self.snapshots.items() if v["expires"] > time.time()}
         self.snapshots[token] = {"area": payload.area, "rows": rows, "expires": time.time() + 900}
         return {"snapshot": token, "count": len(rows), "bytes": sum(r["size"] for r in rows),
-                "files": [r["name"] for r in rows], "skipped_links": skipped,
-                "warning": ("打包本次图片清单，包含最近图片；源文件不修改。" if payload.include_recent else "仅清理本次清单内的图片，保留目录和任务记录；历史图片可能无法查看。最近五分钟的图片不会列入。")}
+                "files": [r["name"] for r in rows[:100]], "skipped_links": skipped,
+                "warning": ("打包本次文件清单，包含最近文件；源文件不修改。" if payload.include_recent else "仅清理本次清单内的文件，保留目录和任务记录；历史图片或旧备份可能无法查看。最近五分钟的文件不会列入。")}
 
     def validate(self, payload):
         snap = self.snapshots.get(payload.snapshot)
@@ -168,20 +219,28 @@ class ImageStorage:
         return snap, root
 
     async def idle(self):
-        if any(job.status in {"queued", "running"} for job in self.jobs._jobs.values()):
-            raise ValueError("Hub 仍有排队或运行任务，请任务完成后清理")
+        if any(getattr(job, 'status', None) not in {"succeeded", "failed"}
+               for job in self.jobs._jobs.values()):
+            raise ValueError("Hub 仍有未结束或未知状态任务，请任务完成后清理")
         records = checked(self.settings.plugin_data_dir / "job_store" / "jobs")
+        if records.exists() and not records.is_dir():
+            raise ValueError("插件任务目录类型异常，停止清理")
         if records.is_dir():
             for path in records.glob("*.json"):
-                job = json.loads(checked(path).read_text("utf-8-sig"))
-                if job.get("status") in {"queued", "running"}:
-                    raise ValueError("插件仍有未结束任务，请完成任务后清理（中断遗留任务请管理员先核实）")
+                path = checked(path)
+                if not stat.S_ISREG(path.lstat().st_mode):
+                    raise ValueError("插件任务记录类型异常，停止清理")
+                job = json.loads(path.read_text("utf-8-sig"))
+                if (not isinstance(job, dict) or not isinstance(job.get('status'), str)
+                        or job['status'] not in {'completed', 'failed', 'cancelled'}):
+                    raise ValueError("插件仍有未结束或未知状态任务，请完成任务后清理（中断遗留任务请管理员先核实）")
         import httpx
         async with httpx.AsyncClient(timeout=5) as client:
             response = await client.get(str(self.settings.comfyui_url).rstrip("/") + "/queue")
             response.raise_for_status()
             queue = response.json()
-        if not isinstance(queue, dict) or not all(key in queue for key in ("queue_running", "queue_pending")):
+        if not isinstance(queue, dict) or not all(isinstance(queue.get(key), list)
+                                                for key in ("queue_running", "queue_pending")):
             raise ValueError("无法验证 ComfyUI 队列，禁止清理")
         if queue["queue_running"] or queue["queue_pending"]:
             raise ValueError("ComfyUI 队列不为空，请稍后清理")
@@ -236,11 +295,11 @@ class ImageStorage:
                     path.unlink()
                     deleted += 1
             except OSError as exc:
-                raise ValueError(f"已清理 {deleted} 张后遇到文件错误，已停止，不会强制重试") from exc
+                raise ValueError(f"已清理 {deleted} 个文件后遇到文件错误，已停止，不会强制重试") from exc
             finally:
                 self.snapshots.pop(payload.snapshot, None)
-            self.last_cleanup = f"{time.strftime('%Y-%m-%d %H:%M:%S')} {payload.area}: {deleted} 张"
-            return {"deleted": deleted, "message": "图片已永久删除，任务记录保留；可从自行保存的压缩包恢复。"}
+            self.last_cleanup = f"{time.strftime('%Y-%m-%d %H:%M:%S')} {payload.area}: {deleted} 个文件"
+            return {"deleted": deleted, "message": "选定文件已永久删除，任务记录保留；可从自行保存的压缩包恢复。"}
 
     async def scheduler(self):
         while True:
@@ -248,11 +307,23 @@ class ImageStorage:
             try:
                 config = self.config()
                 today = time.strftime("%Y-%m-%d")
-                if config.scheduled and time.localtime().tm_hour == config.cleanup_hour and self.last_day != today:
-                    action = StorageAction(area="cache", older_days=config.retention_days, confirmed=True)
-                    action.snapshot = self.preview(action)["snapshot"]
-                    await self.cleanup(action, scheduled=True)
-                    self.last_day = today
+                if time.localtime().tm_hour == config.cleanup_hour:
+                    policies = dict(config.retention_policies)
+                    if config.scheduled and "cache" not in policies:
+                        policies["cache"] = RetentionPolicy(enabled=True, days=config.retention_days)
+                    for area, policy in policies.items():
+                        if area not in AUTO_AREAS or not policy.enabled or self.last_days.get(area) == today:
+                            continue
+                        try:
+                            action = StorageAction(area=area, older_days=policy.days, confirmed=True)
+                            action.snapshot = self.preview(action)["snapshot"]
+                            await self.cleanup(action, scheduled=True)
+                            self.last_days[area] = today
+                        except asyncio.CancelledError:
+                            raise
+                        except Exception as exc:
+                            # One unavailable area must not starve other policies.
+                            self.last_cleanup = f"自动清理 {area} 未执行：{str(exc)[:160]}"
             except asyncio.CancelledError:
                 raise
             except Exception as exc:

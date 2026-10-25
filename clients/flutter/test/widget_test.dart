@@ -154,7 +154,7 @@ void main() {
     final issued = LiteUserIssueResult.fromJson({
       'action': 'created',
       'revision': 'rev-2',
-      'token': 'aah_u_example',
+      'token': 'aah_u_test-placeholder',
       'user': {
         'id': 'qq-123456789',
         'qq': '123456789',

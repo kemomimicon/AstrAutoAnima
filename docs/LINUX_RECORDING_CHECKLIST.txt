@@ -1,0 +1,142 @@
+AstrAutoAnima 0.5.2-beta.1+44 · Linux 全新部署与视频录制清单
+适用：独立新实例；不是现有业务服务器覆盖升级步骤。
+本清单对应包内真实入口；录制中实际通过的环节才可标为“通过”。
+
+一、开录前准备（不展示凭据）
+[ ] 新实例，无正在训练/运行的其他业务；持久盘有足够空间且明确哪些目录会随实例释放。
+[ ] 选定永久安装目录，如 /workspace/aaa-install。解压源码不等于安装目录，勿部署到下载临时目录。
+[ ] Linux x86_64；Python 3.12+（全新 AstrBot 要求）、venv、pip、Git、curl、unzip 可用。
+    不自动安装显卡驱动；先用 nvidia-smi 确认 GPU。首次首图推荐 16GB+ 显存/32GB+ 内存；
+    12GB 属需减分辨率/逐个卸载模型的试验档位，不保证全部工作流。
+    为环境、模型、下载临时文件及图片建议预留至少 80GB；装齐大扩展建议 150GB 以上。
+    这些是容量预算，不是全部功能实测最低要求；参阅 HARDWARE_AND_QUANTIZATION.md。
+[ ] 若无 GPU，先装文件与配置；不能将 CPU 健康检查当作 GPU 生图验收。
+[ ] 本次完整候选包及 SHA256SUMS.txt；离线准备模型可减少镜头内等待，注明是预先下载。
+[ ] 录制前试一下到 GitHub、PyPI、PyTorch、Hugging Face 的网络；不承诺中国区无障碍。
+[ ] 浏览器仅展示脱敏配置。隐藏命令历史、运行日志中的凭据、QQ 扫码、WebUI Token、IP/域名。
+[ ] 可中途暂停录制下载，不反复点击安装；保留进度与错误日志。
+
+二、包的选择与校验（镜头 1）
+[ ] 完整合集用于分发；服务器只上传其中 deployment 下 Linux lazy bundle，勿运行 Windows 包。
+[ ] 将 Linux ZIP 与配套 SHA256 清单放同一目录，使用 sha256sum 核对对应文件那一行。
+    若使用整份 SHA256SUMS.txt -c，需其他列出的文件也在目录中；缺其他包不代表当前包损坏。
+[ ] 在空的解压目录运行 unzip <Linux包.zip>；进入 AstrAutoAnima-0.5.2-beta.1。
+[ ] 查看 docs/INTEGRATED_PATCHES.txt；确认 release-manifest.json 的 public_build 为 44。
+    打包报告不含真实服务器/GPU通过记录；这部分由本次现场录制补齐。
+
+三、制定部署计划与预检（镜头 2）
+[ ] 复制 examples/deployment-plan.linux.fresh.example.json 到发布源码以外的工作目录并修改。
+    示例会安装 AstrBot/ComfyUI/依赖（已选外部获取），但模型/AM/扩展默认不下载。
+    你按需主动开启，不是解压后自动联网。完整核心部署建议确认后：
+      install_am = true                        安装兼容基线 Anima Master 0.7.1
+      download_models = true                  自动取 Anima Base 1.0 的 UNET/CLIP/VAE
+      accept_model_license = true             阅读模型许可后才能勾选
+    原有 examples/deployment-plan.linux.json 是复用环境的样例，别误用为全新安装。
+[ ] destination 改为实际永久目录；没有复用环境时不填其他人的 astrbot/comfyui/Python 路径。
+[ ] 不想重下模型：download_models=false，unet/clip/vae 填各自完整本地文件路径；
+    程序会复制到对应 models 子目录，或复用已位于该目录下的文件。
+[ ] 首图先不选 JoyCaption/SeedVR2/训练组件，减少下载与故障变量。
+[ ] 首次 api_key、bot_id 可暂留空；不要把密钥写进演示计划或录屏命令。
+[ ] 在解压后的源码根目录执行（按实际 Python/计划路径替换）：
+      AAA_PYTHON=python3.12 sh Deploy-Linux.sh --plan /workspace/aaa-fresh-plan.json
+    预期“预检通过，未写入、未联网”。预检不验证下载链路、磁盘预算或运行生图。
+    没通过就只修该错误，不直接加 --apply 硬跑。
+
+四、执行部署与阶段状态（镜头 3）
+[ ] 确认端口 6185/6278/8188 未被其他服务占用，且只有一次部署进程。
+[ ] 再执行同一命令追加 --apply：
+      AAA_PYTHON=python3.12 sh Deploy-Linux.sh --plan /workspace/aaa-fresh-plan.json --apply
+    输出阶段：准备 → 应用环境 → AAA 文件 → 依赖 → 扩展 → 模型 → 连接与 AM → 启动入口 → 健康。
+    SSH 无桌面使用终端阶段日志；Tk 状态灯仅在有桌面环境时显示，不会在无桌面弹窗。
+[ ] 记录实际安装的 AstrBot、ComfyUI、PyTorch 和模型版本；上游依赖会随时间变化。
+    当前计划全新 AstrBot 固定 4.27.2 / ComfyUI v0.21.1；不要口播成最新版本。
+[ ] AM 兼容基线为 0.7.1；0.7.2 是过去错误指引。0.9.1 是历史提及的未联调版本，
+    不代表录制当日上游最新，教程不要写“自动兼容所有新版”。
+[ ] 下载后检查大小及 SHA256，不关闭校验、不将 HTML/网盘分享页保存为模型。
+[ ] 阶段结束后看 pending/“下一步.txt”；needs_attention 不是已验收首图。
+
+五、健康检查与安全访问（镜头 4）
+[ ] curl -fsS --max-time 15 http://127.0.0.1:8188/system_stats
+[ ] curl -fsS --max-time 15 http://127.0.0.1:6278/api/v1/health
+[ ] AstrBot 用 GET http://127.0.0.1:6185/ 查看，不用 HEAD 的 405 判断挂了。
+[ ] 查看安装目录 services.json 的路径/端口（分享前遮盖）；必要时只读查看各服务日志。
+[ ] 日常启动：sh /workspace/aaa-install/Start.sh；不要为启动反复 --apply。
+    Start.sh 的终端退出后服务进程行为需按实际系统验证，本包不宣称自带 systemd 开机自启。
+[ ] 默认本机回环监听。远程浏览器用受保护 SSH 转发/VPN/HTTPS；不要全开公网端口。
+    可在自己电脑执行 ssh -N -L 6278:127.0.0.1:6278 -L 6185:127.0.0.1:6185 <自己的SSH目标>。
+    本机浏览器访问转发端口；不要把真实 SSH 用户/地址和认证信息录进去。
+
+六、QQ/NapCat 与首次授权（镜头 5）
+[ ] NapCat 可复用已有安装；新装先阅读 docs/NAPCAT_SETUP.md。
+    无桌面可先只准备校验过的入口：
+      python3.12 tools/napcat_setup.py --platform linux --prepare /workspace/napcat-prep --allow-prepare
+    此命令不执行第三方安装器。检查显示的命令、权限和依赖后，你在交互终端自行运行。
+    此工具的镜像参数只管入口下载，不会替换第三方安装器内部所有链接。
+[ ] 按官方安装输出启动 NapCat → 打开受保护 WebUI → 自己扫码/设备验证（暂停录制）。
+[ ] AstrBot 新建并启用 aiocqhttp / OneBot 平台；NapCat 配 WebSocket 客户端反向连接。
+    同机常用 ws://127.0.0.1:6199/ws；两端 Token 一致，容器/跨主机不能照搬127.0.0.1。
+[ ] 用自己的私聊发 /sid 收到会话标识；记录实际 Bot ID，不将 QQ 群号当 Bot ID。
+[ ] AstrBot OpenAPI 创建完整 Key，检查所需 chat/message 权限。
+    Key 不等于 WebUI 登录密码，不要复制省略显示的字符串；401 先查凭据与授权。
+[ ] 完整服务档位使用安装目录 runtime-env.full.json；runtime-env.json 是活动副本。
+    安全编辑这两份的 AAH_ASTRBOT_API_KEY 和 AAH_ASTRBOT_BOT_ID，保持完整服务配置一致。
+    不改 runtime-env.local.json 的独立本机令牌或混入QQ凭据。
+    Hub 管理员令牌 AAH_ADMIN_TOKEN 已独立生成；四类凭据不能混用：
+    AstrBot Key / Hub 管理或个人令牌 / OneBot共享Token / NapCat WebUI Token。
+    不 cat 全文件、不录屏保存、不上传；两份环境文件权限均设为600。
+[ ] 修改环境后正常重启 Hub（先精确确认服务再停止，不用 pkill python）；模型/词库不删除。
+[ ] 有Linux桌面：在实际服务器运行首次配置向导（Python+Tk），读取完整服务配置；
+    向导只写所选择的本机文件，不会SSH远程写入。完整服务修改连接后还需核对活动副本。
+    不能在Windows直接用这套向导编辑含Linux绝对路径的远程配置副本；它会安全拒绝。
+[ ] 无Linux桌面：直接安全编辑环境配置；个人用户用包内已有离线CLI创建。
+    先正常停止Hub，在解压后的源码根目录运行（替换为自己的QQ，暂停录制令牌交付过程）：
+      python3.12 tools/hub_lite_user_manager.py add --registry /workspace/aaa-install/astrbot/data/plugin_data/astrbot_plugin_comfy_bridge/hub_state/lite_users.json --delivery /workspace/aaa-user-token.csv --qq <自己的QQ号> --no-group
+    命令会备份已有注册表；不要加 --rotate-existing，除非明确要使旧令牌失效。
+    CSV是一次性明文交付文件，只供本人安全保存；不展示、不提交Git、不放公开下载目录。
+    注册表和CSV权限均应为600，后续启动Hub读取注册表。
+[ ] 个人令牌登录独立服务客户端，先选择“我的QQ私聊”动态目标（self-private），
+    按注册QQ与实际Bot ID投递；不是管理员自己配置的群。先验证授权与私聊收图。
+    固定群目标及高级权限按 docs/FIRST_RUN_WIZARD.md 的格式人工配置/用实际Linux桌面向导；
+    不要把群号直接填成UMO，不公开管理员令牌。修改前停服务并备份，保存后回读。
+
+七、第一次完整生图（镜头 6，核心验收）
+[ ] 确认 AAA 与 AM 0.7.1 都加载；AAA 的 ComfyUI 地址正确且工作流文件真实存在。
+[ ] 基础模型三件齐全，节点按实际模型名选择；LoRA 先不选，先跑最小单张任务。
+    Quick 是最小起步工作流，不是“旧错误文件”；动态 LoRA 无需猜填 46/47/48/49。
+[ ] 使用一条无敏感内容的英文测试串，默认单张；查看排队/生成/完成。
+[ ] 取回完整图片，可在管理/服务客户端记录页打开，下载后实际验证图片。
+[ ] 再用自己的 QQ 私聊触发单张，确认真实返图。生成成功但投递失败要分开记录。
+[ ] 保存一次角色/画风后重开回读；首次 LoRA 元信息保存后改分类，无无故409。
+[ ] 管理端先启动、Hub后启动：词库/角色页应恢复；不要用401测试自动重连。
+[ ] QQ 官方适配用户额外测：新图片带AAA-REF、引用/aremake精确关联；
+    OneBot 路线不应新增该标记。固定种子且参数/模型相同，重跑相同结果是预期。
+[ ] /aecho 测随机抽卡来源快照，/astyle 测画风信息；手写生图缺抽卡串不是bug。
+[ ] 新建少量测试提示词组 → 导入预览/去重 → 确认级别与权限 → 保存 → 抽取；
+    词库/角色原始数据不随包分发，公开词库下载和导入须用户自选核对许可。
+
+八、扩展单独录制（首图成功后再做）
+[ ] HQ / 局部修复逐项补齐节点与模型、绑定工作流、单张验收。
+[ ] WD-EVA02 / CLTagger 文件按 docs/EXTENSIONS_GUIDE.md 放置，检查运行 provider。
+[ ] JoyCaption 选匹配 GGUF+mmproj，Q4节省内存但可能损失细节/标签稳定性；
+    CPU能加载≠速度可用，反推与生图尽量顺序运行。
+[ ] SeedVR2 必须按当前显存选量化及分辨率，不默认分块；不保证12GB跑所有尺寸。
+[ ] 首图教程不默认装训练环境，不启动训练、不操作付费实例关机/开机。
+
+九、出错与重置（建议保留真实示范片段）
+[ ] 下载超时：等当前任务结束/明确停止后再恢复；同一目标不要并行写。
+    残片保留供续传，失败不跳SHA；可选可信镜像/代理或完整本地文件，不写死陌生代理。
+[ ] 部署中断：保留目录、deployment-status.json、日志、last-plan.json；修原因后重新预检。
+    last-plan.json 不保存API Key，恢复时凭据另填；进度记录不用于跳过校验。
+[ ] 只有服务未就绪：先看安装目录日志，正常启动/重启服务，不重复安装环境。
+[ ] 401：分清是Hub还是AstrBot；完整Key和权限错误不能靠重装/更换模型解决。
+[ ] 节点/模型 not in list：核对API工作流、object_info中模型原名和路径分隔符，刷新模型后再试。
+[ ] 503休眠/维护：先恢复服务状态；不重发多次生成，避免恢复后堆积任务。
+[ ] 修改模型/工作流后仍失败：留完整错误与脱敏日志，按节点逐项定位，不清词库/密钥。
+[ ] Windows搬家是另一教程；Linux目录/venv也含绝对路径，不直接改名搬走。
+
+十、录制结束/发布视频前
+[ ] 填写实际OS/GPU/驱动/Python/依赖/模型SHA/包SHA，以及每项“通过/失败/未测”。
+[ ] 遮盖密钥、Token、QR、IP/域名、QQ身份、私人词条及命令历史。
+[ ] 视频说明区提供本轮包与SHA、Linux入口、AM0.7.1基线、官方上游链接与已知限制。
+[ ] 不将录制实例直接制成公开镜像；完整镜像还需清理账号/登录态/令牌并独立克隆验证。
+[ ] 本清单不表示已上传GitHub，也不代表已经在你的实例上验证。

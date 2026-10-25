@@ -11,8 +11,9 @@ AstrAutoAnima 将 AstrBot、QQ/NapCat 与 ComfyUI/Anima 连接起来，提供基
 
 GitHub 项目：https://github.com/kemomimicon/AstrAutoAnima
 
-候选软件基线：AAA `0.5.2-beta.1/build44`，AM `0.7.1`，Studio `0.25.0`。
-目前公开主分支和旧下载包不等于这个镜像的完整对应源码，最终发布前必须补齐版本对应记录。
+拟发布名称：`0.5.2-1.44`，与视频和镜像同步。内部版本 AAA `0.5.2-beta.1/build44`，
+AM `0.7.1`，Studio `0.25.0`。本地新版候选源码已准备，尚未推送；
+目前公开主分支和旧下载包不等于这个镜像的完整对应源码，最终发布前必须完成版本对应核对。
 
 ## 内容和限制
 

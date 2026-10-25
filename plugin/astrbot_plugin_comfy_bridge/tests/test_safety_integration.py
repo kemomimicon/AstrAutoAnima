@@ -186,7 +186,10 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         tree = ast.parse((ROOT / "main.py").read_text(encoding="utf-8"))
         klass = next(n for n in tree.body if isinstance(n,ast.ClassDef) and n.name=="ComfyWorkflowBridge")
         method = next(n for n in klass.body if isinstance(n,ast.AsyncFunctionDef) and n.name=="_execute_random_picture")
-        ns = dict(globals(), AstrMessageEvent=object, Any=object, parse_group_selector=parse_group_selector)
+        ns = dict(globals(), AstrMessageEvent=object, Any=object, parse_group_selector=parse_group_selector,
+                  __package__="astrbot_plugin_comfy_bridge")
+        self.bridge._prompt_pool_path = lambda: self.bridge.root / "pool.json"
+        self.bridge._is_private_event = lambda event: True
         exec(compile(ast.Module(body=[method],type_ignores=[]),"selection","exec"),ns)
         self.event.send = AsyncMock()
         self.event.plain_result = lambda text: text

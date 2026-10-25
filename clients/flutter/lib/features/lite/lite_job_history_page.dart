@@ -1,17 +1,21 @@
 import '../../core/courtyard_theme.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../core/hub_api.dart';
 import '../../core/job_image_store.dart';
 import '../../core/models.dart';
 import '../settings/settings_drawer.dart';
 import 'remake_options_dialog.dart';
+import 'prompt_provenance_details.dart';
 
 class LiteJobHistoryPage extends StatefulWidget {
-  const LiteJobHistoryPage({required this.api, super.key});
+  const LiteJobHistoryPage(
+      {required this.api, this.localMode = false, super.key});
 
   final HubApi api;
+  final bool localMode;
 
   @override
   State<LiteJobHistoryPage> createState() => _LiteJobHistoryPageState();
@@ -27,6 +31,7 @@ class _LiteJobHistoryPageState extends State<LiteJobHistoryPage> {
   String _downloadDirectoryUri = '';
   bool _downloading = false;
   final Set<String> _liking = {};
+  final Set<String> _likedHere = {};
 
   static const _kindLabels = <String, String>{
     '': '全部类型',
@@ -181,27 +186,74 @@ class _LiteJobHistoryPageState extends State<LiteJobHistoryPage> {
     }
   }
 
-  Future<void> _like(RemoteJobResult job, String promptId) async {
-    final key = '${job.id}:$promptId';
+  Future<void> _like(RemoteJobResult job, String promptId,
+      {String imageId = ''}) async {
+    final key = '${job.id}:${imageId.isEmpty ? promptId : imageId}';
     if (!_liking.add(key)) return;
     setState(() {});
     try {
-      if (job.likedPromptIds.contains(promptId)) {
+      if (imageId.isEmpty && job.likedPromptIds.contains(promptId)) {
         await widget.api.unfavoritePrompt(promptId);
         _notice('已取消收藏');
-        _refresh();
+        if (mounted) setState(() => _likedHere.remove(key));
         return;
       }
-      final result =
-          await widget.api.likeJobPrompt(jobId: job.id, promptId: promptId);
+      final result = imageId.isEmpty
+          ? await widget.api.likeJobPrompt(jobId: job.id, promptId: promptId)
+          : await widget.api.favoriteJobImage(jobId: job.id, imageId: imageId);
       _notice(
-          result.action == 'already_liked' ? '这条模板已经收藏在 P 组。' : '已点赞并保存到 P 组。');
-      _refresh();
+          result.action == 'already_liked' ? '该完整提示词已在个人收藏中。' : '已保存到个人收藏。');
+      if (mounted) setState(() => _likedHere.add(key));
     } on HubApiException catch (error) {
       _notice(error.message, error: true);
     } finally {
       _liking.remove(key);
       if (mounted) setState(() {});
+    }
+  }
+
+  Future<void> _showImagePrompt(
+      RemoteJobResult job, RemoteJobImage image) async {
+    try {
+      final snapshot = await widget.api.getImagePrompt(job.id, image.id);
+      if (!mounted) return;
+      final positive = '${snapshot['positive'] ?? ''}';
+      final negative = '${snapshot['negative'] ?? ''}';
+      final detail = [
+        '${snapshot['stage'] ?? '任务提示词'}',
+        if (snapshot['available'] != true) '未保存可核对的提示词，不会从编号猜测。',
+        positive,
+        if (negative.isNotEmpty) '\n负向提示词：\n$negative',
+        if ('${snapshot['source_id'] ?? ''}'.isNotEmpty)
+          '\n来源编号：${snapshot['source_id']}',
+        if ('${snapshot['user_addition'] ?? ''}'.isNotEmpty)
+          '\n附加内容（已合并）：${snapshot['user_addition']}',
+        if ('${snapshot['edit_request'] ?? ''}'.isNotEmpty)
+          '\n本次调整：${snapshot['edit_request']}',
+      ].join('\n');
+      await showDialog<void>(
+          context: context,
+          builder: (context) => AlertDialog(
+                title: const Text('本张图的提示词'),
+                content: SizedBox(
+                    width: 600,
+                    child:
+                        SingleChildScrollView(child: SelectableText(detail))),
+                actions: [
+                  if (positive.isNotEmpty)
+                    TextButton(
+                        onPressed: () async {
+                          await Clipboard.setData(
+                              ClipboardData(text: positive));
+                        },
+                        child: const Text('复制正向提示词')),
+                  TextButton(
+                      onPressed: () => Navigator.pop(context),
+                      child: const Text('关闭')),
+                ],
+              ));
+    } on HubApiException catch (error) {
+      _notice(error.message, error: true);
     }
   }
 
@@ -221,6 +273,44 @@ class _LiteJobHistoryPageState extends State<LiteJobHistoryPage> {
     };
   }
 
+  Future<void> _choosePage(int pages) async {
+    final controller = TextEditingController(text: '$_page');
+    final selected = await showDialog<int>(
+        context: context,
+        builder: (context) => AlertDialog(
+              title: const Text('跳转页码'),
+              content: TextField(
+                controller: controller,
+                autofocus: true,
+                keyboardType: TextInputType.number,
+                decoration: InputDecoration(helperText: '可选 1–$pages 页'),
+                onSubmitted: (_) {
+                  final value = int.tryParse(controller.text.trim());
+                  if (value != null && value >= 1 && value <= pages) {
+                    Navigator.pop(context, value);
+                  }
+                },
+              ),
+              actions: [
+                TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text('取消')),
+                FilledButton(
+                    onPressed: () {
+                      final value = int.tryParse(controller.text.trim());
+                      if (value != null && value >= 1 && value <= pages) {
+                        Navigator.pop(context, value);
+                      }
+                    },
+                    child: const Text('跳转')),
+              ],
+            ));
+    controller.dispose();
+    if (selected == null || !mounted || selected == _page) return;
+    _page = selected;
+    _refresh();
+  }
+
   @override
   Widget build(BuildContext context) {
     return FutureBuilder<RemoteJobPageResult>(
@@ -228,6 +318,7 @@ class _LiteJobHistoryPageState extends State<LiteJobHistoryPage> {
       builder: (context, snapshot) {
         final data = snapshot.data;
         return ListView(
+          key: const PageStorageKey('lite-job-history'),
           padding: const EdgeInsets.all(24),
           children: [
             Row(
@@ -370,7 +461,10 @@ class _LiteJobHistoryPageState extends State<LiteJobHistoryPage> {
                             },
                       icon: const CourtyardIcon(Icons.chevron_left),
                     ),
-                    Text('${data.page} / ${data.pages}'),
+                    TextButton(
+                      onPressed: () => _choosePage(data.pages),
+                      child: Text('${data.page} / ${data.pages} · 跳转'),
+                    ),
                     IconButton(
                       tooltip: '下一页',
                       onPressed: data.page >= data.pages
@@ -412,7 +506,12 @@ class _LiteJobHistoryPageState extends State<LiteJobHistoryPage> {
                   label: Text(_statusLabels[job.status] ?? job.status),
                   side: BorderSide(color: statusColor),
                 ),
-                Chip(label: Text(job.safetyCode)),
+                Chip(
+                    label: Text(job.targetId == 'local' && job.kind == 'random'
+                        ? '未人工逐条审核'
+                        : job.safetyCode)),
+                if (job.status == 'succeeded' && job.deliveryStatus == 'failed')
+                  const Chip(label: Text('已生成 · QQ 发送失败')),
                 if (job.profile.isNotEmpty) Chip(label: Text(job.profile)),
                 Text(_time(job.createdAt)),
               ],
@@ -421,6 +520,18 @@ class _LiteJobHistoryPageState extends State<LiteJobHistoryPage> {
             SelectableText(job.commandPreview),
             const SizedBox(height: 6),
             Text('${job.targetLabel} · ${job.message}'),
+            if (job.images.isEmpty && job.finalPrompt.isNotEmpty)
+              ExpansionTile(title: const Text('查看反推提示词（未生图）'), children: [
+                SelectableText(job.finalPrompt),
+                TextButton(
+                    onPressed: () =>
+                        Clipboard.setData(ClipboardData(text: job.finalPrompt)),
+                    child: const Text('复制提示词')),
+              ]),
+            PromptProvenanceDetails(
+                jobId: job.id, provenance: job.promptProvenance),
+            if (job.status == 'succeeded' && job.deliveryError.isNotEmpty)
+              const Text('图片仍保留在任务记录中，可在连接恢复后手动保存。'),
             if (job.taskSuiteId.isNotEmpty) ...[
               for (final row in job.taskSuiteRows)
                 Text(
@@ -467,10 +578,7 @@ class _LiteJobHistoryPageState extends State<LiteJobHistoryPage> {
                 spacing: 8,
                 runSpacing: 8,
                 children: job.promptIds.map((promptId) {
-                  final liked = job.likedPromptIds.contains(promptId);
-                  return Chip(
-                      label:
-                          SelectableText(liked ? '$promptId · 已收藏' : promptId));
+                  return Chip(label: SelectableText(promptId));
                 }).toList(),
               ),
             ],
@@ -491,7 +599,7 @@ class _LiteJobHistoryPageState extends State<LiteJobHistoryPage> {
                           child: ClipRRect(
                             borderRadius: BorderRadius.circular(10),
                             child: Image.network(
-                              widget.api.resolveUrl(image.downloadUrl),
+                              widget.api.resolveImageUrl(image.downloadUrl),
                               headers: widget.api.authorizationHeaders,
                               width: 180,
                               height: 180,
@@ -516,11 +624,13 @@ class _LiteJobHistoryPageState extends State<LiteJobHistoryPage> {
                               onPressed: () async {
                                 Map<String, dynamic> options = {};
                                 if (showRemakeOptions.value) {
-                                  final selected = await showDialog<
-                                          Map<String, dynamic>>(
-                                      context: context,
-                                      builder: (context) =>
-                                          RemakeOptionsDialog(api: widget.api));
+                                  final selected =
+                                      await showDialog<Map<String, dynamic>>(
+                                          context: context,
+                                          builder: (context) =>
+                                              RemakeOptionsDialog(
+                                                  api: widget.api,
+                                                  localMode: widget.localMode));
                                   if (selected == null) return;
                                   options = selected;
                                 }
@@ -537,53 +647,61 @@ class _LiteJobHistoryPageState extends State<LiteJobHistoryPage> {
                               }),
                           if (image.promptId.isNotEmpty)
                             Text('词库编号：${image.promptId}'),
-                          if (image.promptId.isNotEmpty ||
-                              job.promptIds.length == 1)
-                            IconButton(
-                                tooltip: '点赞 / 取消收藏',
-                                icon: CourtyardIcon(job.likedPromptIds.contains(
-                                        image.promptId.isNotEmpty
-                                            ? image.promptId
-                                            : job.promptIds.first)
-                                    ? Icons.thumb_up
-                                    : Icons.thumb_up_outlined),
-                                onPressed: () => _like(
-                                    job,
-                                    image.promptId.isNotEmpty
-                                        ? image.promptId
-                                        : job.promptIds.first)),
+                          if (image.userAddition.isNotEmpty)
+                            Text('附加内容：${image.userAddition}',
+                                maxLines: 2, overflow: TextOverflow.ellipsis),
                           IconButton(
-                              tooltip: '举报图片',
+                              tooltip: '查看本张提示词',
                               icon: const CourtyardIcon(
-                                  Icons.warning_amber_rounded),
-                              onPressed: () async {
-                                final yes = await showDialog<bool>(
-                                    context: context,
-                                    builder: (context) => AlertDialog(
-                                            title: const Text('举报这张图？'),
-                                            content: const Text(
-                                                '图片和关联提示词将发给管理员审核，不会自动删除词条。'),
-                                            actions: [
-                                              TextButton(
-                                                  onPressed: () =>
-                                                      Navigator.pop(
-                                                          context, false),
-                                                  child: const Text('取消')),
-                                              FilledButton(
-                                                  onPressed: () =>
-                                                      Navigator.pop(
-                                                          context, true),
-                                                  child: const Text('举报'))
-                                            ]));
-                                if (yes != true) return;
-                                try {
-                                  await widget.api
-                                      .reportImage(job.id, image.id);
-                                  _notice('举报已提交');
-                                } catch (error) {
-                                  _notice('$error', error: true);
-                                }
-                              }),
+                                  Icons.description_outlined),
+                              onPressed: () => _showImagePrompt(job, image)),
+                          IconButton(
+                              tooltip: (job.likedImageIds.contains(image.id) ||
+                                      _likedHere
+                                          .contains('${job.id}:${image.id}'))
+                                  ? '已收藏；取消请到个人收藏'
+                                  : '收藏本张完整提示词；取消请到个人收藏',
+                              icon: CourtyardIcon((job.likedImageIds
+                                          .contains(image.id) ||
+                                      _likedHere
+                                          .contains('${job.id}:${image.id}'))
+                                  ? Icons.thumb_up
+                                  : Icons.thumb_up_outlined),
+                              onPressed: () => _like(job, image.promptId,
+                                  imageId: image.id)),
+                          if (!widget.localMode)
+                            IconButton(
+                                tooltip: '举报图片',
+                                icon: const CourtyardIcon(
+                                    Icons.warning_amber_rounded),
+                                onPressed: () async {
+                                  final yes = await showDialog<bool>(
+                                      context: context,
+                                      builder: (context) => AlertDialog(
+                                              title: const Text('举报这张图？'),
+                                              content: const Text(
+                                                  '图片和关联提示词将发给管理员审核，不会自动删除词条。'),
+                                              actions: [
+                                                TextButton(
+                                                    onPressed: () =>
+                                                        Navigator.pop(
+                                                            context, false),
+                                                    child: const Text('取消')),
+                                                FilledButton(
+                                                    onPressed: () =>
+                                                        Navigator.pop(
+                                                            context, true),
+                                                    child: const Text('举报'))
+                                              ]));
+                                  if (yes != true) return;
+                                  try {
+                                    await widget.api
+                                        .reportImage(job.id, image.id);
+                                    _notice('举报已提交');
+                                  } catch (error) {
+                                    _notice('$error', error: true);
+                                  }
+                                }),
                         ])
                       ]),
                     )
@@ -617,7 +735,7 @@ class _LiteJobHistoryPageState extends State<LiteJobHistoryPage> {
                 maxScale: 5,
                 child: Center(
                   child: Image.network(
-                    widget.api.resolveUrl(image.downloadUrl),
+                    widget.api.resolveImageUrl(image.downloadUrl),
                     headers: widget.api.authorizationHeaders,
                     fit: BoxFit.contain,
                     errorBuilder: (_, __, ___) => const Center(

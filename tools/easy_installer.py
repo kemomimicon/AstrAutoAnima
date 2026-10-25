@@ -13,10 +13,16 @@ import shutil
 import subprocess
 import sys
 import threading
+import time
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
+from install_progress import StageProgress, ProgressLog, ProgressPanel, report, stream_command
+
+LEGACY_STEPS = (('prepare', '检查安装选项'), ('plugin', 'AAA 插件'),
+                ('comfyui', '节点与工作流'), ('hub', 'Hub 服务'), ('optional', '可选扩展'))
 
 
 class InstallError(RuntimeError):
@@ -156,91 +162,212 @@ def copy_workflows(source: Path, target: Path, backup_root: Path, log: Logger) -
 
 
 def run_checked(command: list[str], log: Logger, *, cwd: Path | None = None) -> None:
-    log("执行：" + " ".join(command))
-    process = subprocess.Popen(
-        command,
-        cwd=str(cwd) if cwd else None,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-    )
-    assert process.stdout is not None
-    for line in process.stdout:
-        log(line.rstrip())
-    code = process.wait()
-    if code:
-        raise InstallError(f"命令执行失败，退出码 {code}")
+    stream_command(command, log, cwd=str(cwd) if cwd else None, error_type=InstallError)
 
 
 def install_git_component(
     item: dict[str, Any], plan: InstallPlan, log: Logger
 ) -> Path:
     target = plan.comfyui_root / str(item["target"])
-    if target.exists():
-        log(f"已存在，安全跳过（不会覆盖）：{target}")
-        return target
+    from deployment_support import no_links
+    no_links(target); no_links(target / '.git'); no_links(target / '__init__.py')
     git = shutil.which("git")
     if not git:
         raise InstallError("未找到 Git；请安装 Git 后重试该外部组件")
-    run_checked([git, "clone", "--filter=blob:none", str(item["url"]), str(target)], log)
     commit = str(item.get("commit", "")).strip()
-    if commit:
-        run_checked([git, "-C", str(target), "checkout", "--detach", commit], log)
+    if not target.exists():
+        run_checked([git, "clone", "--filter=blob:none", str(item["url"]), str(target)], log)
+        if commit:
+            run_checked([git, "-C", str(target), "checkout", "--detach", commit], log)
+    # A failed clone/checkout can leave a directory. Existence alone is not success.
+    if not (target / '.git').is_dir() or not (target / '__init__.py').is_file():
+        raise InstallError('节点目录已存在但无法确认完整Git安装；已保留，不覆盖。请人工检查残留/手动安装：' + str(target))
+    result = subprocess.run([git, '-C', str(target), 'rev-parse', 'HEAD'], capture_output=True,
+                            text=True, encoding='utf-8', errors='replace', timeout=15,
+                            creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+    if result.returncode or (commit and result.stdout.strip().lower() != commit.lower()):
+        raise InstallError('已有节点提交与清单不匹配或Git不可读；不自动覆盖/降级，也不安装其依赖：' + str(target))
+    log(f'节点目录与提交检查通过，保留已有代码：{target}')
     return target
 
 
-def sha256_file(path: Path) -> str:
+def sha256_file(path: Path, log=None) -> str:
     digest = hashlib.sha256()
+    total, current, notified = path.stat().st_size, 0, time.monotonic()
+    if log:
+        report(log, kind='activity', name='SHA256 校验：' + path.name, current=0, total=total, rate=None)
     with path.open("rb") as handle:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
+            current += len(chunk)
+            if log and time.monotonic() - notified >= 0.5:
+                report(log, kind='activity', name='SHA256 校验：' + path.name, current=current, total=total, rate=None)
+                notified = time.monotonic()
+    if log:
+        report(log, kind='activity', name='SHA256 校验：' + path.name, current=current, total=total, rate=None)
     return digest.hexdigest()
 
 
-def download_file(
+@contextmanager
+def download_lock(target):
+    from deployment_support import no_links
+    lock = target.with_name(target.name + '.download.lock')
+    no_links(target); no_links(lock)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with lock.open('a+b') as stream:
+        if lock.stat().st_size == 0:
+            stream.write(b'0'); stream.flush()
+        stream.seek(0)
+        try:
+            if os.name == 'nt':
+                import msvcrt
+                msvcrt.locking(stream.fileno(), msvcrt.LK_NBLCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            raise InstallError('同一文件已有下载进程，请等待或关闭另一安装器，不要同时下载到同一路径。') from None
+        # Closing releases the OS lock, including after a crash. Keep the tiny file to avoid unlink races.
+        yield
+
+
+def quarantine_partial(path, log):
+    from deployment_support import no_links
+    no_links(path)
+    if not path.is_file():
+        raise InstallError('断点路径不是普通文件，停止处理：' + str(path))
+    saved = path.with_name(path.name + '.rejected.' + datetime.now().strftime('%Y%m%d_%H%M%S') + '.' + secrets.token_hex(4))
+    no_links(saved)
+    if saved.exists() or saved.parent.resolve() != path.parent.resolve():
+        raise InstallError('隔离目标异常，停止处理')
+    path.rename(saved)
+    log(f'问题断点已保留为：{saved}；不会删除，可人工检查或恢复。')
+
+
+def invalid_download_body(path):
+    if not path.is_file() or not path.stat().st_size:
+        return True
+    with path.open('rb') as stream:
+        head = stream.read(512).lstrip(b'\xef\xbb\xbf \t\r\n').lower()
+    return head.startswith((b'<html', b'<!doctype html', b'<?xml',
+                            b'version https://git-lfs.github.com/spec/v1', b'{"error"'))
+
+
+def download_file(url, target, log, *, expected_sha256='', expected_size=0, network=None, modelscope_url=''):
+    target = Path(target)
+    if expected_sha256 and (len(expected_sha256) != 64 or any(c not in '0123456789abcdefABCDEF' for c in expected_sha256)):
+        raise InstallError('发布清单 SHA256 格式错误（必须64位十六进制），停止下载；不要跳过校验。')
+    if isinstance(expected_size, bool) or not isinstance(expected_size, int) or expected_size < 0:
+        raise InstallError('发布清单文件大小不合法')
+    with download_lock(target):
+        _download_file_locked(url, target, log, expected_sha256=expected_sha256,
+                              expected_size=expected_size, network=network, modelscope_url=modelscope_url)
+
+
+def _download_file_locked(
     url: str,
     target: Path,
     log: Logger,
     *,
     expected_sha256: str = "",
+    expected_size: int = 0,
     network=None,
+    modelscope_url='',
 ) -> None:
     # Both final and resume paths must stay in real directories.
     from deployment_support import no_links
-    from download_network import DownloadNetwork, fetch_public_file
+    from download_network import DownloadNetwork, DownloadFailure, fetch_public_file
     network = network or DownloadNetwork()
     network.validate()
     no_links(target)
     no_links(target.with_name(target.name + '.part'))
     if target.is_file() and target.stat().st_size > 0:
-        if not expected_sha256 or sha256_file(target) == expected_sha256.casefold():
-            log(f"已存在且校验通过，安全跳过：{target}")
+        size_ok = not expected_size or target.stat().st_size == expected_size
+        if size_ok and (not expected_sha256 or sha256_file(target, log) == expected_sha256.casefold()):
+            log(f"已存在，{'SHA256 校验通过' if expected_sha256 else '清单无哈希，仅保留原文件'}，跳过：{target}")
             return
         raise InstallError(f"目标文件已存在但 SHA256 不匹配，请人工检查：{target}")
     target.parent.mkdir(parents=True, exist_ok=True)
     partial = target.with_name(target.name + ".part")
-    if expected_sha256 and partial.is_file() and sha256_file(partial) == expected_sha256.casefold():
+    if expected_sha256 and partial.is_file() and (not expected_size or partial.stat().st_size == expected_size) and sha256_file(partial, log) == expected_sha256.casefold():
         os.replace(partial, target)
         log(f"完整断点文件已通过 SHA256，直接完成：{target}")
         return
-    source = network.source(url, expected_sha256)
+    sources = network.sources(url, expected_sha256, modelscope_url)
+    if network.mode == 'modelscope':
+        log('使用已核对同一 SHA256 的 ModelScope 固定文件。' if modelscope_url else
+            '此文件未配置已验证的 ModelScope 对应项，仍使用原官方源；不会猜测替代地址。')
     curl = shutil.which("curl")
     if not curl:
         raise InstallError("未找到 curl；大模型下载需要 curl 以支持断点续传")
-    try:
-        fetch_public_file(curl, source, partial, log, network)
-    except (ValueError, OSError) as exc:
-        raise InstallError(str(exc)) from exc
-    if expected_sha256:
-        actual = sha256_file(partial)
-        if actual != expected_sha256.casefold():
-            raise InstallError(
-                f"下载文件 SHA256 不匹配：{partial}\n实际：{actual}"
-            )
-    os.replace(partial, target)
-    log(f"下载完成：{target}")
+    if partial.is_file() and (invalid_download_body(partial) or
+                             (expected_size and partial.stat().st_size >= expected_size)):
+        quarantine_partial(partial, log)
+    fresh_retry = False
+    last_error = None
+    for index, source in enumerate(sources):
+        short_retries = 0
+        if index:
+            log('所选渠道下载未成功，按已勾选设置回退原官方源；仍使用同一固定文件及 SHA256。')
+        while True:
+            no_links(partial); no_links(target)
+            have = partial.stat().st_size if partial.is_file() else 0
+            if expected_size and shutil.disk_usage(target.parent).free < max(0, expected_size - have) + 32 * 1024**2:
+                raise InstallError('磁盘可用空间不足（包含32MiB余量）。保留断点，请先释放空间或选择其它磁盘。')
+            report(log, kind='transfer', name='下载：' + target.name, current=have, total=expected_size or None, rate=0)
+            try:
+                fetch_public_file(curl, source, partial, log, network)
+            except DownloadFailure as exc:
+                last_error = exc
+                complete = (expected_sha256 and partial.is_file() and
+                            (not expected_size or partial.stat().st_size == expected_size) and
+                            sha256_file(partial, log) == expected_sha256.casefold())
+                if complete:
+                    log('网络返回错误，但本地文件已完整且 SHA256 正确，继续校验而不重复下载。')
+                elif exc.restart_required and partial.is_file() and not fresh_retry:
+                    quarantine_partial(partial, log)
+                    fresh_retry = True
+                    log('服务器拒绝续传，保留旧断点后尝试一次从头下载。')
+                    continue
+                else:
+                    break
+            except (ValueError, OSError) as exc:
+                raise InstallError(str(exc)) from exc
+            no_links(partial)
+            size = partial.stat().st_size if partial.is_file() else 0
+            # Some gateways terminate with HTTP success after only a slice. Do not throw
+            # away gigabytes merely because curl reports success for that shorter body.
+            if expected_size and 0 < size < expected_size and not invalid_download_body(partial):
+                last_error = InstallError(f'传输尚未完整：{size:,}/{expected_size:,} bytes；保留 .part，重新运行可续传。')
+                if size > have and short_retries < 3:
+                    short_retries += 1
+                    log(f'服务器提前结束传输，保留进度并续传（{short_retries}/3）：{size:,}/{expected_size:,} bytes。')
+                    continue
+                log(str(last_error))
+                break
+            log(f'传输完成，开始本地校验：{size:,} bytes（大文件需要读取磁盘，请稍候）。')
+            actual = sha256_file(partial, log) if partial.is_file() and expected_sha256 else ''
+            bad = invalid_download_body(partial) or (expected_size and size != expected_size) or (
+                expected_sha256 and actual != expected_sha256.casefold())
+            if not bad:
+                no_links(target)
+                if target.exists() and target.stat().st_size:
+                    raise InstallError('下载期间目标文件被其它程序创建，停止覆盖：' + str(target))
+                os.replace(partial, target)
+                log(f"下载完成并校验通过：{target}")
+                return
+            last_error = InstallError(f'下载校验失败（SHA256 / 大小 / 错误页面）：{partial}\n'
+                                      f'期望 SHA256：{expected_sha256 or "未提供"}\n实际：{actual or "未计算"}\n'
+                                      f'期望大小：{expected_size or "未提供"}；实际：{size}')
+            log(str(last_error))
+            if partial.is_file():
+                quarantine_partial(partial, log)
+            if not fresh_retry:
+                fresh_retry = True
+                log('问题文件已隔离，自动从头重试一次；不会无限重下或放宽校验。')
+                continue
+            break
+    raise InstallError(str(last_error or '下载未完成；保留断点后重试。'))
 
 
 def install_external(plan: InstallPlan, backup_root: Path, log: Logger) -> None:
@@ -259,7 +386,9 @@ def install_external(plan: InstallPlan, backup_root: Path, log: Logger) -> None:
                     plan.comfyui_root / str(file["target"]),
                     log,
                     expected_sha256=str(file.get("sha256", "")),
+                    expected_size=int(file.get('size', 0)),
                     network=plan.download_network,
+                    modelscope_url=str(file.get('modelscope_url', '')),
                 )
         else:
             raise InstallError(f"不支持的外部组件类型：{item['kind']}")
@@ -346,6 +475,16 @@ def install_hub(plan: InstallPlan, backup_root: Path, log: Logger) -> None:
 
 
 def execute_plan(plan: InstallPlan, log: Logger) -> Path:
+    progress = StageProgress(LEGACY_STEPS, log)
+    try:
+        return _execute_plan(plan, log, progress)
+    except Exception:
+        progress.finish('failed')
+        raise
+
+
+def _execute_plan(plan: InstallPlan, log: Logger, progress) -> Path:
+    progress.stage('prepare')
     validate_plan(plan)
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     backup_root = plan.repo_root.parent / f"AstrAutoAnima_backup_{stamp}"
@@ -356,8 +495,12 @@ def execute_plan(plan: InstallPlan, log: Logger) -> Path:
     log(f"备份目录：{backup_root}")
     if not plan.apply:
         log("当前为预检模式，没有修改任何文件。")
+        for key, _ in LEGACY_STEPS[1:]:
+            progress.stage(key); progress.skip('仅预检，不安装')
+        progress.finish('completed')
         return backup_root
     backup_root.mkdir(parents=True, exist_ok=False)
+    progress.stage('plugin')
     if "plugin" in plan.components:
         backup_and_copy(
             plan.repo_root / "plugin/astrbot_plugin_comfy_bridge",
@@ -365,6 +508,8 @@ def execute_plan(plan: InstallPlan, log: Logger) -> Path:
             backup_root,
             log,
         )
+    else: progress.skip('未选 AAA 插件')
+    progress.stage('comfyui')
     if "comfyui" in plan.components:
         backup_and_copy(
             plan.repo_root / "comfyui/custom_nodes/ComfyUI-AstrAutoAnima-Workflow-Tools",
@@ -378,11 +523,17 @@ def execute_plan(plan: InstallPlan, log: Logger) -> Path:
             backup_root,
             log,
         )
+    else: progress.skip('未选节点与工作流')
+    progress.stage('hub')
     if "hub" in plan.components:
         install_hub(plan, backup_root, log)
+    else: progress.skip('未选 Hub')
+    progress.stage('optional')
     if plan.external:
         install_external(plan, backup_root, log)
+    else: progress.skip('未选可选扩展')
     log("\n部署完成。请重载 AstrBot 插件，并完整重启 ComfyUI。")
+    progress.finish('completed')
     return backup_root
 
 
@@ -396,6 +547,8 @@ def launch_gui(repo_root: Path) -> int:
     root = tk.Tk()
     root.title("AstrAutoAnima 一键部署助手")
     root.geometry("940x760")
+    monitor = ProgressPanel(root, LEGACY_STEPS)
+    monitor.frame.pack(fill='x', padx=12, pady=6)
     messages: queue.Queue[tuple[str, str]] = queue.Queue()
 
     guessed = guess_install_paths(repo_root)
@@ -471,38 +624,51 @@ def launch_gui(repo_root: Path) -> int:
             apply=apply,
         )
 
-    def worker(apply: bool) -> None:
+    state = {'busy': False}
+    def worker(plan) -> None:
         try:
-            execute_plan(build_plan(apply), lambda value: messages.put(("log", value)))
-            messages.put(("done", "部署完成" if apply else "预检通过"))
+            execute_plan(plan, ProgressLog(lambda value: messages.put(('log', value)), lambda event: messages.put(('progress', event))))
+            messages.put(("done", "组件部署完成，需重载插件并重启 ComfyUI。" if plan.apply else "预检通过，尚未安装。"))
         except Exception as exc:
             messages.put(("error", str(exc)))
 
     def start(apply: bool) -> None:
+        if state['busy']: return
         if apply and not messagebox.askyesno("确认部署", "确认按当前勾选项开始部署？外部拉取可能耗时很久。"):
             return
-        threading.Thread(target=worker, args=(apply,), daemon=True).start()
+        plan = build_plan(apply)  # Tk variables are read on the UI thread only.
+        state['busy'] = True; monitor.reset(LEGACY_STEPS)
+        threading.Thread(target=worker, args=(plan,), daemon=True).start()
 
     def poll_messages() -> None:
         try:
-            while True:
+            for _ in range(150):
                 kind, message = messages.get_nowait()
                 if kind == "log":
+                    monitor.note()
                     append_log(message)
+                elif kind == 'progress': monitor.update(message)
                 elif kind == "done":
+                    state['busy'] = False; monitor.finish('completed', message)
                     messagebox.showinfo("完成", message)
                 else:
+                    state['busy'] = False; monitor.finish('failed', message)
                     append_log("错误：" + message)
                     messagebox.showerror("部署失败", message)
         except queue.Empty:
             pass
+        monitor.render()
         root.after(150, poll_messages)
 
     buttons = ttk.Frame(frame)
     buttons.grid(row=6, column=0, columnspan=3, pady=4)
     ttk.Button(buttons, text="仅预检", command=lambda: start(False)).pack(side="left", padx=8)
     ttk.Button(buttons, text="开始部署", command=lambda: start(True)).pack(side="left", padx=8)
-    ttk.Button(buttons, text="退出", command=root.destroy).pack(side="left", padx=8)
+    def close():
+        if state['busy']: messagebox.showinfo('安装进行中', '请等待当前安装结束；状态与输出会持续更新。')
+        else: root.destroy()
+    ttk.Button(buttons, text="退出", command=close).pack(side="left", padx=8)
+    root.protocol('WM_DELETE_WINDOW', close)
     ttk.Label(frame, text="提示：外部组件全部为自愿选项；已有外部目录不会被覆盖。", foreground="#875f00").grid(row=8, column=0, columnspan=3, sticky="w")
     poll_messages()
     root.mainloop()

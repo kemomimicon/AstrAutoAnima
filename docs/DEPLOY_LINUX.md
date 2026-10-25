@@ -1,6 +1,10 @@
 # Linux 懒人包
 
+默认安装在用户目录下 `AstrAutoAnima-install`，不要部署到下载/临时目录。安装后不能直接改名或移动：配置与虚拟环境含绝对路径。搬迁需停止服务、备份并核对配置及环境；本轮独立搬家工具仅支持 Windows，不要在 Linux 使用。
+
 使用文件名含 `lazy-bundle-linux` 的包。Linux 与 Windows 分开入口、预检和示例；不需要运行 `.cmd` 或 PowerShell。Linux 目前支持 CLI 接入，不支持 AstrBot Desktop 模式。
+
+失败后不要新建第二套目录或清空模型，按 [失败续接说明](EASY_INSTALL.md) 处理。源码候选版会在开始执行时提前保存原独立目录的 `last-plan.json` 和 `deployment-status.json`，不含 API Key；CLI 可用同一 `last-plan.json` 再次 `--plan` 预检，核对后加 `--apply`。不能把 `runtime-env.json` 当计划文件。已经部署完成仅需开机使用时执行原 `Start.sh`，不重复 `--apply`。
 
 ## 无桌面服务器（推荐）
 
@@ -39,3 +43,8 @@ AAA_PYTHON=/path/to/python3.12 sh Deploy-Linux.sh --plan my-plan.json
 不自动安装系统驱动、配置 systemd、登录 QQ 或重启云实例。无卡环境可部署文件/CPU 验证，但不能据此判断 CUDA 推理正常。现有环境不自动替换 Torch。Windows 的便携 Python、盘符和 Desktop 数据目录规则不适用于 Linux。
 
 后续联通见 [AM 与模型](ANIMA_MASTER.md)、[一键部署总览](EASY_INSTALL.md)。
+# NapCat 与统一入口（2026-10-20 本地候选）
+
+有桌面的 Linux 运行 `sh Deploy-Linux.sh` 进入安装与启动中心。原 `--plan`、`--apply`、`--start` 命令保持兼容；无桌面仍使用计划文件。
+
+NapCat 引导只在确认后准备固定提交、SHA256 校验的官方脚本，显示命令由你在服务器的交互终端执行；不自动 sudo、改开机服务或覆盖旧安装。QQ 扫码与设备验证仍由本人完成。桌面 / 无桌面、已有容器和 OneBot 对接的区别见 [NapCat 指引](NAPCAT_SETUP.md)。

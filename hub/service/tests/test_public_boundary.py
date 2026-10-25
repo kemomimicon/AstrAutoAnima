@@ -24,15 +24,16 @@ class PublicBoundaryTests(unittest.TestCase):
                 self.assertFalse(settings.plugin_data_dir.is_absolute())
                 self.assertFalse(settings.comfyui_root.is_absolute())
 
-    def test_no_training_extension_routes(self):
+    def test_optional_extension_and_no_cloud_shutdown(self):
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
         root = Path(directory.name)
         app = create_app(Settings(admin_token='test-' + 'x' * 40, plugin_dir=root / 'plugin',
                                   plugin_data_dir=root / 'data', comfyui_root=root / 'comfy'))
-        routes = [getattr(route, 'path', '') for route in app.routes]
-        self.assertFalse(any('/extensions/' in route or 'auto-sleep' in route for route in routes))
-        self.assertFalse(hasattr(app.state, 'extension_host'))
+        routes = app.openapi()['paths']
+        self.assertFalse(any('auto-sleep' in route for route in routes))
+        self.assertIn('/api/v1/admin/extensions', routes)
+        self.assertTrue(hasattr(app.state, 'extension_host'))
 
     def test_no_private_recovery_commands(self):
         with patch('subprocess.Popen') as spawn:

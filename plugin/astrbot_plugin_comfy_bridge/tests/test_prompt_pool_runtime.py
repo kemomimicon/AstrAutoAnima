@@ -7,10 +7,12 @@ from unittest.mock import patch
 from prompt_pool_runtime import (
     compose_random_body,
     load_prompt_pool,
+    parse_group_selector,
     prompt_pool_stats,
     quality_prompt,
     select_random_prompt,
 )
+from preset_runtime import parse_generation_directives
 
 
 class PromptPoolRuntimeTests(unittest.TestCase):
@@ -77,6 +79,35 @@ class PromptPoolRuntimeTests(unittest.TestCase):
             compose_random_body("holding umbrella", self.pool["prompts"][0]),
             "holding umbrella, 1girl, solo, rainy street",
         )
+
+    def test_random_subject_tag_changes_only_the_drawn_entry(self):
+        item = self.pool["prompts"][0]
+        self.assertEqual(
+            compose_random_body("holding umbrella", item, subject_tag="1boy"),
+            "holding umbrella, 1boy, solo, rainy street",
+        )
+        self.assertEqual(
+            compose_random_body("", item, subject_tag="none"),
+            "solo, rainy street",
+        )
+        self.assertEqual(item["prompt"], "1girl, solo, rainy street")
+        self.assertEqual(
+            compose_random_body("", {"source_code": "K", "prompt": "1girl, solo"}, subject_tag="1man"),
+            "1girl, solo",
+        )
+        self.assertEqual(
+            compose_random_body("", {"prompt": "score_9, 1girl, solo"}, subject_tag="1man"),
+            "score_9, 1girl, solo",
+        )
+
+    def test_random_command_reads_selector_before_subject_choice(self):
+        body, selection = parse_group_selector("D/N 起手=1boy 角色=梅娅")
+        prompt, options = parse_generation_directives(body)
+        self.assertEqual(selection["source_codes"], ["D"])
+        self.assertEqual(selection["safety_codes"], ["N"])
+        self.assertEqual(prompt, "")
+        self.assertEqual(options["random_subject_tag"], "1boy")
+        self.assertEqual(options["character"], "梅娅")
 
     def test_stats_preserve_labels_and_disabled_duplicates(self):
         stats = prompt_pool_stats(self.pool)

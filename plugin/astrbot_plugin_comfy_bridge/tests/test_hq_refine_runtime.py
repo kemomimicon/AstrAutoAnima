@@ -272,7 +272,7 @@ class HqRefineConfigurationTests(unittest.TestCase):
         self.assertEqual(workflow["4"]["inputs"]["seed"], 7)
         self.assertNotIn("tile_width", workflow["4"]["inputs"])
         self.assertFalse(result["tile"])
-        self.assertTrue(workflow["3"]["inputs"]["decode_tiled"])
+        self.assertFalse(workflow["3"]["inputs"]["decode_tiled"])
         with self.assertRaises(WorkflowError):
             configure_seedvr2_workflow(workflow, image_name="a.png", image_node_id="1",
                 upscaler_node_id="4", profile={"enhance": {"target_resolution": 10000}}, seed=0)

@@ -21,7 +21,9 @@ String _numberText(num value) => value == value.roundToDouble()
 String buildImageCommand({
   required ImageCommandKind kind,
   bool fiveDraw = false,
+  String randomSubjectTag = '',
   String poolFilter = '',
+  List<String> customGroups = const [],
   String character = '',
   String characterTagMode = 'weak',
   String characterVariant = '',
@@ -93,6 +95,14 @@ String buildImageCommand({
   if ((kind == ImageCommandKind.random || kind == ImageCommandKind.chaos) &&
       poolFilter.trim().isNotEmpty) {
     parts.add(poolFilter.trim());
+  }
+  if ((kind == ImageCommandKind.random || kind == ImageCommandKind.chaos) &&
+      customGroups.isNotEmpty) {
+    parts.add('@${customGroups.join('+')}');
+  }
+  if ((kind == ImageCommandKind.random || kind == ImageCommandKind.chaos) &&
+      randomSubjectTag.isNotEmpty) {
+    parts.add('起手=${randomSubjectTag == 'none' ? '无' : randomSubjectTag}');
   }
   if (kind != ImageCommandKind.chaos && kind != ImageCommandKind.multi) {
     if (character.trim().isNotEmpty) {

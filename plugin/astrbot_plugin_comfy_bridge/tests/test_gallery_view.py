@@ -65,7 +65,7 @@ class GalleryDispatchTests(unittest.IsolatedAsyncioTestCase):
                 {'index':0,'status':'succeeded','file':'a'*32+'.image'}]}]}))
             (root/'style_gallery'/('a'*32+'.image')).write_bytes(b'image')
             bridge=SimpleNamespace(_character_dictionary_path=lambda:root/'dictionary.json',
-                _safety_policy=lambda:SimpleNamespace(enabled=True,fingerprint='new'),
+                _safety_policy=lambda event=None:SimpleNamespace(enabled=True,fingerprint='new'),
                 _safety_store=SimpleNamespace(approved=Mock(return_value=False)))
             event=SimpleNamespace(message_str='查看画廊 A',stop_event=Mock(),should_call_llm=Mock(),
                 plain_result=lambda text:('text',text),image_result=lambda path:('image',path),send=AsyncMock())

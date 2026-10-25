@@ -5,15 +5,18 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 import re
 import subprocess
 import sys
 import zipfile
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from public_resource_policy import require_public_resource
 
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION = "0.5.0-beta.2"
+VERSION = json.loads((ROOT / 'release-manifest.json').read_text('utf-8-sig'))['release']
 WORKFLOW_VERSION = "0.8.0-beta.1-public"
 ZIP_TIME = (2026, 9, 23, 0, 0, 0)
 LF_SUFFIXES = {".sh", ".py", ".json", ".yaml", ".yml", ".toml", ".md"}
@@ -21,6 +24,19 @@ CRLF_SUFFIXES = {".bat", ".cmd", ".ps1"}
 
 
 def public_files() -> list[Path]:
+    snapshot = ROOT / 'candidate-source-manifest.json'
+    if snapshot.is_file():
+        entries = json.loads(snapshot.read_text('utf-8'))
+        paths = []
+        for name, entry in entries.items():
+            require_public_resource(name)
+            path = ROOT / name
+            if Path(name).is_absolute() or '..' in Path(name).parts or path.is_symlink():
+                raise ValueError('Unsafe snapshot path: ' + name)
+            if hashlib.sha256(path.read_bytes()).hexdigest() != entry['sha256']:
+                raise ValueError('Source has changed since preflight: ' + name)
+            paths.append(path)
+        return sorted(paths + [snapshot])
     result = subprocess.run(
         [
             "git",
@@ -37,11 +53,16 @@ def public_files() -> list[Path]:
         text=True,
         encoding="utf-8",
     )
-    paths = [ROOT / line for line in result.stdout.split('\0') if line]
+    names = [line for line in result.stdout.split('\0') if line]
+    for name in names:
+        require_public_resource(name)
+    paths = [ROOT / name for name in names]
     return sorted(path for path in paths if path.is_file())
 
 
-def write_zip(destination: Path, entries: list[tuple[Path, str]]) -> None:
+def write_zip(destination: Path, entries: list[tuple[Path, str]], *, preserve_bytes: bool = False) -> None:
+    for _, archive_name in entries:
+        require_public_resource(archive_name)
     destination.parent.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(
         destination,
@@ -54,9 +75,13 @@ def write_zip(destination: Path, entries: list[tuple[Path, str]]) -> None:
             info.compress_type = zipfile.ZIP_DEFLATED
             info.external_attr = (0o755 if source.suffix in {".sh", ".py"} else 0o644) << 16
             payload = source.read_bytes()
-            if source.suffix.lower() in LF_SUFFIXES:
+            # Frozen candidates carry hashes of the exact source bytes. Changing
+            # line endings here would invalidate the manifest inside source ZIPs.
+            if preserve_bytes and source.suffix.lower() == ".sh" and b"\r\n" in payload:
+                raise ValueError("Normalize shell line endings before freezing: " + archive_name)
+            if not preserve_bytes and source.suffix.lower() in LF_SUFFIXES:
                 payload = payload.replace(b"\r\n", b"\n")
-            elif source.suffix.lower() in CRLF_SUFFIXES:
+            elif not preserve_bytes and source.suffix.lower() in CRLF_SUFFIXES:
                 payload = payload.replace(b"\r\n", b"\n").replace(b"\n", b"\r\n")
             archive.writestr(info, payload)
 
@@ -94,7 +119,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, default=ROOT / "dist")
     parser.add_argument("--web-archive", type=Path, help="Optional separately built public Web ZIP to include in lazy bundle")
-    parser.add_argument('--deployment-revision', help='Build revised source/lazy/tools/plugin/Hub/workflow packages without replacing old release assets')
+    parser.add_argument('--deployment-revision', help='Build only revised lazy/tools/source packages, e.g. network.1; do not overwrite original release assets')
     args = parser.parse_args()
     if args.deployment_revision and not re.fullmatch(r'[a-z0-9]+(?:[.-][a-z0-9]+)*', args.deployment_revision):
         parser.error('Invalid deployment revision')
@@ -105,16 +130,11 @@ def main() -> int:
 
     files = public_files()
     plugin_root = ROOT / "plugin" / "astrbot_plugin_comfy_bridge"
-    match = re.search(r'^version:\s*([0-9A-Za-z.+-]+)\s*$',
-                      (plugin_root / 'metadata.yaml').read_text('utf-8-sig'), re.M)
-    if not match:
-        raise ValueError('Plugin metadata version missing or invalid')
-    plugin_version = match.group(1)
     hub_root = ROOT / "hub" / "service"
     workflow_root = ROOT / "comfyui"
 
     archives: dict[str, list[tuple[Path, str]]] = {
-        f"astrbot_plugin_comfy_bridge-{plugin_version}.zip": relative_entries(
+        f"astrbot_plugin_comfy_bridge-{VERSION}.zip": relative_entries(
             files, plugin_root, exclude_parts={"tests"}
         ),
         f"astr_auto_anima_hub_service-{VERSION}.zip": relative_entries(
@@ -126,34 +146,14 @@ def main() -> int:
             prefix=f"Anima_Workflow_Pack-{WORKFLOW_VERSION}",
         ),
     }
-    if args.deployment_revision in {'windows.1', 'windows.2'}:
-        hotfix = [(ROOT / 'docs/WINDOWS_COMPAT_HOTFIX.md', 'README.md')]
-        for relative in ('main.py', 'preset_runtime.py', 'cleanup_runtime.py',
-                         'idle_guard_runtime.py', 'lora_name_runtime.py', 'metadata.yaml', 'tools/install_character_dictionary.py'):
-            hotfix.append((plugin_root / relative, 'plugin_files/' + relative))
-        for relative in ('__init__.py', 'nodes.py', 'idle_guard.py', 'idle_admission.py'):
-            hotfix.append((workflow_root / 'custom_nodes/ComfyUI-AstrAutoAnima-Workflow-Tools' / relative,
-                           'comfyui_nodes/' + relative))
-        for relative in ('pyproject.toml', 'src/astr_auto_anima_hub/__init__.py', 'src/astr_auto_anima_hub/idle_guard.py'):
-            hotfix.append((hub_root / relative, 'hub_files/' + relative))
-        archives[f'AAA_Windows_Compatibility_Hotfix_{VERSION}.zip'] = hotfix
-
-    if args.deployment_revision in {'remake.1', 'remake.2'}:
-        # Code-only update: never replace an existing user's corpus/configuration.
-        archives[f'AAA_Remake_Hotfix_{VERSION}.zip'] = [
-            (ROOT / 'docs/REMAKE_HOTFIX.md', 'README.md'),
-            (ROOT / 'docs/WINDOWS_COMPAT_HOTFIX.md', 'WINDOWS_COMPAT_HOTFIX.md'),
-        ] + relative_entries(
-            [p for p in files if p.is_relative_to(plugin_root)
-             and (p.suffix == '.py' or p.name == 'metadata.yaml')],
-            plugin_root, prefix='plugin_files', exclude_parts={'tests'},
-        )
 
     tool_paths = [
         path
         for path in files
         if path.is_relative_to(ROOT / "tools")
+        or path.is_relative_to(ROOT / "optional")
         or path.is_relative_to(ROOT / "examples")
+        or path.is_relative_to(ROOT / "docs")
         or path in {
             ROOT / "docs" / "TOOLS.md",
             ROOT / "docs" / "EASY_INSTALL.md",
@@ -175,7 +175,7 @@ def main() -> int:
         for path in files
     ]
     archives[f"AstrAutoAnima-{VERSION}-source.zip"] = source_entries
-    lazy_roots = {"plugin", "hub", "comfyui", "tools", "examples", "docs"}
+    lazy_roots = {"plugin", "hub", "comfyui", "tools", "examples", "docs", "optional"}
     lazy_root_files = {
         ".astr_auto_anima_public_root",
         ".gitattributes",
@@ -211,22 +211,21 @@ def main() -> int:
 
     output.mkdir(parents=True, exist_ok=True)
     if args.deployment_revision:
-        archives = {(name if name.startswith('astrbot_plugin_comfy_bridge-') else
-                     name.replace(WORKFLOW_VERSION, WORKFLOW_VERSION + '-' + args.deployment_revision)
-                     if name.startswith('Anima_Workflow_Pack-') else
-                     name.replace(VERSION, VERSION + '-' + args.deployment_revision)): entries
+        archives = {name.replace(VERSION, VERSION + '-' + args.deployment_revision): entries
                     for name, entries in archives.items()
-                    if 'lazy-bundle' in name or name.endswith('-source.zip') or name.startswith(('AAA_Remake_Hotfix_', 'AAA_Windows_Compatibility_Hotfix_', 'AstrAutoAnima-tools-', 'astrbot_plugin_comfy_bridge-', 'astr_auto_anima_hub_service-', 'Anima_Workflow_Pack-'))}
+                    if 'lazy-bundle' in name or name.endswith('-source.zip') or name.startswith('AstrAutoAnima-tools-')}
         for name in archives:
             if (output / name).exists():
                 raise ValueError('Revision archive already exists; choose a new revision/output: ' + name)
     built: list[Path] = []
+    if any((output / name).exists() for name in archives):
+        raise ValueError('Use a fresh output directory; never overwrite released archives')
     for filename, entries in archives.items():
         if not entries:
             raise RuntimeError(f"Archive would be empty: {filename}")
         destination = output / filename
-        write_zip(destination, entries)
-        if 'lazy-bundle' in filename and args.web_archive:
+        write_zip(destination, entries, preserve_bytes=(ROOT / 'candidate-source-manifest.json').is_file())
+        if ('lazy-bundle' in filename or filename.startswith('astr_auto_anima_hub_service-')) and args.web_archive:
             with zipfile.ZipFile(args.web_archive) as web, zipfile.ZipFile(destination, 'a', compression=zipfile.ZIP_DEFLATED) as bundle:
                 if 'index.html' not in web.namelist():
                     raise ValueError('Web archive must have index.html at root')
@@ -236,7 +235,8 @@ def main() -> int:
                         continue
                     if name.startswith('/') or ':' in name or '..' in Path(name).parts or name.endswith(('.env', '.map')):
                         raise ValueError('Unsafe Web archive entry')
-                    info = zipfile.ZipInfo(f'{source_prefix}/hub/service/web/{name}', ZIP_TIME)
+                    web_prefix = f'{source_prefix}/hub/service/web/' if 'lazy-bundle' in filename else 'web/'
+                    info = zipfile.ZipInfo(web_prefix + name, ZIP_TIME)
                     info.compress_type = zipfile.ZIP_DEFLATED
                     info.external_attr = 0o644 << 16
                     bundle.writestr(info, web.read(member))

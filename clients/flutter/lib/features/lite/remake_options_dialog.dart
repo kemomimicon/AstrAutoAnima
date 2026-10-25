@@ -4,8 +4,10 @@ import '../../core/models.dart';
 import '../presets/task_suites_page.dart';
 
 class RemakeOptionsDialog extends StatefulWidget {
-  const RemakeOptionsDialog({required this.api, super.key});
+  const RemakeOptionsDialog({required this.api, this.localMode = false,
+      super.key});
   final HubApi api;
+  final bool localMode;
   @override
   State<RemakeOptionsDialog> createState() => _RemakeOptionsDialogState();
 }
@@ -67,7 +69,7 @@ class _RemakeOptionsDialogState extends State<RemakeOptionsDialog> {
                                   ],
                                   onChanged: changed));
                       return Column(mainAxisSize: MainAxisSize.min, children: [
-                        SwitchListTile(
+                        if (!widget.localMode) SwitchListTile(
                             title: const Text('启用任务套组'),
                             value: _suiteEnabled,
                             onChanged: (v) =>
@@ -87,7 +89,7 @@ class _RemakeOptionsDialogState extends State<RemakeOptionsDialog> {
                               '画风',
                               _style,
                               [
-                                '随机模式',
+                                if (!widget.localMode) '随机模式',
                                 ...snapshot.data!.styles.map((p) => p.name)
                               ],
                               (v) => setState(() => _style = v ?? '')),
@@ -107,9 +109,11 @@ class _RemakeOptionsDialogState extends State<RemakeOptionsDialog> {
                             controller: _adjustment,
                             maxLines: 4,
                             maxLength: 4000,
-                            decoration: const InputDecoration(
+                            decoration: InputDecoration(
                                 labelText: '补充调整提示词',
-                                helperText: '文字修改需服务端已配置文本模型')),
+                                helperText: widget.localMode
+                                    ? '英文标签直接补充；中文需配置本机 LLM API'
+                                    : '文字修改需服务端已配置文本模型')),
                         const Text('以上修改仅本次有效，不保存为个人设置。'),
                       ]);
                     }))),

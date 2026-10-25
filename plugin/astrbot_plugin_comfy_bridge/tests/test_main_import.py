@@ -335,6 +335,78 @@ class FiveDrawBatchTests(unittest.IsolatedAsyncioTestCase):
             for index in range(1, 6)
         ]
 
+    async def test_random_command_reaches_draw_plan_with_subject_choice(self):
+        with tempfile.TemporaryDirectory() as directory:
+            plugin = ComfyWorkflowBridge(
+                object(),
+                {"input_dir": str(Path(directory) / "inputs"), "max_concurrency": 1},
+            )
+            plugin._random_prompt_pool = lambda _selection, _qq, **_kwargs: {
+                "prompts": [{
+                    "id": "D-1", "prompt": "1girl, solo, forest",
+                    "source_code": "D", "safety_code": "N", "enabled": True,
+                }]
+            }
+            plugin._platform_admit = lambda _event: None
+            plugin._random_quality_prompt = lambda _pool: ""
+            received = []
+
+            async def fake_draw(_event, **kwargs):
+                received.append(kwargs)
+                return 1
+
+            plugin._deliver_random_draw_plans = fake_draw
+            event = FakeEvent()
+            await plugin._execute_random_picture(
+                event, "D/N 起手=1boy 角色=铃兰 evening", draw_count=1,
+            )
+            self.assertEqual(len(received), 1, event.sent)
+            self.assertEqual(received[0]["random_subject_tag"], "1boy")
+            self.assertEqual(received[0]["user_prompt"], "evening")
+            self.assertEqual(received[0]["draw_plans"][0][0]["id"], "D-1")
+            self.assertEqual(received[0]["draw_plans"][0][1]["character"], "铃兰")
+
+    async def test_subject_override_changes_each_draw_without_editing_catalog(self):
+        with tempfile.TemporaryDirectory() as directory:
+            plugin = ComfyWorkflowBridge(
+                object(),
+                {
+                    "input_dir": str(Path(directory) / "inputs"),
+                    "max_concurrency": 1,
+                    "five_draw_batch_enabled": True,
+                    "five_draw_micro_batch_size": 2,
+                },
+            )
+            plans = self._plans()
+            for selected, _, _ in plans:
+                selected["prompt"] = "1girl, solo, " + selected["prompt"]
+            calls = []
+
+            async def fake_deliver(_event, **kwargs):
+                calls.append(kwargs)
+                return True
+
+            plugin._deliver_generation = fake_deliver
+            self.assertEqual(
+                await plugin._deliver_random_draw_plans(
+                    FakeEvent(), draw_plans=plans, user_prompt="extra",
+                    quality="quality", chaos=False, random_subject_tag="1boy",
+                ),
+                5,
+            )
+            prompts = [
+                prompt
+                for call in calls
+                for prompt in call.get("batch_prompts", [call["prompt"]])
+            ]
+            self.assertEqual(len(prompts), 5)
+            self.assertTrue(all("extra, 1boy, solo, scene" in prompt for prompt in prompts))
+            self.assertTrue(all(
+                entry["prompt"].startswith("1boy, solo")
+                for call in calls for entry in call["options"]["_source_entries"]
+            ))
+            self.assertTrue(all(item[0]["prompt"].startswith("1girl, solo") for item in plans))
+
     async def test_ordinary_five_draw_uses_2_2_1_micro_batches(self):
         with tempfile.TemporaryDirectory() as directory:
             plugin = ComfyWorkflowBridge(
@@ -381,6 +453,9 @@ class FiveDrawBatchTests(unittest.IsolatedAsyncioTestCase):
                 },
             )
             calls = []
+            plans = self._plans()
+            for selected, _, _ in plans:
+                selected["prompt"] = "1girl, solo, " + selected["prompt"]
 
             async def fake_deliver(_event, **kwargs):
                 calls.append(kwargs)
@@ -391,10 +466,11 @@ class FiveDrawBatchTests(unittest.IsolatedAsyncioTestCase):
             event = FakeEvent()
             successes = await plugin._deliver_random_draw_plans(
                 event,
-                draw_plans=self._plans(),
+                draw_plans=plans,
                 user_prompt="",
                 quality="",
                 chaos=False,
+                random_subject_tag="1man",
             )
             self.assertEqual(successes, 5)
             self.assertEqual(
@@ -403,6 +479,11 @@ class FiveDrawBatchTests(unittest.IsolatedAsyncioTestCase):
             )
             fallback_calls = [call for call in calls if not call.get("batch_prompts")]
             self.assertEqual(len(fallback_calls), 3)
+            self.assertTrue(all("1man, solo" in call["prompt"] for call in calls))
+            self.assertTrue(all(
+                "1man, solo" in prompt
+                for call in calls for prompt in call.get("batch_prompts", [])
+            ))
             self.assertTrue(any("自动改为逐张生成" in text for text in event.sent))
 
     async def test_chaos_five_draw_remains_sequential(self):
@@ -416,6 +497,9 @@ class FiveDrawBatchTests(unittest.IsolatedAsyncioTestCase):
                 },
             )
             calls = []
+            plans = self._plans()
+            for selected, _, _ in plans:
+                selected["prompt"] = "1girl, solo, " + selected["prompt"]
 
             async def fake_deliver(_event, **kwargs):
                 calls.append(kwargs)
@@ -424,14 +508,21 @@ class FiveDrawBatchTests(unittest.IsolatedAsyncioTestCase):
             plugin._deliver_generation = fake_deliver
             successes = await plugin._deliver_random_draw_plans(
                 FakeEvent(),
-                draw_plans=self._plans(),
+                draw_plans=plans,
                 user_prompt="",
                 quality="",
                 chaos=True,
+                random_subject_tag="none",
             )
             self.assertEqual(successes, 5)
             self.assertEqual(len(calls), 5)
             self.assertTrue(all("batch_prompts" not in call for call in calls))
+            self.assertTrue(all("1girl" not in call["prompt"] for call in calls))
+            self.assertTrue(all("solo, scene" in call["prompt"] for call in calls))
+            self.assertTrue(all(
+                entry["prompt"].startswith("solo, scene")
+                for call in calls for entry in call["options"]["_source_entries"]
+            ))
 
 
 if __name__ == "__main__":

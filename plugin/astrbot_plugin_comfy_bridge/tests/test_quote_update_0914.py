@@ -50,6 +50,7 @@ class QuoteUpdateTests(unittest.IsolatedAsyncioTestCase):
                                     plain_result=lambda t: t, send=AsyncMock())
             bridge = SimpleNamespace(_event_is_admin=lambda e: True, _quoted_job=AsyncMock(return_value=(self.parent(), 0)),
                                      config={}, _preset_path=lambda: path)
+            bridge._group_can_manage_presets = lambda e: bridge._event_is_admin(e)
             method = self.bind('asavestyle', bridge)
             await method(event)
             self.assertEqual(load_presets(path)['styles']['saved'], quoted_style_preset(self.parent()))

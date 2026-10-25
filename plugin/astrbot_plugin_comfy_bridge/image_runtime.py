@@ -212,21 +212,68 @@ class EventImageResolver:
                     return saved
         return None
 
+    async def _save_discord_reply(self, event: AstrMessageEvent) -> str | None:
+        if event.get_platform_name() != "discord":
+            return None
+        raw = getattr(event.message_obj, "raw_message", None)
+        reference = getattr(raw, "reference", None)
+        reply_id = getattr(reference, "message_id", None)
+        channel = getattr(raw, "channel", None)
+        if reply_id is None or channel is None:
+            return None
+        channel_id = getattr(channel, "id", None)
+        ref_channel_id = getattr(reference, "channel_id", None)
+        if ref_channel_id is not None and str(ref_channel_id) != str(channel_id):
+            return None
+        quoted = getattr(reference, "resolved", None) or getattr(reference, "cached_message", None)
+        if quoted is None:
+            try:
+                quoted = await channel.fetch_message(reply_id)
+            except Exception as exc:
+                self.logger.warning("Discord quoted image lookup failed: %s", exc)
+                return None
+        if str(getattr(quoted, "id", "")) != str(reply_id):
+            return None
+        for attachment in getattr(quoted, "attachments", ()):
+            name = str(getattr(attachment, "filename", "") or "")
+            content_type = str(getattr(attachment, "content_type", "") or "")
+            if not (content_type.startswith("image/") or Path(name).suffix.lower() in IMAGE_SUFFIXES):
+                continue
+            saved = await self._save_ref(str(getattr(attachment, "url", "") or ""), name)
+            if saved:
+                return saved
+        return None
+
     async def resolve(self, event: AstrMessageEvent) -> str | None:
+        menu_image = getattr(event, "_aaa_menu_source_image", "")
+        if menu_image:
+            source = Path(menu_image)
+            if source.is_file() and not source.is_symlink():
+                return str(source)
         reply_images: list[Comp.Image] = []
         direct_images: list[Comp.Image] = []
+        reply_files: list[Any] = []
+        direct_files: list[Any] = []
+        file_type = getattr(Comp, "File", None)
         for component in event.get_messages():
             if isinstance(component, Comp.Image):
                 direct_images.append(component)
+            elif file_type is not None and isinstance(component, file_type):
+                direct_files.append(component)
             elif isinstance(component, Comp.Reply):
                 for inner in component.chain or []:
                     if isinstance(inner, Comp.Image):
                         reply_images.append(inner)
+                    elif file_type is not None and isinstance(inner, file_type):
+                        reply_files.append(inner)
 
         for component in reply_images:
             saved = await self._save_component(component)
             if saved:
                 return saved
+        saved = await self._save_discord_reply(event)
+        if saved:
+            return saved
         saved = await self._save_raw_reply(event)
         if saved:
             return saved
@@ -234,6 +281,14 @@ class EventImageResolver:
             saved = await self._save_component(component)
             if saved:
                 return saved
+        for component in reply_files + direct_files:
+            name = str(getattr(component, "name", "") or "")
+            if Path(name).suffix.lower() not in IMAGE_SUFFIXES:
+                continue
+            for ref in (getattr(component, "file", ""), getattr(component, "url", "")):
+                saved = await self._save_ref(str(ref or ""), name)
+                if saved:
+                    return saved
         for segment in self._raw_segments(event):
             if not isinstance(segment, dict) or segment.get("type") != "image":
                 continue

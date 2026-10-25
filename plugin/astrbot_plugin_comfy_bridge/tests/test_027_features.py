@@ -79,6 +79,84 @@ class TextCharacterTests(unittest.TestCase):
 
 
 class DynamicLoraTests(unittest.TestCase):
+    def test_quick_workflow_builds_dynamic_style_without_legacy_slots(self) -> None:
+        for configured_slots in ([], ["46", "47", "48", "49"]):
+            with self.subTest(configured_slots=configured_slots):
+                workflow = {
+                    "1": {"class_type": "UNETLoader", "inputs": {}},
+                    "2": {"class_type": "CLIPLoader", "inputs": {}},
+                    "11": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["2", 0], "text": ""}},
+                    "12": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["2", 0], "text": ""}},
+                    "19": {"class_type": "KSampler", "inputs": {"model": ["1", 0]}},
+                }
+                result = apply_lora_plan(
+                    workflow,
+                    style={"loras": [{"name": "my-style.safetensors", "strength_model": 0.8}]},
+                    character=None,
+                    style_slot_ids=configured_slots,
+                    positive_node_id="11",
+                    negative_node_id="12",
+                    sampler_node_id="19",
+                    character_node_id="900001",
+                    options={},
+                    style_mode="dynamic",
+                )
+                self.assertEqual(workflow["900100"]["inputs"]["model"], ["1", 0])
+                self.assertEqual(workflow["900100"]["inputs"]["clip"], ["2", 0])
+                self.assertEqual(workflow["19"]["inputs"]["model"], ["900100", 0])
+                self.assertEqual(workflow["11"]["inputs"]["clip"], ["900100", 1])
+                self.assertEqual(workflow["12"]["inputs"]["clip"], ["900100", 1])
+                self.assertEqual(len(result["style_loras"]), 1)
+
+    def test_quick_workflow_dynamic_style_then_character_lora(self) -> None:
+        workflow = {
+            "1": {"class_type": "UNETLoader", "inputs": {}},
+            "2": {"class_type": "CLIPLoader", "inputs": {}},
+            "11": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["2", 0]}},
+            "12": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["2", 0]}},
+            "19": {"class_type": "KSampler", "inputs": {"model": ["1", 0]}},
+        }
+        apply_lora_plan(
+            workflow,
+            style={"loras": [{"name": "style.safetensors"}]},
+            character={"lora": {"name": "character.safetensors"}},
+            style_slot_ids=[], positive_node_id="11", negative_node_id="12",
+            sampler_node_id="19", character_node_id="900001", options={},
+            style_mode="dynamic",
+        )
+        self.assertEqual(workflow["900001"]["inputs"]["model"], ["900100", 0])
+        self.assertEqual(workflow["900001"]["inputs"]["clip"], ["900100", 1])
+        self.assertEqual(workflow["19"]["inputs"]["model"], ["900001", 0])
+        self.assertEqual(workflow["12"]["inputs"]["clip"], ["900001", 1])
+
+    def test_partial_or_broken_dynamic_sources_fail_without_guessing(self) -> None:
+        workflow = {
+            "1": {"class_type": "UNETLoader", "inputs": {}},
+            "2": {"class_type": "CLIPLoader", "inputs": {}},
+            "11": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["2", 0]}},
+            "19": {"class_type": "KSampler", "inputs": {"model": ["1", 0]}},
+        }
+        common = dict(
+            style={"loras": [{"name": "style.safetensors"}]}, character=None,
+            positive_node_id="11", negative_node_id="12", sampler_node_id="19",
+            character_node_id="900001", options={}, style_mode="dynamic",
+        )
+        with self.assertRaisesRegex(WorkflowError, "定位基础 MODEL/CLIP"):
+            apply_lora_plan({**workflow, "11": {"class_type": "CLIPTextEncode", "inputs": {}}},
+                            style_slot_ids=[], **common)
+        partial = dict(workflow)
+        partial["46"] = {"class_type": "LoraLoader", "inputs": {"model": ["1", 0], "clip": ["2", 0]}}
+        with self.assertRaisesRegex(WorkflowError, "槽位配置与工作流不一致"):
+            apply_lora_plan(partial, style_slot_ids=["46", "47"], **common)
+        with self.assertRaisesRegex(WorkflowError, "包含 LoRA 节点"):
+            apply_lora_plan(partial, style_slot_ids=[], **common)
+
+    def test_fixed_mode_still_requires_real_slots(self) -> None:
+        with self.assertRaisesRegex(WorkflowError, "真实存在的 LoRA 槽位"):
+            apply_lora_plan({}, style={"loras": []}, character=None, style_slot_ids=[],
+                            positive_node_id="11", negative_node_id="12", sampler_node_id="19",
+                            character_node_id="900001", options={}, style_mode="fixed")
+
     def test_dynamic_chain_supports_more_than_four(self) -> None:
         workflow = {
             "1": {"class_type": "BaseModel", "inputs": {}},

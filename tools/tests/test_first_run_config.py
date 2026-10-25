@@ -34,6 +34,38 @@ class FirstRunTests(unittest.TestCase):
         self.assertEqual(self.runtime.read_bytes(), before)
         self.assertEqual(list(self.data.iterdir()), [])
 
+    def test_discard_one_page_leaves_disk_and_other_pages_alone(self):
+        session = SetupSession(self.runtime)
+        old = self.runtime.read_bytes()
+        session.set_connections({'AAH_ASTRBOT_BOT_ID': 'updated'})
+        session.stage_dictionary({'characters': [{'tag': 'example'}]})
+        session.discard('服务连接')
+        self.assertEqual(session.env, self.env)
+        self.assertEqual(session.changes(), ['角色词典'])
+        self.assertEqual(self.runtime.read_bytes(), old)
+        session.discard('角色词典')
+        self.assertEqual(session.changes(), [])
+        with self.assertRaises(SetupError): session.discard('全部清空')
+
+    def test_discard_users_preserves_saved_delivery_but_removes_unsaved(self):
+        session = SetupSession(self.runtime)
+        session.add_user('123456789', 'saved'); session.commit()
+        token = session.pending_tokens['123456789']
+        before = session.paths['用户注册表'].read_bytes()
+        session.add_user('987654321', 'unsaved')
+        session.discard('用户注册表')
+        self.assertEqual(session.pending_tokens, {'123456789': token})
+        self.assertEqual(session.paths['用户注册表'].read_bytes(), before)
+        self.assertEqual(session.changes(), [])
+
+    def test_discard_keeps_concurrent_write_guard(self):
+        session = SetupSession(self.runtime)
+        self.write(self.runtime, {**self.env, 'EXTERNAL_CHANGE': 'keep'})
+        session.discard('服务连接')
+        session.set_connections({'AAH_ASTRBOT_BOT_ID': 'new'})
+        with self.assertRaises(SetupError): session.commit()
+        self.assertIn('EXTERNAL_CHANGE', self.runtime.read_text())
+
     def test_commit_preserves_settings_and_creates_backup(self):
         old = self.runtime.read_bytes()
         session = SetupSession(self.runtime)

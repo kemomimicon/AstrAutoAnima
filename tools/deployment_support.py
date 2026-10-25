@@ -4,6 +4,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import tempfile
 import zipfile
 
@@ -17,6 +18,24 @@ def host_platform():
     return 'windows' if os.name == 'nt' else 'linux'
 
 
+def default_install_directory():
+    """A stable user location, never a sibling of the downloaded release."""
+    return str(Path.home() / 'AstrAutoAnima-install')
+
+
+def relocation_notice(root, services):
+    if (root / '.aaa-migration-incomplete').exists():
+        return '搬家副本尚未完成，停止启动。原目录保留，请查看搬家工具结果。'
+    hubs = [item for item in services if item.get('name') == 'Hub']
+    if len(hubs) == 1 and hubs[0].get('cwd'):
+        configured = Path(hubs[0]['cwd']).absolute()
+        if configured != (root / 'hub').absolute():
+            return ('检测到安装目录改名/搬迁，停止启动，防止误用旧实例。当前目录：' + str(root)
+                    + '；配置中的 Hub：' + str(configured)
+                    + '。请先用 Windows 搬家与路径修复工具的“就地修复”；Linux 请人工迁移配置及环境。不要重新下载模型或覆盖配置。')
+    return ''
+
+
 def clean_path(value):
     value = os.path.expandvars(str(value).strip())
     if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
@@ -28,7 +47,11 @@ def clean_path(value):
 
 def no_links(path):
     for item in (path, *path.parents):
-        if item.is_symlink() or (hasattr(item, 'is_junction') and item.is_junction()):
+        try:
+            reparse = bool(getattr(item.lstat(), 'st_file_attributes', 0) & getattr(stat, 'FILE_ATTRIBUTE_REPARSE_POINT', 0x400))
+        except FileNotFoundError:
+            reparse = False
+        if item.is_symlink() or reparse:
             raise ValueError('为避免写入错误目录，不支持符号链接/目录联接：' + str(item))
 
 
@@ -74,12 +97,15 @@ def discover_python(root, explicit='', portable=False):
     return found.absolute()
 
 
-def windows_start_script():
+def windows_start_script(profile=None):
     # Never pass a quoted path ending in a backslash to Python's argv parser.
+    if profile not in (None, 'local', 'full'):
+        raise ValueError('未知启动档位')
+    profile_arg = '' if profile is None else ' --profile ' + profile
     return ('@echo off\r\nsetlocal DisableDelayedExpansion\r\nchcp 65001 >nul\r\nset "PYTHONUTF8=1"\r\ncd /d "%~dp0."\r\n'
             'if errorlevel 1 goto :failed\r\n'
             'if not exist "hub\\.venv\\Scripts\\python.exe" goto :missing\r\n'
-            '"hub\\.venv\\Scripts\\python.exe" "deploy_project.py" --start "."\r\n'
+            '"hub\\.venv\\Scripts\\python.exe" "deploy_project.py" --start "."' + profile_arg + '\r\n'
             'goto :done\r\n:missing\r\necho Hub Python missing. Resume the deployment wizard.\r\n'
             ':failed\r\necho Start failed. Keep this window for diagnostics.\r\n:done\r\npause\r\n')
 
@@ -96,7 +122,8 @@ def download_base_models(root, comfy, plan, log):
         no_links(target)
         log(f"下载 {entry['filename']} ({entry['size']:,} bytes)，来源：{entry['url']}")
         download_file(entry['url'], target, log, expected_sha256=entry['sha256'],
-                      network=DownloadNetwork.from_plan(plan))
+                      expected_size=entry['size'],
+                      network=DownloadNetwork.from_plan(plan), modelscope_url=entry.get('modelscope_url', ''))
         if target.stat().st_size != entry['size']:
             raise ValueError('模型大小不符合发布清单：' + target.name)
         setattr(plan, key, str(target))

@@ -23,6 +23,17 @@ class VariantSchemaTests(unittest.TestCase):
         self.assertIsNone(PresetWriteRequest(name="A", prompt="identity").variants)
         self.assertEqual(PresetWriteRequest(name="A", variants=[]).variants, [])
 
+    def test_base_model_variants_need_no_lora_but_still_need_default_prompt(self):
+        variant = {"id": "hanfu", "category": "clothing", "name": "汉服", "prompt": "identity, hanfu"}
+        role = PresetWriteRequest(name="A", prompt="identity, uniform", variants=[variant])
+        value = _preset_value("character", role)
+        self.assertIsNone(value["lora"])
+        self.assertEqual(value["variants"][0]["prompt"], "identity, hanfu")
+        with self.assertRaises(RepositoryError):
+            _preset_value("character", role.model_copy(update={"prompt": ""}))
+        with self.assertRaises(RepositoryError):
+            _preset_value("character", role.model_copy(update={"variants": role.variants * 2}))
+
     def test_command_injection_rejected(self):
         with self.assertRaises(ValidationError):
             RemoteJobCreateRequest(target_id="private", kind="direct", character_variant="x 画风=y")

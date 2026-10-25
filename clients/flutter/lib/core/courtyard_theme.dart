@@ -226,7 +226,8 @@ class HubNavigation extends StatelessWidget {
               '工作站': AdminNavigation.indicesFor('main'),
               '资源': AdminNavigation.indicesFor('resources'),
               '管理': AdminNavigation.indicesFor('management',
-                  includeStorage: destinations.length > 9)
+                  includeStorage: destinations.length > 9,
+                  includeChatGroups: destinations.length > 10)
             }.entries) ...[
               Padding(
                   padding: const EdgeInsets.fromLTRB(20, 16, 16, 8),

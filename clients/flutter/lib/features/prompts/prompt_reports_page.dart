@@ -77,7 +77,7 @@ class _PromptReportsPageState extends State<PromptReportsPage> {
                             Text(
                                 '${raw['prompt_id']} · ${raw['owner']} · ${raw['status']}'),
                             Image.network(
-                                widget.api.resolveUrl(
+                                widget.api.resolveImageUrl(
                                     '/api/v1/admin/prompt-reports/${raw['id']}/image'),
                                 headers: widget.api.authorizationHeaders,
                                 height: 240,

@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../core/courtyard_theme.dart';
+import '../../core/random_subject_tag.dart';
+import '../../core/builtin_features.dart';
+import 'builtin_features_page.dart';
+import '../lite/qq_command_composer_page.dart';
 
 final appThemeMode = ValueNotifier<ThemeMode>(ThemeMode.system);
 final appSkin = ValueNotifier<String>('courtyard');
@@ -10,6 +14,8 @@ Future<void> loadAppTheme() async {
   final prefs = await SharedPreferences.getInstance();
   final value = prefs.getString('aaa_theme_mode');
   showRemakeOptions.value = prefs.getBool('aaa_remake_options') ?? true;
+  await loadRandomSubjectTag();
+  await loadBuiltinFeatures();
   appSkin.value =
       prefs.getString('aaa_skin') == 'classic' ? 'classic' : 'courtyard';
   appThemeMode.value = ThemeMode.values
@@ -17,9 +23,18 @@ Future<void> loadAppTheme() async {
 }
 
 class SettingsDrawer extends StatelessWidget {
-  const SettingsDrawer({required this.onDisconnect, this.onGallery, super.key});
+  const SettingsDrawer(
+      {required this.onDisconnect,
+      this.onSwitch,
+      this.onGallery,
+      this.onConnections,
+      this.localMode = false,
+      super.key});
   final Future<void> Function() onDisconnect;
+  final VoidCallback? onSwitch;
   final VoidCallback? onGallery;
+  final VoidCallback? onConnections;
+  final bool localMode;
 
   @override
   Widget build(BuildContext context) => Drawer(
@@ -27,6 +42,17 @@ class SettingsDrawer extends StatelessWidget {
         child: SafeArea(
             child: ListView(children: [
           const ListTile(title: Text('设置', style: TextStyle(fontSize: 24))),
+          if (onConnections != null)
+            ListTile(
+                leading: const Icon(Icons.dns_outlined),
+                title: const Text('设备与实例连接'),
+                subtitle: const Text('多个 Hub 独立保存，按需切换'),
+                onTap: onConnections),
+          ListTile(
+              leading: const Icon(Icons.widgets_outlined),
+              title: const Text('内置功能与连接方案'),
+              onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(
+                  builder: (_) => BuiltinFeaturesPage(localMode: localMode)))),
           ValueListenableBuilder<bool>(
             valueListenable: showRemakeOptions,
             builder: (context, value, _) => SwitchListTile(
@@ -40,11 +66,39 @@ class SettingsDrawer extends StatelessWidget {
               },
             ),
           ),
+          ValueListenableBuilder<bool>(
+            valueListenable: randomSubjectTagLocked,
+            builder: (context, locked, _) => SwitchListTile(
+              title: const Text('锁定随机串起手选项'),
+              subtitle:
+                  Text(locked ? '已锁定当前选择；抽卡页隐藏修改入口' : '解锁后可在抽卡页修改开头的 1girl'),
+              value: locked,
+              onChanged: (value) => saveRandomSubjectTagLocked(value),
+            ),
+          ),
           if (onGallery != null)
             ListTile(
                 leading: const Icon(Icons.photo_library_outlined),
                 title: const Text('画风画廊'),
                 onTap: onGallery),
+          if (onSwitch != null)
+            ListTile(
+                leading: const Icon(Icons.swap_horiz),
+                title: const Text('切换工作模式'),
+                subtitle: const Text('本机、在线管理、在线服务分别保存连接；任务继续运行'),
+                onTap: onSwitch),
+          if (!localMode)
+            ValueListenableBuilder<bool>(
+                valueListenable: qqComposerEnabled,
+                builder: (context, enabled, child) => enabled
+                    ? ListTile(
+                        leading: const CourtyardIcon(Icons.copy_all_outlined),
+                        title: const Text('复制 QQ 生图指令'),
+                        subtitle: const Text('离线组合，手动粘贴发送；不连接工作站'),
+                        onTap: () => Navigator.of(context).push(
+                            MaterialPageRoute<void>(
+                                builder: (_) => const QqCommandComposerPage())))
+                    : const SizedBox.shrink()),
           Padding(
               padding: const EdgeInsets.all(16),
               child: ValueListenableBuilder<String>(
@@ -90,14 +144,16 @@ class SettingsDrawer extends StatelessWidget {
                       }))),
           ListTile(
               leading: const CourtyardIcon(Icons.dns_outlined),
-              title: const Text('切换服务器 / 令牌'),
+              title: Text(localMode ? '修改本机 Hub / 令牌' : '切换服务器 / 令牌'),
               subtitle: const Text('退出当前连接后重新填写；不会显示当前令牌'),
               onTap: () async {
                 final yes = await showDialog<bool>(
                     context: context,
                     builder: (context) => AlertDialog(
                             title: const Text('切换连接？'),
-                            content: const Text('将清除本机当前连接凭据，服务器已排队任务不会因此取消。'),
+                            content: Text(localMode
+                                ? '将清除本机工作站的连接凭据；已提交的 ComfyUI 任务不会因此取消。'
+                                : '将清除当前远程连接凭据；服务器已排队任务不会因此取消。'),
                             actions: [
                               TextButton(
                                   onPressed: () =>

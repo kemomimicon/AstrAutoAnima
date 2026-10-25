@@ -4,7 +4,7 @@ import secrets
 from .workflow_runtime import WorkflowError
 
 
-def copy_context(job: dict, index: int, overrides: dict):
+def copy_context(job: dict, index: int, overrides: dict, *, camera_lora_name: str = ""):
     """Recover editable prompt/options from an authorized job, never its tickets."""
     inputs = job.get("input", {})
     if str(overrides.get('style', '')).startswith('__hub_suite_') and not (inputs.get('prompt') or inputs.get('raw_batch_prompts')):
@@ -18,7 +18,7 @@ def copy_context(job: dict, index: int, overrides: dict):
         prompt = inputs.get("prompt") or inputs.get("compiled_prompt")
     if not isinstance(prompt, str) or not prompt.strip():
         raise WorkflowError("原任务未保存可编辑提示词")
-    allowed = {"character", "character_variant", "style", "character_tag_mode", "ratio", "width", "height", "size", "sampler", "scheduler", "steps", "cfg", "lighting_key", "lighting_effect", "material_primary", "material_details", "material_surface", "camera_distance", "camera_yaw", "camera_pitch", "camera_lens", "camera_roll", "detail_hands", "detail_feet", "detail_face"}
+    allowed = {"character", "character_variant", "style", "character_tag_mode", "ratio", "width", "height", "size", "sampler", "scheduler", "steps", "cfg", "lighting_key", "lighting_effect", "material_primary", "material_details", "material_surface", "camera_distance", "camera_yaw", "camera_pitch", "camera_lens", "camera_roll", "camera_extreme_lora", "detail_hands", "detail_feet", "detail_face", "detail_upscale"}
     aliases = {"steps": "sampler_steps", "cfg": "sampler_cfg", "sampler": "sampler_preset"}
     allowed.update(aliases.values())
     allowed.update({"character_strength", "character_model", "character_clip", "style_scale"})
@@ -51,7 +51,25 @@ def copy_context(job: dict, index: int, overrides: dict):
     for kind in ("character", "style"):
         saved = inputs.get("preset_snapshot", {}).get(kind)
         if kind not in overrides and isinstance(saved, dict):
-            options["_copy_" + kind] = copy.deepcopy(saved)
+            snapshot = copy.deepcopy(saved)
+            # Legacy snapshots stored the camera adapter inside the style list.
+            # Remove only the verified appended entry, never an arbitrary LoRA.
+            prior = inputs.get("generation_options", {})
+            if (kind == "style"
+                    and inputs.get("preset_snapshot", {}).get("camera_auxiliary_embedded") is not False
+                    and prior.get("camera_extreme_lora") is True
+                    and prior.get("camera_pitch") in {"extreme_low", "extreme_high"}):
+                loras = snapshot.get("loras", [])
+                if camera_lora_name and isinstance(loras, list) and loras:
+                    last = loras[-1]
+                    if (isinstance(last, dict) and last.get("name") == camera_lora_name
+                            and last.get("strength_clip") == 0.0):
+                        snapshot["loras"] = loras[:-1]
+                    else:
+                        raise WorkflowError("旧任务的机位辅助 LoRA 来源无法确认，请显式选择画风后重跑，避免重复或残留辅助 LoRA")
+                elif loras:
+                    raise WorkflowError("旧任务缺少可核对的机位辅助 LoRA 配置，请显式选择画风后重跑")
+            options["_copy_" + kind] = snapshot
             options[kind] = options.get(kind) or "原任务" + kind
     return prompt, options
 

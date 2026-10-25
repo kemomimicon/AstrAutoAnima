@@ -28,10 +28,10 @@
     "inputs": {
       "model": "YOUR_SEEDVR2_VAE.safetensors",
       "device": "cuda:0",
-      "encode_tiled": true,
+      "encode_tiled": false,
       "encode_tile_size": 1024,
       "encode_tile_overlap": 128,
-      "decode_tiled": true,
+      "decode_tiled": false,
       "decode_tile_size": 1024,
       "decode_tile_overlap": 128,
       "tile_debug": "false",
@@ -72,7 +72,7 @@
     },
     "class_type": "SeedVR2VideoUpscaler",
     "_meta": {
-      "title": "SeedVR2 原生整图放大（VAE分块）"
+      "title": "SeedVR2 原生整图放大（关闭图像与VAE分块）"
     }
   },
   "5": {

@@ -194,9 +194,6 @@ class _PresetEditorDialogState extends State<_PresetEditorDialog> {
     if (!_formKey.currentState!.validate()) return;
     try {
       final loras = _parseLoras();
-      if (!_isStyle && _variants.isNotEmpty && loras.isEmpty) {
-        throw const FormatException('新增造型需要指定角色 LoRA');
-      }
       final value = <String, dynamic>{
         'name': _name.text.trim(),
         'prompt': _prompt.text.trim(),
@@ -245,6 +242,7 @@ class _PresetEditorDialogState extends State<_PresetEditorDialog> {
                 const SizedBox(height: 12),
                 TextFormField(
                   controller: _prompt,
+                  onChanged: _isStyle ? null : (_) => setState(() {}),
                   minLines: 3,
                   maxLines: 8,
                   decoration: const InputDecoration(labelText: '固定提示词'),
@@ -281,6 +279,7 @@ class _PresetEditorDialogState extends State<_PresetEditorDialog> {
                   decoration: InputDecoration(
                     labelText: _isStyle ? 'LoRA 列表（每行一个）' : '角色 LoRA（可留空）',
                     hintText: 'anima_lora/name/model.safetensors|0.8|0.8',
+                    helperText: _isStyle ? null : '底模角色可留空，服装 / 造型预设同样可用。',
                   ),
                 ),
                 if (widget.api != null)

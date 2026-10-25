@@ -1,25 +1,55 @@
 {
-  "release": "0.5.0-beta.2",
+  "public_display_version": "0.5.2-1.44",
+  "release_coordination": "video-and-public-image-together-after-acceptance",
+  "publication_preparation_date": "2026-10-25",
+  "public_image_rebuild_and_acceptance_required": true,
+  "retained_public_windows_compatibility_patch": "windows.2",
+  "release": "0.5.2-beta.1",
   "status": "prerelease",
   "components": {
-    "astrbot_plugin_comfy_bridge": "0.5.0-beta.2-remake.2",
-    "astr_auto_anima_hub_service": "0.5.0b2.post1",
-    "astr_auto_anima_hub_client": "0.5.0-beta.2+36",
-    "workflow_pack": "0.8.0-beta.1-public-windows.1"
+    "astrbot_plugin_comfy_bridge": "0.5.2-beta.1",
+    "astr_auto_anima_hub_service": "0.5.2b1",
+    "astr_auto_anima_hub_client": "0.5.2-beta.1+44",
+    "workflow_pack": "0.8.0-beta.1-public"
   },
   "compatibility": {
     "astrbot": ">=4.17,<5",
     "anima_master_tested": "0.7.1",
-    "anima_master_untested": ["0.9.1"],
+    "anima_master_untested": [
+      "0.9.1"
+    ],
     "python": ">=3.10"
   },
   "private_data_included": false,
   "authorized_project_artwork_included": true,
-  "deployment_platforms": ["windows", "linux"],
-  "training_studio_connector_included": false,
+  "deployment_platforms": [
+    "windows",
+    "linux"
+  ],
+  "training_studio_connector_included": true,
   "automatic_cloud_shutdown_included": false,
   "bundled_prompt_count": 0,
   "models_included": false,
   "external_downloads_default_enabled": false,
-  "android_release_signing": "community-test-debug-key"
+  "android_release_signing": "community-test-debug-key",
+  "candidate_only": true,
+  "compiled_clients_rebuilt": false,
+  "local_repair_review": "20261024",
+  "production_deployed": false,
+  "integrated_feature_review": "20261018",
+  "prompt_preset_fix_review": "build39",
+  "public_build": 44,
+  "minimum_prior_client_build": 43,
+  "catalog_outfits_build43_included": true,
+  "integrated_qq_official_patch": "qqofficial.2",
+  "admin_recovery_fix": true,
+  "deployment_patch_review": "20261024",
+  "server_install_candidate": true,
+  "image_clone_acceptance": false,
+  "builtins_require_reinstallation_on_toggle": false,
+  "real_local_workstation_acceptance": false,
+  "real_messaging_acceptance": false,
+  "deployment_revision": "entryfix.1",
+  "deployment_entry_order_fixed": true,
+  "client_binaries_changed_by_deployment_revision": false
 }

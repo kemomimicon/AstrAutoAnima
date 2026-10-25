@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import urlsplit
 
 
 def _int_env(name: str, default: int) -> int:
@@ -29,6 +30,13 @@ def _float_env(name: str, default: float) -> float:
 class Settings:
     host: str = "127.0.0.1"
     port: int = 6278
+    execution_mode: str = "remote"
+    local_workflow_path: Path | None = None
+    local_gufeng_catalog_path: Path | None = None
+    local_llm_base_url: str = ""
+    local_llm_model: str = ""
+    local_llm_api_key: str = ""
+    local_llm_guide_path: Path | None = None
     admin_token: str = ""
     lite_token: str = ""
     legacy_lite_qq: str = ""
@@ -54,12 +62,30 @@ class Settings:
     character_dictionary_override: Path | None = None
     character_dictionary_edits_override: Path | None = None
     character_favorites_override: Path | None = None
+    prompt_favorites_override: Path | None = None
     web_root: Path | None = None
+    extensions_override: Path | None = None
+    anima_studio_upstream: str = "http://127.0.0.1:8765"
     remote_job_timeout_seconds: float = 1800.0
 
     @classmethod
     def from_env(cls) -> "Settings":
         return cls(
+            execution_mode=os.getenv("AAH_EXECUTION_MODE", "remote").strip().lower(),
+            local_workflow_path=(Path(os.environ["AAH_LOCAL_WORKFLOW_PATH"]).expanduser()
+                                 if os.getenv("AAH_LOCAL_WORKFLOW_PATH", "").strip() else None),
+            local_gufeng_catalog_path=(
+                Path(os.environ["AAH_LOCAL_GUFENG_CATALOG_PATH"].strip()).expanduser()
+                if os.getenv("AAH_LOCAL_GUFENG_CATALOG_PATH", "").strip() else None
+            ),
+            local_llm_base_url=os.getenv("AAH_LOCAL_LLM_BASE_URL", "").strip(),
+            local_llm_model=os.getenv("AAH_LOCAL_LLM_MODEL", "").strip(),
+            local_llm_api_key=os.getenv("AAH_LOCAL_LLM_API_KEY", "").strip(),
+            local_llm_guide_path=(Path(os.environ["AAH_LOCAL_LLM_GUIDE_PATH"]).expanduser()
+                                  if os.getenv("AAH_LOCAL_LLM_GUIDE_PATH", "").strip() else None),
+            anima_studio_upstream=os.getenv("AAH_ANIMA_STUDIO_UPSTREAM", "http://127.0.0.1:8765"),
+            extensions_override=(Path(os.environ['AAH_EXTENSIONS_ROOT']).expanduser()
+                                 if os.getenv('AAH_EXTENSIONS_ROOT', '').strip() else None),
             host=os.getenv("AAH_HOST", "127.0.0.1").strip() or "127.0.0.1",
             port=_int_env("AAH_PORT", 6278),
             admin_token=os.getenv("AAH_ADMIN_TOKEN", "").strip(),
@@ -85,7 +111,10 @@ class Settings:
             plugin_data_dir=Path(
                 os.getenv(
                     "AAH_PLUGIN_DATA_DIR",
-                    "astrbot-runtime/data/plugin_data/astrbot_plugin_comfy_bridge",
+                    (str(Path(os.getenv("LOCALAPPDATA", str(Path.home() / ".local" / "share")))
+                         / "AstrAutoAnima" / "Hub")
+                     if os.getenv("AAH_EXECUTION_MODE", "remote").strip().lower() == "local"
+                     else "astrbot-runtime/data/plugin_data/astrbot_plugin_comfy_bridge"),
                 )
             ).expanduser(),
             comfyui_root=Path(
@@ -141,6 +170,11 @@ class Settings:
                 if os.getenv("AAH_CHARACTER_FAVORITES_PATH", "").strip()
                 else None
             ),
+            prompt_favorites_override=(
+                Path(os.environ["AAH_PROMPT_FAVORITES_PATH"]).expanduser()
+                if os.getenv("AAH_PROMPT_FAVORITES_PATH", "").strip()
+                else None
+            ),
             web_root=(
                 Path(os.environ["AAH_WEB_ROOT"]).expanduser()
                 if os.getenv("AAH_WEB_ROOT", "").strip()
@@ -156,6 +190,10 @@ class Settings:
         return self.prompt_pool_override or (
             self.plugin_data_dir / "anima_random_prompt_pool.json"
         )
+
+    @property
+    def prompt_favorites_path(self) -> Path:
+        return self.prompt_favorites_override or (self.hub_state_dir / "prompt_favorites.sqlite3")
 
     @property
     def preset_path(self) -> Path:
@@ -188,6 +226,10 @@ class Settings:
     @property
     def hub_state_dir(self) -> Path:
         return self.plugin_data_dir / "hub_state"
+
+    @property
+    def extensions_root(self) -> Path:
+        return self.extensions_override or (self.hub_state_dir / 'extensions')
 
     @property
     def lora_root(self) -> Path:
@@ -238,6 +280,16 @@ class Settings:
         return self.hub_state_dir / "remote_jobs"
 
     def validate_for_startup(self) -> None:
+        if self.execution_mode not in {"remote", "local"}:
+            raise ValueError("AAH_EXECUTION_MODE must be remote or local")
+        if self.execution_mode == "local" and self.host not in {"127.0.0.1", "::1", "localhost"}:
+            raise ValueError("local execution mode must bind to loopback only")
+        if self.execution_mode == "local":
+            comfy_url = urlsplit(self.comfyui_url)
+            if (comfy_url.scheme != "http" or
+                    comfy_url.hostname not in {"127.0.0.1", "::1", "localhost"} or
+                    comfy_url.username or comfy_url.password):
+                raise ValueError("local execution mode requires a loopback ComfyUI HTTP URL")
         if len(self.admin_token) < 32:
             raise ValueError(
                 "AAH_ADMIN_TOKEN must contain at least 32 characters before startup"

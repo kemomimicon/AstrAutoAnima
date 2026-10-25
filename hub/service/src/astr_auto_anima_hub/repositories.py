@@ -90,6 +90,7 @@ def list_prompts(
     page: int = 1,
     page_size: int = 20,
     owner: str | None = None,
+    custom_groups: list[str] | tuple[str, ...] = (),
 ) -> PromptPage:
     data = read_json_object(path)
     prompts = data.get("prompts")
@@ -98,9 +99,19 @@ def list_prompts(
     source_set = {part for part in source.upper().replace(",", "").replace("/", "")}
     safety_set = {part for part in safety.upper().replace(",", "").replace("/", "")}
     folded_query = query.strip().casefold()
+    from .prompt_group_ids import normalize_group_ids
+    try:
+        required_groups = set(normalize_group_ids(list(custom_groups)))
+    except ValueError as exc:
+        raise RepositoryError(str(exc)) from exc
     selected: list[PromptRecord] = []
     for raw in prompts:
         if not isinstance(raw, dict):
+            continue
+        memberships = raw.get('custom_groups', [])
+        if required_groups and (not isinstance(memberships, list) or not required_groups.issubset(
+            {str(value).strip().casefold() for value in memberships}
+        )):
             continue
         if owner is not None and raw.get("liked_by") and raw["liked_by"] != owner:
             continue
@@ -144,6 +155,7 @@ def list_prompts(
                 enabled=item_enabled,
                 weight=weight,
                 categories=[str(value) for value in raw.get("categories", [])],
+                custom_groups=[str(value) for value in raw.get("custom_groups", [])],
             )
         )
     selected.sort(key=lambda item: item.id.casefold())

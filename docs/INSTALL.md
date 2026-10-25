@@ -113,7 +113,7 @@ AnimaReverseResultSaver
 | --- | --- | --- |
 | `Anima_HQ_Txt2Img_Beta_api.json` | HQ Stable/Beauty | Beta |
 | `Anima_Refine_Existing_Beta_api.json` | 已有图放大低重绘 | Beta |
-| `Anima_SeedVR2_Refine_Beta_api.json` | SeedVR2 分块放大 | Beta |
+| `Anima_SeedVR2_Refine_Beta_api.json` | SeedVR2 整图放大，图像/VAE分块关闭 | Beta |
 | `Anima_WD_CT_JoyCaption_Reverse_Beta.json` | 可视化反推工作流 | Beta |
 | `Anima_WD_CT_JoyCaption_Reverse_Beta_api.json` | 插件调用反推 API | Beta |
 | `Anima_WD_EVA02_Safe_Caption_Train_v2.json` | 独立炼丹打标/质检 | Beta |

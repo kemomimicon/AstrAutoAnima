@@ -51,6 +51,7 @@ def request_bytes(base, path, token='', payload=None, limit=20 * 1024 * 1024):
             raise SetupError('响应超过大小限制；请在 App 查看，不自动保存。')
         return data
     except urllib.error.HTTPError as exc:
+        exc.close()
         hints = {401: '令牌未通过验证。AstrBot Key 不要填 12 位前缀；Hub 要用管理员令牌。',
                  403: '权限不足。核对 AstrBot chat / file / im 权限或 Hub 用户权限。',
                  404: '接口或任务不存在。核对地址、版本及任务是否来自当前 Hub。',

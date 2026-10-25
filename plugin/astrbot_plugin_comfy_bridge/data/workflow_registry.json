@@ -271,17 +271,8 @@
         "seedvr2": {
           "enhance": {
             "target_resolution": 4096,
-            "tile_width": 1024,
-            "tile_height": 1024,
-            "mask_blur": 3,
-            "tile_padding": 64,
-            "tile_upscale_resolution": 1536,
-            "tiling_strategy": "Linear",
-            "anti_aliasing_strength": 0.1,
-            "blending_method": "content_aware",
             "color_correction": "lab",
-            "resolution_target": "longest",
-            "tile_batch_size": 1
+            "resolution_target": "longest"
           }
         }
       },
@@ -303,7 +294,7 @@
         "img2img": true,
         "seedvr2": true,
         "default_profile": "seedvr2",
-        "tile_default": true
+        "tile_default": false
       }
     }
   ]

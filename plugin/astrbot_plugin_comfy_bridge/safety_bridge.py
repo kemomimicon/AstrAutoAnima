@@ -46,7 +46,7 @@ class SafetyBridge:
             return False
 
     def _safety_applies(self, event):
-        return self._safety_policy().enabled and not self._safety_admin_exempt(event)
+        return self._safety_policy(event).enabled and not self._safety_admin_exempt(event)
 
     def _safety_setup(self, concurrency):
         self._safety_root_dir = self._character_dictionary_path().parent / "safety"
@@ -56,9 +56,11 @@ class SafetyBridge:
         self._safety_policy_signature = None
         self._safety_policy()
 
-    def _safety_policy(self):
+    def _safety_policy(self, event=None):
+        group_policy = getattr(self, "_group_policy", None)
+        override = group_policy(event).get("safety_mode") if event is not None and callable(group_policy) else None
         if not hasattr(self, "_safety_root_dir"):
-            if not self.config.get("safety_mode_enabled", False):
+            if not self.config.get("safety_mode_enabled", False) and override is not True:
                 return Policy({})
             self._safety_setup(max(1, int(self.config.get("max_concurrency", 1))))
         policy = Policy(self.config)
@@ -74,6 +76,8 @@ class SafetyBridge:
             temp.write_text(signature, encoding="utf-8")
             temp.replace(path)
             self._safety_policy_signature = signature
+        if override is not None:
+            policy = Policy({**self.config, "safety_mode_enabled": override})
         return policy
 
     def _safety_identity(self, event):
@@ -93,7 +97,13 @@ class SafetyBridge:
         else:
             if "webchat" in origin.casefold():
                 raise WorkflowError("安全模式需要新版 Hub 身份凭据，生成失败")
-            qq = sender
+            platform = str(getattr(event, "get_platform_name", lambda: "")()).casefold()
+            if platform in {"telegram", "discord"}:
+                if not re.fullmatch(r"[0-9]{1,24}", sender):
+                    raise WorkflowError("安全模式无法确认平台用户身份，生成失败")
+                qq = f"{platform}:{sender}"
+            else:
+                qq = sender
             root = getattr(event, "_aaa_safety_root", "")
             if not root:
                 message_id = str(getattr(getattr(event, "message_obj", None), "message_id", "") or "")
@@ -101,8 +111,10 @@ class SafetyBridge:
                     message_id = uuid.uuid4().hex
                 root = hashlib.sha256(f"{origin}|{sender}|{message_id}".encode()).hexdigest()
                 setattr(event, "_aaa_safety_root", root)
-        if not re.fullmatch(r"[1-9][0-9]{4,14}", qq) or not root:
-            raise WorkflowError("安全模式缺少有效 QQ 绑定，生成失败")
+        valid_user = (re.fullmatch(r"[1-9][0-9]{4,14}", qq) or
+                      re.fullmatch(r"(?:telegram|discord):[0-9]{1,24}", qq))
+        if not valid_user or not root:
+            raise WorkflowError("安全模式缺少有效平台用户身份，生成失败")
         return qq, root
 
     def _safety_guard(self, event):
@@ -126,6 +138,12 @@ class SafetyBridge:
     @asynccontextmanager
     async def _generation_slot(self, event):
         from .idle_guard_runtime import admission
+        platform_admit = getattr(self, "_platform_admit", None)
+        if callable(platform_admit):
+            platform_admit(event)
+        group_admit = getattr(self, "_group_admit", None)
+        if callable(group_admit):
+            group_admit(event, consume=True)
         try:
             lease = admission(self._character_dictionary_path().parent)
         except RuntimeError as exc:
@@ -151,7 +169,7 @@ class SafetyBridge:
     async def _safety_notice_loop(self):
         while True:
             try:
-                if self._safety_policy().enabled:
+                if hasattr(self, "_safety_store"):
                     await self._safety_notices()
             except Exception:
                 pass  # Durable outbox is retained for the next attempt.
@@ -169,7 +187,7 @@ class SafetyBridge:
                     continue
                 try:
                     ok = await self.context.send_message(target, MessageChain().message(
-                        f"AAA 安全信用提醒：QQ={qq}，信用={score}，{'已禁止生图' if score == 0 else '排队优先级降低一级'}，任务={root}"))
+                        f"AAA 安全信用提醒：用户={qq}，信用={score}，{'已禁止生图' if score == 0 else '排队优先级降低一级'}，任务={root}"))
                     if ok is False:
                         sent = False
                 except Exception:
@@ -199,7 +217,7 @@ class SafetyBridge:
         if not self._safety_applies(event):
             return
         self._safety_guard(event)
-        policy = self._safety_policy()
+        policy = self._safety_policy(event)
         if policy.input:
             hits = match_rules(text, self._safety_rules, policy.exemptions)
             if hits:
@@ -210,7 +228,7 @@ class SafetyBridge:
             # Do not create a global approval receipt for exempt images.
             return paths
         self._safety_guard(event)
-        policy = self._safety_policy()
+        policy = self._safety_policy(event)
         if not policy.enabled:
             return paths
         initial_policy = policy.fingerprint
@@ -240,7 +258,7 @@ class SafetyBridge:
                 raise WorkflowError("安全审核暂不可用，生成失败（未扣分）") from exc
             except Exception as exc:
                 raise WorkflowError("安全审核暂不可用，生成失败（未扣分）") from exc
-        if self._safety_policy().fingerprint != initial_policy:
+        if self._safety_policy(event).fingerprint != initial_policy:
             raise WorkflowError("审核期间安全配置已变化，请重新提交（未扣分）")
         approved = []
         for path in paths:

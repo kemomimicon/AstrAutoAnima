@@ -19,27 +19,72 @@ class _LoraLibraryPageState extends State<LoraLibraryPage> {
   String _query = '';
   String _category = 'all';
 
-  void _reload() => setState(() => _future = widget.api.getLoraCatalog());
+  void _reload() {
+    setState(() {
+      _future = widget.api.getLoraCatalog();
+    });
+  }
 
   Future<void> _share(LoraCatalogItem item) async {
     await showLoraShareDialog(context, item);
   }
 
-  Future<void> _edit(LoraCatalogItem item, String revision) async {
+  Map<String, dynamic> _editable(LoraCatalogItem item) => {
+        'display_name': item.displayName,
+        'source_url': item.sourceUrl,
+        'category': item.category,
+        'recommended_prompt': item.recommendedPrompt,
+        'enabled': item.enabled,
+      };
+
+  bool _matches(LoraCatalogItem item, Map<String, dynamic> value) =>
+      _editable(item).entries.every((entry) => value[entry.key] == entry.value);
+
+  Future<void> _edit(LoraCatalogItem item) async {
+    final api = widget.api;
     final value = await showDialog<Map<String, dynamic>>(
       context: context,
-      builder: (context) => _LoraEditor(item: item),
+      barrierDismissible: false,
+      builder: (context) => _LoraEditor(
+          item: item,
+          onSave: (value) async {
+            // Read a fresh catalog revision, but never overwrite changed metadata.
+            final latest = await api.getLoraCatalog();
+            if (!mounted || widget.api != api) {
+              throw const HubApiException('连接已切换，未提交本次编辑。');
+            }
+            final matches = latest.items
+                .where((row) => row.path == item.path && row.present);
+            if (matches.isEmpty) {
+              throw const HubApiException('该 LoRA 已移除，请取消编辑后重新扫描。',
+                  statusCode: 409);
+            }
+            final current = matches.first;
+            final alreadySaved = _matches(current, value);
+            if (!alreadySaved && !_matches(current, _editable(item))) {
+              throw const HubApiException(
+                  '该 LoRA 已被其他操作修改，未覆盖。编辑内容仍保留，请取消后刷新并核对。',
+                  statusCode: 409);
+            }
+            if (!alreadySaved) {
+              await api.updateLora(
+                  path: item.path, revision: latest.revision, value: value);
+            }
+            final saved = await api.getLoraCatalog();
+            if (!saved.items.any((row) =>
+                row.path == item.path && row.present && _matches(row, value))) {
+              throw const HubApiException('保存后回读不一致，编辑内容已保留，请核对服务器记录。');
+            }
+            if (mounted && widget.api == api) {
+              setState(() {
+                _future = Future.value(saved);
+              });
+            }
+          }),
     );
-    if (value == null) return;
-    try {
-      await widget.api
-          .updateLora(path: item.path, revision: revision, value: value);
-      _reload();
-    } on HubApiException catch (error) {
-      if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(error.message)));
-      }
+    if (value != null && mounted) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('LoRA 已保存并回读确认')));
     }
   }
 
@@ -151,7 +196,7 @@ class _LoraLibraryPageState extends State<LoraLibraryPage> {
                           IconButton(
                               tooltip: '编辑 LoRA',
                               icon: const Icon(Icons.edit_outlined),
-                              onPressed: () => _edit(item, result.revision)),
+                              onPressed: () => _edit(item)),
                         ]),
                       ),
                     );
@@ -176,8 +221,9 @@ class _LoraLibraryPageState extends State<LoraLibraryPage> {
 }
 
 class _LoraEditor extends StatefulWidget {
-  const _LoraEditor({required this.item});
+  const _LoraEditor({required this.item, required this.onSave});
   final LoraCatalogItem item;
+  final Future<void> Function(Map<String, dynamic>) onSave;
 
   @override
   State<_LoraEditor> createState() => _LoraEditorState();
@@ -190,6 +236,41 @@ class _LoraEditorState extends State<_LoraEditor> {
       TextEditingController(text: widget.item.recommendedPrompt);
   late String _category = widget.item.category;
   late bool _enabled = widget.item.enabled;
+  bool _saving = false;
+  String? _error;
+
+  Future<void> _save() async {
+    if (_saving || _name.text.trim().isEmpty) return;
+    final value = <String, dynamic>{
+      'display_name': _name.text.trim(),
+      'source_url': _source.text.trim(),
+      'category': _category,
+      'recommended_prompt': _prompt.text.trim(),
+      'enabled': _enabled,
+    };
+    setState(() {
+      _saving = true;
+      _error = null;
+    });
+    try {
+      await widget.onSave(value);
+      if (mounted) {
+        setState(() => _saving = false);
+        await WidgetsBinding.instance.endOfFrame;
+        if (mounted) Navigator.pop(context, value);
+      }
+    } catch (error) {
+      if (mounted) {
+        setState(() => _error = error is HubApiException
+            ? (error.statusCode == 409
+                ? '数据版本冲突；未强行覆盖。${error.message}'
+                : error.message)
+            : '保存未确认，编辑内容仍保留：$error');
+      }
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
 
   @override
   void dispose() {
@@ -201,71 +282,77 @@ class _LoraEditorState extends State<_LoraEditor> {
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
-      title: const Text('编辑 LoRA'),
-      content: SizedBox(
-        width: 560,
-        child: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              SelectableText(widget.item.path,
-                  style: Theme.of(context).textTheme.bodySmall),
-              const SizedBox(height: 12),
-              TextField(
-                  controller: _name,
-                  decoration: const InputDecoration(labelText: '客户端显示名称')),
-              const SizedBox(height: 12),
-              DropdownButtonFormField<String>(
-                initialValue: _category,
-                decoration: const InputDecoration(labelText: '分类'),
-                items: const [
-                  DropdownMenuItem(value: 'unclassified', child: Text('未分类')),
-                  DropdownMenuItem(value: 'style', child: Text('画风')),
-                  DropdownMenuItem(value: 'character', child: Text('角色')),
-                  DropdownMenuItem(value: 'other', child: Text('其他')),
-                ],
-                onChanged: (value) =>
-                    setState(() => _category = value ?? 'unclassified'),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                  controller: _source,
-                  decoration: const InputDecoration(
-                      labelText: '公开来源链接（分享用）',
-                      helperText: 'Civitai 下载自动记录；其他来源手动填写，不填令牌或下载签名。'),
-                  maxLines: 2),
-              const SizedBox(height: 12),
-              TextField(
-                  controller: _prompt,
-                  minLines: 3,
-                  maxLines: 8,
-                  decoration: const InputDecoration(
-                      labelText: '推荐触发词', hintText: '用户可一键追加到个人预设触发词框')),
-              SwitchListTile(
-                  value: _enabled,
-                  title: const Text('允许客户端使用'),
-                  onChanged: (value) => setState(() => _enabled = value)),
-            ],
+    return PopScope(
+        canPop: !_saving,
+        child: AlertDialog(
+          title: const Text('编辑 LoRA'),
+          content: SizedBox(
+            width: 560,
+            child: SingleChildScrollView(
+              child: AbsorbPointer(
+                  absorbing: _saving,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      SelectableText(widget.item.path,
+                          style: Theme.of(context).textTheme.bodySmall),
+                      if (_error != null)
+                        Text(_error!,
+                            style: TextStyle(
+                                color: Theme.of(context).colorScheme.error)),
+                      const SizedBox(height: 12),
+                      TextField(
+                          controller: _name,
+                          decoration:
+                              const InputDecoration(labelText: '客户端显示名称')),
+                      const SizedBox(height: 12),
+                      DropdownButtonFormField<String>(
+                        initialValue: _category,
+                        decoration: const InputDecoration(labelText: '分类'),
+                        items: const [
+                          DropdownMenuItem(
+                              value: 'unclassified', child: Text('未分类')),
+                          DropdownMenuItem(value: 'style', child: Text('画风')),
+                          DropdownMenuItem(
+                              value: 'character', child: Text('角色')),
+                          DropdownMenuItem(value: 'other', child: Text('其他')),
+                        ],
+                        onChanged: (value) =>
+                            setState(() => _category = value ?? 'unclassified'),
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                          controller: _source,
+                          decoration: const InputDecoration(
+                              labelText: '公开来源链接（分享用）',
+                              helperText: 'Civitai 下载自动记录；其他来源手动填写，不填令牌或下载签名。'),
+                          maxLines: 2),
+                      const SizedBox(height: 12),
+                      TextField(
+                          controller: _prompt,
+                          minLines: 3,
+                          maxLines: 8,
+                          decoration: const InputDecoration(
+                              labelText: '推荐触发词',
+                              hintText: '用户可一键追加到个人预设触发词框')),
+                      SwitchListTile(
+                          value: _enabled,
+                          title: const Text('允许客户端使用'),
+                          onChanged: (value) =>
+                              setState(() => _enabled = value)),
+                    ],
+                  )),
+            ),
           ),
-        ),
-      ),
-      actions: [
-        TextButton(
-            onPressed: () => Navigator.pop(context), child: const Text('取消')),
-        FilledButton(
-          onPressed: _name.text.trim().isEmpty
-              ? null
-              : () => Navigator.pop(context, {
-                    'display_name': _name.text.trim(),
-                    'source_url': _source.text.trim(),
-                    'category': _category,
-                    'recommended_prompt': _prompt.text.trim(),
-                    'enabled': _enabled,
-                  }),
-          child: const Text('保存'),
-        ),
-      ],
-    );
+          actions: [
+            TextButton(
+                onPressed: _saving ? null : () => Navigator.pop(context),
+                child: const Text('取消')),
+            FilledButton(
+              onPressed: _saving ? null : _save,
+              child: Text(_saving ? '保存并确认中…' : '保存'),
+            ),
+          ],
+        ));
   }
 }

@@ -6,10 +6,61 @@ from pathlib import Path
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from deploy_project import Plan, validate, configure, quick_workflow, checked_root, start_services, MARKER, deploy, python_at
+from deploy_project import (Plan, validate, configure, quick_workflow, checked_root, start_services,
+                            MARKER, deploy, python_at, load_previous_plan, progress_text, json_write)
 
 
 class DeploymentTests(unittest.TestCase):
+    def test_interrupted_config_write_keeps_original(self):
+        with tempfile.TemporaryDirectory() as t:
+            path = Path(t) / 'runtime-env.json'; path.write_bytes(b'{"keep":"original"}')
+            with patch('deploy_project.os.replace', side_effect=OSError('fixture locked')), self.assertRaises(OSError):
+                json_write(path, {'new': 'not-saved'}, True)
+            self.assertEqual(path.read_bytes(), b'{"keep":"original"}')
+            self.assertEqual(list(Path(t).iterdir()), [path])
+
+    def test_corrupt_progress_is_only_information_not_an_install_blocker(self):
+        with tempfile.TemporaryDirectory() as t:
+            path = Path(t) / 'deployment-status.json'; path.write_text('{truncated')
+            self.assertIn('先只做预检', progress_text(t))
+            self.assertEqual(path.read_text(), '{truncated')
+
+    def test_failure_saves_form_without_key_and_releases_lock(self):
+        with tempfile.TemporaryDirectory() as t:
+            root = Path(t) / 'install'
+            plan = Plan(str(root), install_dependencies=True, install_astrbot=True,
+                        install_comfyui=True, api_key='DO_NOT_PERSIST_IN_PLAN')
+            with patch('deploy_project.validate', return_value=root), patch('deploy_project.port_open', return_value=False), \
+                 patch('deploy_project.make_env', side_effect=RuntimeError('fixture failure')):
+                for _ in range(2):
+                    with self.assertRaisesRegex(RuntimeError, 'fixture failure'): deploy(plan, lambda s: None)
+            self.assertEqual(load_previous_plan(root / 'last-plan.json').api_key, '')
+            state = json.loads((root / 'deployment-status.json').read_text('utf-8'))
+            self.assertEqual((state['status'], state['stage']), ('failed', 'prepare'))
+            self.assertNotIn(plan.api_key, (root / 'last-plan.json').read_text())
+            self.assertIn('已中断', progress_text(root))
+            self.assertFalse((root / '.deploy.lock').exists())
+
+    def test_legacy_lock_is_not_deleted(self):
+        with tempfile.TemporaryDirectory() as t:
+            root = Path(t); (root / MARKER).touch()
+            legacy = root / '.deploy.lock'; legacy.write_bytes(b'legacy')
+            with patch('deploy_project.validate', return_value=root), self.assertRaisesRegex(ValueError, '旧版'):
+                deploy(Plan(t))
+            self.assertEqual(legacy.read_bytes(), b'legacy')
+
+    def test_resume_form_is_readonly_and_rejects_bad_types(self):
+        with tempfile.TemporaryDirectory() as t:
+            path = Path(t) / 'last-plan.json'
+            payload = {'destination': str(Path(t) / 'install'), 'api_key': 'OLD-SECRET', 'gpu': False}
+            path.write_text(json.dumps(payload), encoding='utf-8'); before = path.read_bytes()
+            self.assertEqual(load_previous_plan(path).api_key, '')
+            self.assertFalse(load_previous_plan(path).gpu)
+            self.assertEqual(path.read_bytes(), before)
+            for extra in ({'gpu': 'false'}, {'execute': 'anything'}, {'destination': None}):
+                path.write_text(json.dumps({**payload, **extra}), encoding='utf-8')
+                with self.assertRaises(ValueError): load_previous_plan(path)
+
     def test_downloads_require_explicit_dependency_consent(self):
         with tempfile.TemporaryDirectory() as t:
             with self.assertRaisesRegex(ValueError, '允许安装依赖'):
@@ -113,9 +164,11 @@ class DeploymentTests(unittest.TestCase):
             pool = user_data / 'anima_random_prompt_pool.json'
             pool.write_text('{"prompts": [{"id": "mine"}]}')
             plan = Plan(str(root), astrbot=str(astro), comfyui=str(comfy))
+            from install_progress import ProgressLog
+            events = []
             with (patch('deploy_project.port_open', return_value=False), patch('deploy_project.run') as run,
                   patch('deploy_project.start_services', return_value=[])):
-                deploy(plan, lambda _: None)
+                outcome = deploy(plan, ProgressLog(lambda _: None, events.append))
                 token = json.loads((root / 'runtime-env.json').read_text())['AAH_ADMIN_TOKEN']
                 deploy(plan, lambda _: None)
                 run.assert_not_called()
@@ -124,3 +177,9 @@ class DeploymentTests(unittest.TestCase):
             self.assertEqual(json.loads(pool.read_text())['prompts'][0]['id'], 'mine')
             self.assertFalse((root / '.deploy.lock').exists())
             self.assertTrue((root / 'deploy_project.py').is_file())
+            self.assertTrue((root / 'install_progress.py').is_file())
+            self.assertEqual(outcome['status'], 'needs_attention')
+            self.assertEqual(events[-1]['states']['services'], 'done')
+            self.assertEqual(events[-1]['states']['dependencies'], 'skipped')
+            self.assertEqual(events[-1]['states']['optional'], 'skipped')
+            self.assertTrue(any('模型' in item for item in outcome['pending']))

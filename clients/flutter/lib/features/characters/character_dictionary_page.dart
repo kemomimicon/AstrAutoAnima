@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 
 import '../../core/hub_api.dart';
 import '../../core/models.dart';
+import '../../core/read_recovery.dart';
 
 class CharacterDictionaryPage extends StatefulWidget {
   const CharacterDictionaryPage({
@@ -34,6 +35,7 @@ class _CharacterDictionaryPageState extends State<CharacterDictionaryPage> {
   bool _strong = false;
   int _page = 1;
   String _error = '';
+  late final _readRecovery = ReadRecovery(() => unawaited(_search()));
 
   @override
   void initState() {
@@ -42,7 +44,24 @@ class _CharacterDictionaryPageState extends State<CharacterDictionaryPage> {
   }
 
   @override
+  void didUpdateWidget(covariant CharacterDictionaryPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.api != widget.api) {
+      _debounce?.cancel();
+      _readRecovery.succeeded();
+      _loading = false;
+      _result = null;
+      _favorites = null;
+      _error = '';
+      _page = 1;
+      _query.clear();
+      unawaited(_search());
+    }
+  }
+
+  @override
   void dispose() {
+    _readRecovery.dispose();
     _debounce?.cancel();
     _query.dispose();
     super.dispose();
@@ -58,34 +77,40 @@ class _CharacterDictionaryPageState extends State<CharacterDictionaryPage> {
 
   Future<void> _search() async {
     if (_loading) return;
+    final api = widget.api;
+    _readRecovery.begin();
     setState(() {
       _loading = true;
       _error = '';
     });
     try {
       final result = widget.adminMode
-          ? await widget.api.getAdminCharacters(
+          ? await api.getAdminCharacters(
               query: _query.text,
               page: _page,
             )
-          : await widget.api.searchCharacters(
+          : await api.searchCharacters(
               query: _query.text,
               page: _page,
             );
       CharacterFavoriteListResult? favorites;
       if (!widget.adminMode) {
-        favorites = await widget.api.getCharacterFavorites();
+        favorites = await api.getCharacterFavorites();
       }
-      if (mounted) {
+      if (mounted && widget.api == api) {
+        _readRecovery.succeeded();
         setState(() {
           _result = result;
           _favorites = favorites;
         });
       }
     } on HubApiException catch (error) {
-      if (mounted) setState(() => _error = error.message);
+      if (mounted && widget.api == api) {
+        _readRecovery.failed(error);
+        setState(() => _error = error.message);
+      }
     } finally {
-      if (mounted) setState(() => _loading = false);
+      if (mounted && widget.api == api) setState(() => _loading = false);
     }
   }
 
@@ -341,6 +366,15 @@ class _CharacterDictionaryPageState extends State<CharacterDictionaryPage> {
               padding: const EdgeInsets.only(top: 12),
               child: Text(_error,
                   style: TextStyle(color: Theme.of(context).colorScheme.error)),
+            ),
+          if (_error.isNotEmpty)
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                onPressed: _loading ? null : () => unawaited(_search()),
+                icon: const Icon(Icons.refresh),
+                label: const Text('重试连接'),
+              ),
             ),
           if (result != null && !result.available)
             Card(

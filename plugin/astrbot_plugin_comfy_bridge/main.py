@@ -62,6 +62,25 @@ from .prompt_pool_runtime import (
     select_random_prompts,
     update_prompt_entry,
 )
+from .prompt_group_policy import private_group_denial, group_denial
+from .platform_switchboard import admit_event, valid_credit_subject
+from .telegram_menu_runtime import (
+    BACK as TG_BACK, CANCEL as TG_CANCEL, CONFIRM as TG_CONFIRM,
+    EDIT as TG_EDIT, LAUNCH as TG_LAUNCH, MODES as TG_MODES,
+    SKIP as TG_SKIP, Draft as TelegramMenuDraft,
+    chat_and_thread as telegram_chat_and_thread,
+    draft_key as telegram_draft_key, group_message as telegram_group_message,
+    message_id as telegram_message_id, message_text as telegram_message_text,
+    mode_rows as telegram_mode_rows,
+    reply_to_id as telegram_reply_to_id,
+)
+from .discord_menu_runtime import (
+    Draft as DiscordMenuDraft,
+    confirm_view as discord_confirm_view,
+    draft_key as discord_draft_key,
+    mode_view as discord_mode_view,
+    prompt_modal as discord_prompt_modal,
+)
 from .kp_dynamic_runtime import (
     assemble_dynamic_k_prompts,
     dynamic_k_history_count,
@@ -95,7 +114,7 @@ from .camera_runtime import compile_camera_options
 from .image_runtime import EventImageResolver
 from .job_runtime import JobStore
 from .llm_runtime import reverse_image_prompt, translate_chinese_prompt
-from .cleanup_runtime import CleanupReport, cleanup_old_output_images, checked_output_path
+from .cleanup_runtime import CleanupReport, cleanup_old_output_images, require_idle_job_records, checked_output_path
 from .lora_name_runtime import prepare_lora_workflow
 from .character_dictionary_runtime import resolve_character
 from .multi_person_runtime import parse_scene, plan_scene, render_scene, strip_standard_loras
@@ -103,8 +122,9 @@ from .llm_runtime import current_text_provider_id
 from .prompt_compiler_runtime import compile_prompt
 from .chaos_runtime import choose_chaos_style
 from .replay_runtime import replay_workflow, copy_context
-from .delivery_runtime import send_tracked_image, delivery_scope
+from .delivery_runtime import send_tracked_image, delivery_scope, qq_official_reply_ids, qq_official_quote_markers, log_qq_official_quote_diagnostic
 from .safety_bridge import SafetyBridge
+from .group_bridge import GroupBridge
 from .safety_runtime import positive_texts
 from .agent_tools_runtime import (
     build_agent_generation_request,
@@ -160,7 +180,7 @@ REVERSE_PRESET_CATEGORIES = {
 }
 
 
-class ComfyWorkflowBridge(SafetyBridge, Star):
+class ComfyWorkflowBridge(GroupBridge, SafetyBridge, Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
         self.config = config
@@ -174,13 +194,17 @@ class ComfyWorkflowBridge(SafetyBridge, Star):
         self._agent_tool_lock = asyncio.Lock()
         self._pending_images: dict[tuple[str, str], PendingImageRequest] = {}
         self._pending_lock = asyncio.Lock()
+        self._telegram_menu_drafts: dict[tuple[str, str], TelegramMenuDraft] = {}
+        self._discord_menu_drafts: dict[tuple[str, str], DiscordMenuDraft] = {}
+        self._discord_menu_sources: dict[tuple[str, str], tuple[str, AstrMessageEvent]] = {}
+        self._discord_menu_tasks: set[asyncio.Task[Any]] = set()
         self._image_resolver = EventImageResolver(self._input_dir(), logger)
         self._cleanup_task: asyncio.Task[Any] | None = None
         self._safety_setup(concurrency)
 
     async def initialize(self):
         """Start the bounded plugin-output cleanup worker."""
-        if bool(self.config.get("output_cleanup_enabled", True)):
+        if bool(self.config.get("output_cleanup_enabled", False)):
             self._cleanup_task = asyncio.create_task(
                 self._output_cleanup_loop(),
                 name="aaa-output-cleanup",
@@ -254,6 +278,411 @@ class ComfyWorkflowBridge(SafetyBridge, Star):
             "user_id": str(event.get_sender_id() or ""),
         }
 
+    def _platform_admit(self, event: AstrMessageEvent) -> None:
+        denial = admit_event(self._character_dictionary_path().parent, event)
+        if denial:
+            raise WorkflowError(denial)
+        self._group_admit(event)
+
+    async def _telegram_menu_send(self, event, text: str, rows=None, *, remove=False):
+        """Use AstrBot's existing PTB client; never start another update poller."""
+        from telegram import ReplyKeyboardMarkup, ReplyKeyboardRemove
+
+        chat_id, thread_id = telegram_chat_and_thread(event)
+        group = telegram_group_message(event)
+        markup = (ReplyKeyboardRemove(selective=group) if remove else
+                  ReplyKeyboardMarkup(rows or [[TG_LAUNCH]],
+                                      resize_keyboard=True,
+                                      is_persistent=not group,
+                                      one_time_keyboard=group,
+                                      selective=group))
+        kwargs = {"chat_id": chat_id, "text": text, "reply_markup": markup}
+        if thread_id is not None:
+            kwargs["message_thread_id"] = thread_id
+        if group and telegram_message_id(event).isdigit():
+            kwargs["reply_to_message_id"] = int(telegram_message_id(event))
+        return await event.client.send_message(**kwargs)
+
+    async def _telegram_menu_open(self, event):
+        self._platform_admit(event)
+        key = telegram_draft_key(event)
+        self._telegram_menu_drafts.pop(key, None)
+        await self._telegram_menu_send(
+            event, "选择生图模式；选完可补充文字或图片，确认后才排队。"
+                   "群聊请用 /amenu 呼出菜单。",
+            telegram_mode_rows(),
+        )
+
+    async def _telegram_menu_ask_input(self, event, draft):
+        command, input_kind, required = TG_MODES[draft.mode]
+        if input_kind == "text":
+            instruction = "请回复本条消息，填写提示词或参数（如 角色=名称 画风=名称）。"
+            if command == "amulti":
+                instruction += "多人图可填写：自动 场景描述。"
+            rows = [[TG_CANCEL, TG_BACK]] if required else [[TG_SKIP, TG_CANCEL], [TG_BACK]]
+        else:
+            instruction = "请发送图片或引用本机器人生成的图片，可在图片说明中填写补充内容。"
+            if input_kind == "job":
+                instruction = "请引用本机器人生成的原图发送消息；可附加修改文字。"
+            rows = [[TG_CANCEL, TG_BACK]]
+        sent = await self._telegram_menu_send(event, f"{draft.mode}\n{instruction}\n10 分钟内有效。", rows)
+        draft.prompt_message_id = str(getattr(sent, "message_id", "") or "")
+
+    async def _telegram_menu_confirm(self, event, draft):
+        detail = draft.body[:500] + ("…" if len(draft.body) > 500 else "") if draft.body else "（无补充）"
+        if draft.image_path or draft.selected_job:
+            detail += "\n图片：已取得"
+        await self._telegram_menu_send(
+            event, f"模式：{draft.mode}\n补充：{detail}\n确认后提交到现有队列。",
+            [[TG_CONFIRM, TG_EDIT], [TG_CANCEL, TG_BACK]],
+        )
+
+    async def _telegram_menu_ask_edit(self, event, draft):
+        sent = await self._telegram_menu_send(
+            event, "请回复本条消息填写补充文字或参数；也可点“不补充”保留原图设置。",
+            [[TG_SKIP, TG_CANCEL], [TG_BACK]],
+        )
+        draft.prompt_message_id = str(getattr(sent, "message_id", "") or "")
+
+    @filter.command("amenu")
+    async def amenu(self, event: AstrMessageEvent):
+        """Open the platform's native generation menu."""
+        event.should_call_llm(False)
+        event.stop_event()
+        try:
+            if event.get_platform_name() == "telegram":
+                await self._telegram_menu_open(event)
+            elif event.get_platform_name() == "discord":
+                await self._discord_menu_open(event)
+            else:
+                await event.send(event.plain_result("/amenu 目前供 Telegram 和 Discord 使用。"))
+        except Exception as exc:
+            await event.send(event.plain_result(f"生图菜单暂不可用：{exc}"))
+
+    async def _discord_menu_open(self, event):
+        self._platform_admit(event)
+        webhook = getattr(event, "interaction_followup_webhook", None)
+        if webhook is None:
+            raise WorkflowError("请使用 Discord 斜杠指令 /amenu 打开菜单。")
+        key = discord_draft_key(event)
+        if len(self._discord_menu_sources) >= 256:
+            self._discord_menu_sources = {
+                k: value for k, value in self._discord_menu_sources.items()
+                if k in self._discord_menu_drafts and not self._discord_menu_drafts[k].expired()
+            }
+        menu_id = secrets.token_hex(12)
+        self._discord_menu_sources[key] = (menu_id, event)
+        self._discord_menu_drafts.pop(key, None)
+        # AstrBot has already deferred the slash command publicly. Its first
+        # follow-up inherits that visibility; clear it before the private view.
+        if getattr(getattr(event, "message_obj", None), "type", None) is not None and event.get_group_id():
+            await webhook.send(content="正在打开私密生图菜单…", delete_after=2)
+        await webhook.send(
+            content="选择模式后填写参数；图片模式请在当前频道上传图片或回复原图。10 分钟内有效。",
+            view=discord_mode_view(self, key, menu_id), ephemeral=bool(event.get_group_id()),
+        )
+
+    async def _discord_menu_select(self, interaction, key, menu_id, mode):
+        if mode not in TG_MODES:
+            await interaction.response.send_message("模式不存在，请重新打开菜单。", ephemeral=True)
+            return
+        if self._discord_menu_drafts.get(key) and self._discord_menu_drafts[key].expired():
+            self._discord_menu_drafts.pop(key, None)
+        # The slash event is retained only until one submission; no token is
+        # persisted and the active menu count is bounded.
+        source_entry = self._discord_menu_sources.get(key)
+        if source_entry is None or source_entry[0] != menu_id:
+            await interaction.response.send_message("菜单已过期，请重新发送 /amenu。", ephemeral=True)
+            return
+        source = source_entry[1]
+        try:
+            self._platform_admit(source)
+        except Exception as exc:
+            await interaction.response.send_message(str(exc), ephemeral=True)
+            return
+        if len(self._discord_menu_drafts) >= 256:
+            self._discord_menu_drafts = {
+                k: value for k, value in self._discord_menu_drafts.items() if not value.expired()
+            }
+        if len(self._discord_menu_drafts) >= 256:
+            oldest = min(self._discord_menu_drafts, key=lambda k: self._discord_menu_drafts[k].created)
+            self._discord_menu_drafts.pop(oldest, None)
+        draft = DiscordMenuDraft(mode=mode, created=time.monotonic(), source_event=source,
+                                 draft_id=secrets.token_hex(12))
+        self._discord_menu_drafts[key] = draft
+        _, kind, _ = TG_MODES[mode]
+        if kind == "text":
+            draft.stage = "modal"
+            await interaction.response.send_modal(discord_prompt_modal(self, key, mode, draft.draft_id))
+        else:
+            draft.stage = "image"
+            detail = ("请在当前频道回复本机器人生成的原图；可附修改文字。" if kind == "job"
+                      else "请在当前频道上传图片，或回复一张已有图片；消息文字可写补充要求。")
+            await interaction.response.send_message(
+                f"{mode}：{detail} 10 分钟内有效；发送 /amenu 可重新选择。", ephemeral=True,
+            )
+
+    async def _discord_menu_text(self, interaction, key, draft_id, mode, body):
+        draft = self._discord_menu_drafts.get(key)
+        if not draft or draft.expired() or draft.draft_id != draft_id or draft.mode != mode or draft.stage != "modal":
+            await interaction.response.send_message("菜单已过期，请重新发送 /amenu。", ephemeral=True)
+            return
+        _, _, required = TG_MODES[mode]
+        if len(body) > 4000 or (required and not body):
+            await interaction.response.send_message("请填写不超过 4000 字的内容。", ephemeral=True)
+            return
+        draft.body = body
+        draft.stage = "confirm"
+        detail = body[:500] + ("…" if len(body) > 500 else "") if body else "（无补充）"
+        await interaction.response.send_message(
+            f"模式：{mode}\n补充：{detail}\n确认后提交到当前频道的现有队列。",
+            view=discord_confirm_view(self, key, draft.draft_id), ephemeral=True,
+        )
+
+    async def _discord_menu_confirm(self, interaction, key, draft_id):
+        draft = self._discord_menu_drafts.get(key)
+        if not draft or draft.expired() or draft.draft_id != draft_id or draft.stage != "confirm" or draft.claimed:
+            await interaction.response.send_message("菜单已过期或已提交，请重新发送 /amenu。", ephemeral=True)
+            return
+        try:
+            if hasattr(draft.source_event, "_aaa_platform_admitted"):
+                delattr(draft.source_event, "_aaa_platform_admitted")
+            self._platform_admit(draft.source_event)
+        except Exception as exc:
+            await interaction.response.send_message(str(exc), ephemeral=True)
+            return
+        draft.claimed = True
+        self._discord_menu_drafts.pop(key, None)
+        self._discord_menu_sources.pop(key, None)
+        await interaction.response.send_message("已确认，正在提交；结果返回原频道或私信。", ephemeral=True)
+        task = asyncio.create_task(self._discord_menu_dispatch(draft), name="aaa-discord-menu-dispatch")
+        self._discord_menu_tasks.add(task)
+        task.add_done_callback(self._discord_menu_tasks.discard)
+
+    async def _discord_menu_cancel(self, interaction, key, draft_id):
+        draft = self._discord_menu_drafts.get(key)
+        if not draft or draft.expired() or draft.draft_id != draft_id or draft.claimed:
+            await interaction.response.send_message("菜单已过期，请重新发送 /amenu。", ephemeral=True)
+            return
+        self._discord_menu_drafts.pop(key, None)
+        self._discord_menu_sources.pop(key, None)
+        await interaction.response.send_message("已取消；没有提交任务。", ephemeral=True)
+
+    async def _discord_menu_dispatch(self, draft):
+        command = TG_MODES[draft.mode][0]
+        event = draft.image_event or draft.source_event
+        original = event.message_str
+        original_webhook = getattr(event, "interaction_followup_webhook", None)
+        try:
+            # Generation can outlive Discord's interaction token; use the
+            # normal channel route so images arrive where the user started.
+            if original_webhook is not None:
+                event.interaction_followup_webhook = None
+            event.message_str = f"/{command}" + (f" {draft.body}" if draft.body else "")
+            if draft.image_path:
+                event._aaa_menu_source_image = draft.image_path
+            if draft.selected_job is not None:
+                event._aaa_selected_quote = draft.selected_job
+            handler = getattr(self, command)
+            if command == "aimg":
+                async for result in handler(event, draft.body):
+                    await event.send(result)
+            else:
+                await handler(event, draft.body)
+        except Exception as exc:
+            logger.exception("Discord generation menu dispatch failed")
+            await event.send(event.plain_result(f"菜单任务提交失败：{exc}"))
+        finally:
+            event.message_str = original
+            if original_webhook is not None:
+                event.interaction_followup_webhook = original_webhook
+            for attr in ("_aaa_menu_source_image", "_aaa_selected_quote"):
+                if hasattr(event, attr):
+                    delattr(event, attr)
+
+    @filter.event_message_type(EventMessageType.ALL, priority=sys.maxsize - 3)
+    async def discord_menu_image_route(self, event: AstrMessageEvent):
+        if event.get_platform_name() != "discord":
+            return
+        key = discord_draft_key(event)
+        draft = self._discord_menu_drafts.get(key)
+        if not draft or draft.stage != "image":
+            return
+        if draft.expired():
+            self._discord_menu_drafts.pop(key, None)
+            return
+        image_types = tuple(cls for cls in (Comp.Image, getattr(Comp, "File", None), Comp.Reply)
+                            if cls is not None)
+        has_reference = getattr(getattr(getattr(event.message_obj, "raw_message", None),
+                                        "reference", None), "message_id", None) is not None
+        if not has_reference and not any(isinstance(component, image_types) for component in event.get_messages()):
+            return
+        event.should_call_llm(False)
+        event.stop_event()
+        try:
+            self._platform_admit(event)
+            _, kind, _ = TG_MODES[draft.mode]
+            selected = None
+            if kind == "job":
+                selected = await self._quoted_job(event)
+                path = ""
+            else:
+                try:
+                    selected = await self._quoted_job(event)
+                except WorkflowError:
+                    pass
+                path = await self._image_resolver.resolve(event)
+                if not path and selected:
+                    asset_id = selected[0].get("result", {}).get("assets", [])[selected[1]]
+                    path = str(self._job_store().get_asset(asset_id).get("path", ""))
+                if not path:
+                    raise WorkflowError("没有读到图片；请上传图片或回复一张已有图片。")
+            draft.image_path = path
+            draft.selected_job = selected
+            draft.image_event = event
+            draft.body = str(event.message_str or "").strip()[:4000]
+            draft.stage = "confirm"
+            detail = draft.body[:500] + ("…" if len(draft.body) > 500 else "") if draft.body else "（无补充）"
+            await draft.source_event.interaction_followup_webhook.send(
+                content=f"模式：{draft.mode}\n补充：{detail}\n图片：已取得。确认后提交。",
+                view=discord_confirm_view(self, key, draft.draft_id), ephemeral=True,
+            )
+        except Exception as exc:
+            draft.stage = "image"
+            logger.warning("Discord image menu input failed: %s", exc)
+            await event.send(event.plain_result(f"菜单图片未接收：{exc}"))
+
+    @filter.event_message_type(EventMessageType.ALL, priority=sys.maxsize - 3)
+    async def telegram_menu_route(self, event: AstrMessageEvent):
+        if event.get_platform_name() != "telegram":
+            return
+        text = telegram_message_text(event)
+        key = telegram_draft_key(event)
+        draft = self._telegram_menu_drafts.get(key)
+        if draft and draft.expired():
+            self._telegram_menu_drafts.pop(key, None)
+            draft = None
+        if text not in {TG_LAUNCH, TG_CANCEL, TG_BACK, TG_CONFIRM, TG_EDIT, TG_SKIP, *TG_MODES} and draft is None:
+            return
+        if text.startswith("/") and text != TG_LAUNCH:
+            return
+        if draft and draft.stage == "confirm" and text not in {
+            TG_LAUNCH, TG_CANCEL, TG_BACK, TG_CONFIRM, TG_EDIT, *TG_MODES,
+        }:
+            return
+        # Do not swallow unrelated group messages while waiting for one user's input.
+        if draft and draft.stage in {"input", "edit_text"} and text not in {TG_LAUNCH, TG_CANCEL, TG_BACK, TG_SKIP, *TG_MODES}:
+            if telegram_group_message(event) and (draft.stage == "edit_text" or TG_MODES[draft.mode][1] == "text"):
+                if telegram_reply_to_id(event) != draft.prompt_message_id:
+                    return
+        event.should_call_llm(False)
+        event.stop_event()
+        try:
+            if text == TG_LAUNCH or text == TG_BACK:
+                await self._telegram_menu_open(event)
+                return
+            if text == TG_CANCEL:
+                self._telegram_menu_drafts.pop(key, None)
+                await self._telegram_menu_send(event, "已取消；没有提交任务。", remove=telegram_group_message(event))
+                return
+            if text in TG_MODES:
+                self._platform_admit(event)
+                if len(self._telegram_menu_drafts) >= 256:
+                    self._telegram_menu_drafts = {k: value for k, value in self._telegram_menu_drafts.items() if not value.expired()}
+                if len(self._telegram_menu_drafts) >= 256:
+                    oldest = min(self._telegram_menu_drafts, key=lambda k: self._telegram_menu_drafts[k].created)
+                    self._telegram_menu_drafts.pop(oldest, None)
+                draft = TelegramMenuDraft(text, "input", time.monotonic())
+                self._telegram_menu_drafts[key] = draft
+                await self._telegram_menu_ask_input(event, draft)
+                return
+            if draft is None:
+                await self._telegram_menu_send(event, "菜单已过期，请重新发送 /amenu。", remove=telegram_group_message(event))
+                return
+            command, input_kind, required = TG_MODES[draft.mode]
+            if text == TG_EDIT:
+                draft.stage = "edit_text" if input_kind != "text" and (draft.image_path or draft.selected_job) else "input"
+                if draft.stage == "edit_text":
+                    await self._telegram_menu_ask_edit(event, draft)
+                else:
+                    await self._telegram_menu_ask_input(event, draft)
+                return
+            if text == TG_CONFIRM:
+                if draft.stage != "confirm":
+                    await self._telegram_menu_ask_input(event, draft)
+                    return
+                self._platform_admit(event)
+                self._telegram_menu_drafts.pop(key, None)
+                await self._telegram_menu_send(event, "任务已确认，正在提交；结果仍返回当前会话。",
+                                               remove=telegram_group_message(event))
+                original = event.message_str
+                try:
+                    event.message_str = f"/{command}" + (f" {draft.body}" if draft.body else "")
+                    if draft.image_path:
+                        event._aaa_menu_source_image = draft.image_path
+                    if draft.selected_job is not None:
+                        event._aaa_selected_quote = draft.selected_job
+                    handler = getattr(self, command)
+                    if command == "aimg":
+                        async for result in handler(event, draft.body):
+                            await event.send(result)
+                    else:
+                        await handler(event, draft.body)
+                finally:
+                    event.message_str = original
+                    for attr in ("_aaa_menu_source_image", "_aaa_selected_quote"):
+                        if hasattr(event, attr):
+                            delattr(event, attr)
+                return
+            if draft.stage not in {"input", "edit_text"}:
+                return
+            if draft.stage == "edit_text":
+                if text == TG_SKIP:
+                    draft.body = ""
+                elif not text or len(text) > 4000:
+                    await self._telegram_menu_ask_edit(event, draft)
+                    return
+                else:
+                    draft.body = text
+                draft.stage = "confirm"
+                await self._telegram_menu_confirm(event, draft)
+                return
+            if text == TG_SKIP:
+                if required or input_kind != "text":
+                    await self._telegram_menu_ask_input(event, draft)
+                    return
+                draft.body = ""
+            elif input_kind == "text":
+                if not text or len(text) > 4000:
+                    await self._telegram_menu_send(event, "请输入 1–4000 字的补充内容。", [[TG_CANCEL, TG_BACK]])
+                    return
+                draft.body = text
+            else:
+                if input_kind == "job":
+                    draft.selected_job = await self._quoted_job(event)
+                    draft.image_path = ""
+                else:
+                    selected = None
+                    try:
+                        selected = await self._quoted_job(event)
+                    except WorkflowError:
+                        pass
+                    image_path = await self._image_resolver.resolve(event)
+                    if not image_path and selected:
+                        asset_id = selected[0].get("result", {}).get("assets", [])[selected[1]]
+                        image_path = str(self._job_store().get_asset(asset_id).get("path", ""))
+                    if not image_path:
+                        await self._telegram_menu_send(event, "没有读到图片，请附图或引用图片重试。", [[TG_CANCEL, TG_BACK]])
+                        return
+                    draft.image_path = image_path
+                    draft.selected_job = selected
+                draft.body = text if text not in {TG_SKIP, TG_CONFIRM} else ""
+            draft.stage = "confirm"
+            await self._telegram_menu_confirm(event, draft)
+        except Exception as exc:
+            logger.warning("Telegram generation menu failed: %s", exc)
+            await event.send(event.plain_result(f"菜单操作失败：{exc}"))
+
     def _output_dir(self) -> Path:
         configured = str(self.config.get("output_dir", "")).strip()
         if configured:
@@ -271,7 +700,7 @@ class ComfyWorkflowBridge(SafetyBridge, Star):
     def _output_retention_hours(self) -> float:
         try:
             return max(
-                1.0,
+                48.0,
                 float(self.config.get("output_retention_hours", 48)),
             )
         except (TypeError, ValueError):
@@ -287,9 +716,24 @@ class ComfyWorkflowBridge(SafetyBridge, Star):
         return max(300, int(minutes * 60))
 
     async def _cleanup_plugin_outputs(self) -> CleanupReport:
+        # Keep the original path: _output_dir() resolves links and creates folders,
+        # both of which are inappropriate for a deletion preflight.
+        configured = str(self.config.get('output_dir', '')).strip()
+        output_dir = Path(configured or 'data/plugin_data/astrbot_plugin_comfy_bridge/outputs').expanduser().absolute()
+        await asyncio.to_thread(require_idle_job_records, self._job_store().jobs_dir)
+        # Queue failures must not turn an old-cache sweep into a destructive guess.
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5)) as session:
+            async with session.get(self._base_url().rstrip('/') + '/queue') as response:
+                response.raise_for_status()
+                queue = await response.json()
+        if not isinstance(queue, dict) or any(
+            not isinstance(queue.get(key), list) or queue[key]
+            for key in ('queue_running', 'queue_pending')
+        ):
+            raise ValueError('ComfyUI 队列非空或无法确认，停止清理')
         return await asyncio.to_thread(
             cleanup_old_output_images,
-            self._output_dir(),
+            output_dir,
             self._output_retention_hours(),
         )
 
@@ -297,7 +741,8 @@ class ComfyWorkflowBridge(SafetyBridge, Star):
         while True:
             try:
                 # The persisted storage manager owns scheduling once configured.
-                if (self._character_dictionary_path().parent / "image_storage.json").exists():
+                if (not bool(self.config.get('output_cleanup_enabled', False))
+                        or (self._character_dictionary_path().parent / "image_storage.json").exists()):
                     await asyncio.sleep(self._output_cleanup_interval_seconds())
                     continue
                 report = await self._cleanup_plugin_outputs()
@@ -449,10 +894,33 @@ class ComfyWorkflowBridge(SafetyBridge, Star):
             )
             return selected
 
-    def _random_prompt_pool(self, selection: dict[str, Any]) -> dict[str, Any]:
+    def _random_prompt_pool(self, selection: dict[str, Any], qq: str = "", *, event: Any = None) -> dict[str, Any]:
         sources = list(selection.get("source_codes", []))
+        if "V" in sources:
+            if sources != ["V"] or selection.get("custom_groups"):
+                raise WorkflowError("V 国风古韵使用独立通常库，请单独选择 V，不叠加来源或自定义分组。")
+            return {"prompts": []}
         if "K" not in sources:
-            return load_prompt_pool(self._prompt_pool_path())
+            pool = load_prompt_pool(self._prompt_pool_path())
+            if "P" in sources:
+                from .personal_prompt_runtime import personal_prompts
+                pool = dict(pool)
+                # Never expose another user's legacy embedded P records.
+                legacy = [item for item in pool.get("prompts", []) if isinstance(item, dict)
+                          and str(item.get("source_code", "")).upper() == "P"]
+                pool["prompts"] = [item for item in pool.get("prompts", [])
+                                   if isinstance(item, dict) and str(item.get("source_code", "")).upper() != "P"]
+                try:
+                    personal = personal_prompts(self._prompt_pool_path().parent, qq, legacy, event=event)
+                except WorkflowError:
+                    if selection.get("explicit_sources", True):
+                        raise
+                    # Public/default draws also include P in the legacy default
+                    # source set. Anonymous webchat must still draw public rows,
+                    # never borrow a private owner based on its display name.
+                    personal = []
+                pool["prompts"].extend(personal)
+            return pool
         if selection.get("custom_groups"):
             raise WorkflowError("K 动态库不支持自定义分组筛选；请移除 @分组。")
         if sources != ["K"]:
@@ -748,6 +1216,9 @@ class ComfyWorkflowBridge(SafetyBridge, Star):
     def _five_draw_cooldown_remaining(self, event: AstrMessageEvent) -> int:
         if event.is_admin():
             return 0
+        group_policy = getattr(self, "_group_policy", None)
+        if callable(group_policy) and group_policy(event).get("enabled"):
+            return 0  # The shared per-group admission store owns this cooldown.
         sender_id = str(event.get_sender_id())
         elapsed = time.monotonic() - self._five_draw_cooldowns.get(sender_id, 0.0)
         return max(0, int(self._five_draw_cooldown_seconds() - elapsed + 0.999))
@@ -795,6 +1266,9 @@ class ComfyWorkflowBridge(SafetyBridge, Star):
         cooldown = max(
             0, int(self.config.get("agent_tool_user_cooldown_seconds", 30))
         )
+        group_policy = getattr(self, "_group_policy", None)
+        if callable(group_policy) and group_policy(event).get("enabled"):
+            cooldown = 0  # Managed groups use their shared transaction quota/CD.
         elapsed = time.monotonic() - self._agent_tool_cooldowns.get(sender_id, 0.0)
         remaining = max(0, int(cooldown - elapsed + 0.999))
         async with self._agent_tool_lock:
@@ -877,9 +1351,10 @@ class ComfyWorkflowBridge(SafetyBridge, Star):
         *,
         max_images_override: int | None = None,
         existing_output_root: Path | None = None,
+        event: AstrMessageEvent | None = None,
     ) -> list[Path]:
         output_dir = self._output_dir()
-        if self._safety_policy().enabled:
+        if self._safety_policy(event).enabled:
             output_dir = self._safety_root_dir / "quarantine"
             output_dir.mkdir(parents=True, exist_ok=True)
         max_images = (
@@ -1021,7 +1496,8 @@ class ComfyWorkflowBridge(SafetyBridge, Star):
                 storage_root=str(
                     self.config.get(
                         "reverse_history_dir",
-                        str(self._character_dictionary_path().parent / "reverse_history"),
+                        "/workspace/astrbot-runtime/data/plugin_data/"
+                        "astrbot_plugin_comfy_bridge/reverse_history",
                     )
                 ),
                 save_thumbnail=bool(
@@ -1071,6 +1547,8 @@ class ComfyWorkflowBridge(SafetyBridge, Star):
         metadata_restore: str = "none",
         batch_prompts: list[str] | None = None,
     ) -> tuple[list[Path], int | None, str, dict[str, Any]]:
+        if "random_subject_tag" in options:
+            raise WorkflowError("起手参数仅适用于随机抽卡")
         from .visual_preset_runtime import compile_visual_options, VisualPresetError
         try:
             visual_suffix = compile_visual_options(options, Path(__file__).resolve().parent / 'data/aaa_anima_lighting_material_presets_v1.json')
@@ -1089,7 +1567,7 @@ class ComfyWorkflowBridge(SafetyBridge, Star):
         if camera_plan.prompt and workflow_type == 'seedvr2_refine_v1' and not options.get('_compiled_prompt'):
             raise WorkflowError('SeedVR2 不使用提示词，相机控制请选择普通生图或 HQ 生图。')
         await self._safety_input(event, prompt)
-        safety_start = self._safety_policy().fingerprint
+        safety_start = self._safety_policy(event).fingerprint
         clean_batch_prompts = [
             str(item or "").strip() for item in (batch_prompts or [])
         ]
@@ -1228,6 +1706,9 @@ class ComfyWorkflowBridge(SafetyBridge, Star):
         if isinstance(options.get("_chaos_style"), dict):
             style = copy.deepcopy(options["_chaos_style"])
             style_name = "混沌随机画风"
+        # Store the user's style separately from the optional camera adapter.
+        # A later edited replay must be able to turn that adapter off or add it once.
+        style_preset_snapshot = copy.deepcopy(style)
         if camera_plan.lora is not None and not options.get("_compiled_prompt"):
             style = copy.deepcopy(style) if isinstance(style, dict) else {
                 "loras": [],
@@ -1241,6 +1722,7 @@ class ComfyWorkflowBridge(SafetyBridge, Star):
         if options.get("_base_multi"):
             strip_standard_loras(template)
             style, character = {"loras": [], "prompt": ""}, None
+            style_preset_snapshot = copy.deepcopy(style)
             style_name = character_name = character_text = ""
         positive_node_id = mapping.get("positive", "11")
         negative_node_id = mapping.get("negative", "12")
@@ -1465,11 +1947,15 @@ class ComfyWorkflowBridge(SafetyBridge, Star):
                 "draw_positions": list(options.get('_draw_positions', [])),
                 "raw_batch_prompts": list(clean_batch_prompts),
                 "generation_options": {k: copy.deepcopy(v) for k, v in options.items() if not k.startswith("_")},
-                "preset_snapshot": {"style": copy.deepcopy(style), "character": copy.deepcopy(character)},
+                "preset_snapshot": {"style": style_preset_snapshot, "character": copy.deepcopy(character),
+                                    # A restored compiled stack may already contain the adapter.
+                                    "camera_auxiliary_embedded": None if isinstance(restored_loras, list) else False},
             },
             parent_job_id=parent_job_id,
         )
         plan["job_id"] = job["job_id"]
+        if '_source_image_index' in options:
+            job['input']['source_image_index'] = int(options['_source_image_index'])
         if options.get('_refine_receipts'):
             await event.send(event.plain_result('已接收图片，修图任务已创建，正在准备提交。'))
         plan["workflow_type"] = definition.workflow_id
@@ -1569,6 +2055,11 @@ class ComfyWorkflowBridge(SafetyBridge, Star):
                         }
                 for text in positive_texts(workflow):
                     await self._safety_input(event, text)
+                # Freeze the text after all detail/refine graph transforms.
+                if workflow_type != 'seedvr2_refine_v1' and not compiled_batch_prompts:
+                    job['input']['compiled_prompt'] = str(workflow.get(positive_node_id, {}).get('inputs', {}).get('text', compiled_prompt))
+                    job['input']['negative'] = str(workflow.get(negative_node_id, {}).get('inputs', {}).get('text', job['input']['negative']))
+                job_store.save_job(job)
                 prompt_id = await self._submit_workflow(session, workflow)
                 logger.info(
                     "Comfy bridge submitted job_id=%s prompt_id=%s workflow=%s profile=%s",
@@ -1587,6 +2078,7 @@ class ComfyWorkflowBridge(SafetyBridge, Star):
                     session,
                     prompt_id,
                     image_refs,
+                    event=event,
                     existing_output_root=(Path(str(self.config.get("comfyui_output_root", "/workspace/ComfyUI/output"))) if options.get("_random_style") else None),
                     max_images_override=(
                         len(compiled_batch_prompts)
@@ -1599,7 +2091,7 @@ class ComfyWorkflowBridge(SafetyBridge, Star):
                         "批次任务输出数量异常："
                         f"期望 {len(compiled_batch_prompts)} 张，实际 {len(paths)} 张。"
                     )
-            if safety_start != self._safety_policy().fingerprint:
+            if safety_start != self._safety_policy(event).fingerprint:
                 raise WorkflowError("任务期间安全配置变化，生成失败（未扣分）")
             if storage_preferences.get("strip_metadata"):
                 strip_outputs(paths, image_refs, Path(str(self.config.get("comfyui_output_root", "/workspace/ComfyUI/output"))))
@@ -1693,6 +2185,9 @@ class ComfyWorkflowBridge(SafetyBridge, Star):
     ) -> bool:
         from .task_suite_runtime import suite_token, execute_suite, bind_qq_suite
         try:
+            platform_admit = getattr(self, "_platform_admit", None)
+            if callable(platform_admit):
+                platform_admit(event)
             if options.get('task_suite') and not options.get('_suite_row') and not suite_token(options):
                 options = bind_qq_suite(self, event, options)
             if suite_token(options):
@@ -1710,8 +2205,8 @@ class ComfyWorkflowBridge(SafetyBridge, Star):
             if send_progress is None
             else bool(send_progress)
         )
-        if progress_enabled and getattr(event, 'get_platform_name', lambda: '')() != 'aiocqhttp':
-            await event.send(event.plain_result("已提交生成请求，正在等待 ComfyUI…"))
+        if progress_enabled:
+            await event.send(event.plain_result("已接收生成请求，正在排队准备；提交失败会另行通知。"))
         try:
             async with self._generation_slot(event):
                 seedvr2_hq = workflow_type == "hq_txt2img_anima_v1" and bool(self.config.get("hq_use_seedvr2", True))
@@ -1936,7 +2431,8 @@ class ComfyWorkflowBridge(SafetyBridge, Star):
             entry = entries[0] if len(entries) == 1 else (entries[index] if len(entries) == len(paths) else {})
             if entry.get('id'):
                 import hashlib
-                mapping = {'sha256': hashlib.sha256(path.read_bytes()).hexdigest(), 'prompt_id': str(entry['id'])}
+                mapping = {'sha256': hashlib.sha256(path.read_bytes()).hexdigest(), 'prompt_id': str(entry['id']), 'source_prompt': str(entry.get('prompt', ''))[:100000], 'user_addition': str(entry.get('user_addition', ''))[:100000],
+                           **{key: str(entry[key]) for key in ('safety_level', 'safety_code') if entry.get(key)}}
                 await event.send(event.plain_result('AAA_IMAGE_SOURCE=' + json.dumps(mapping, ensure_ascii=False)))
             await send_tracked_image(event, path, self._job_store(), str(plan.get('job_id', '')), index, logger)
         return True
@@ -1996,7 +2492,20 @@ class ComfyWorkflowBridge(SafetyBridge, Star):
         chaos: bool = False,
     ) -> None:
         try:
+            platform_admit = getattr(self, "_platform_admit", None)
+            if callable(platform_admit):
+                platform_admit(event)
             body, selection = parse_group_selector(body)
+            from .prompt_catalog_policy import apply_catalog_policy, read_policies
+            selection = apply_catalog_policy(
+                self._prompt_pool_path().parent, selection, private=self._is_private_event(event))
+            v_level = read_policies(self._prompt_pool_path().parent).get("V", {}).get("default_safety", "N")
+            if "V" in selection.get("source_codes", []):
+                if (chaos or selection["source_codes"] != ["V"]
+                        or selection.get("custom_groups")):
+                    raise WorkflowError("V 国风古韵仅支持独立抽一抽/五连抽，不叠加混沌或自定义分组。")
+                if selection["safety_codes"] != [v_level]:
+                    raise WorkflowError("独立通常库的分级已变更，请使用服务器当前级别。")
             self._safety_guard(event)
             if self._safety_applies(event):
                 if selection.get("explicit_safety") and "S" in selection.get("safety_codes", []):
@@ -2004,10 +2513,23 @@ class ComfyWorkflowBridge(SafetyBridge, Star):
                 selection["safety_codes"] = [s for s in selection.get("safety_codes", ["N", "H"]) if s != "S"]
             if "S" in selection.get("safety_codes", []) and not self._is_private_event(event):
                 raise WorkflowError("S 组只能在 QQ 私聊或 App 的私聊目标中调用。")
+            if selection.get("custom_groups"):
+                denial = group_denial(
+                    self._prompt_pool_path().parent / "hub_state" / "prompt_groups.json",
+                    selection["custom_groups"],
+                    private=self._is_private_event(event), safety=selection["safety_codes"],
+                )
+                if denial:
+                    raise WorkflowError(denial)
             user_prompt, options = parse_generation_directives(body)
+            random_subject_tag = str(options.pop("random_subject_tag", ""))
+            if random_subject_tag == "无":
+                random_subject_tag = "none"
+            if random_subject_tag not in {"", "1girl", "1boy", "1woman", "1man", "none"}:
+                raise WorkflowError("起手只能是 1girl、1boy、1woman、1man 或 无")
             if options.get('task_suite'):
                 raise WorkflowError('任务套组不能叠加抽卡、五连抽或混沌')
-            pool = self._random_prompt_pool(selection)
+            pool = self._random_prompt_pool(selection, str(event.get_sender_id() or ""), event=event)
             quality = self._random_quality_prompt(pool)
             draw_plans: list[tuple[dict[str, Any], dict[str, Any], dict[str, Any]]] = []
             matched_categories: list[str] = []
@@ -2074,7 +2596,24 @@ class ComfyWorkflowBridge(SafetyBridge, Star):
                     str(options.get("character", "")),
                     self.config.get("sexual_protected_characters", ""),
                 )
-                if (
+                if selection.get("source_codes") == ["V"]:
+                    if selection.get("safety_codes") != [v_level]:
+                        raise WorkflowError("当前安全/角色策略不允许独立通常词库。")
+                    from .gufeng_catalog_runtime import draw_gufeng, GufengError
+                    catalog_path = self._prompt_pool_path().parent / "resources/gufeng/cards.sqlite3"
+                    try:
+                        cards = await asyncio.to_thread(
+                            lambda: [draw_gufeng(catalog_path, secrets.randbits(63)) for _ in range(draw_count)]
+                        )
+                    except GufengError as exc:
+                        raise WorkflowError("V 通常词库不可用，请检查独立资源安装。") from exc
+                    selected_items = [{"id": card["template_id"], "prompt": card["prompt"],
+                                       "source_code": "V", "safety_level": {"N": "normal", "H": "nsfw", "S": "sexual"}[v_level],
+                                       "safety_code": v_level, "prompt_provenance": {
+                                           **card["provenance"], "safety_review": "deployment_catalog_policy"},
+                                       "selection_seed": card["selection_seed"]} for card in cards]
+                    matched_categories, used_match = [], False
+                elif (
                     selection.get("source_codes") == ["K"]
                     and bool(self.config.get("kp_dynamic_enabled", True))
                 ):
@@ -2151,6 +2690,7 @@ class ComfyWorkflowBridge(SafetyBridge, Star):
             user_prompt=user_prompt,
             quality=quality,
             chaos=chaos,
+            random_subject_tag=random_subject_tag,
         )
         if draw_count > 1:
             await event.send(
@@ -2167,13 +2707,15 @@ class ComfyWorkflowBridge(SafetyBridge, Star):
         user_prompt: str,
         quality: str,
         chaos: bool,
+        random_subject_tag: str = "",
     ) -> int:
         draw_count = len(draw_plans)
         draw_group = secrets.token_hex(16) if draw_count == 5 else ''
         for position, (selected, draw_options, _) in enumerate(draw_plans, 1):
             draw_options['_draw_group'] = draw_group
             draw_options['_draw_positions'] = [position] if draw_group else []
-            draw_options["_source_entries"] = [{"id": str(selected.get("id", "")), "prompt": str(selected.get("prompt", "")), "safety_level": selected.get("safety_level", "normal")}]
+            draw_options["_source_entries"] = [{"id": str(selected.get("id", "")), "prompt": compose_random_body("", selected, subject_tag=random_subject_tag), "safety_level": selected.get("safety_level", "normal"), "user_addition": user_prompt,
+                **({"prompt_provenance": selected["prompt_provenance"], "selection_seed": selected["selection_seed"]} if selected.get("source_code") == "V" else {})}]
         batch_enabled = (
             draw_count == 5
             and not chaos
@@ -2199,7 +2741,7 @@ class ComfyWorkflowBridge(SafetyBridge, Star):
                     break
                 success = await self._deliver_random_generation(
                     event,
-                    prompt=compose_random_body(user_prompt, selected),
+                    prompt=compose_random_body(user_prompt, selected, subject_tag=random_subject_tag),
                     options=draw_options,
                     extra_prefix=quality,
                     strict_no_style=True,
@@ -2216,7 +2758,7 @@ class ComfyWorkflowBridge(SafetyBridge, Star):
         for start in range(0, draw_count, micro_batch_size):
             chunk = draw_plans[start : start + micro_batch_size]
             chunk_prompts = [
-                compose_random_body(user_prompt, selected)
+                compose_random_body(user_prompt, selected, subject_tag=random_subject_tag)
                 for selected, _, _ in chunk
             ]
             chunk_ids = [str(selected.get("id", "?")) for selected, _, _ in chunk]
@@ -2241,7 +2783,7 @@ class ComfyWorkflowBridge(SafetyBridge, Star):
                 event,
                 prompt=chunk_prompts[0],
                 batch_prompts=chunk_prompts,
-                options={**chunk[0][1], '_draw_positions': list(range(start + 1, end + 1)), "_source_entries": [{"id": str(selected.get("id", "")), "prompt": str(selected.get("prompt", ""))} for selected, _, _ in chunk]},
+                options={**chunk[0][1], '_draw_positions': list(range(start + 1, end + 1)), "_source_entries": [draw_options['_source_entries'][0] for _, draw_options, _ in chunk]},
                 extra_prefix=quality,
                 strict_no_style=True,
                 allow_character_text_fallback=True,
@@ -2386,7 +2928,7 @@ class ComfyWorkflowBridge(SafetyBridge, Star):
         if reverse_id:
             lines.append(f"反推记录：{reverse_id}")
         report = "\n".join(lines)
-        return report[:5000]
+        return report
 
     async def _handle_reverse_generation(
         self,
@@ -2468,13 +3010,11 @@ class ComfyWorkflowBridge(SafetyBridge, Star):
         if reverse_only:
             if extra_prompt:
                 reverse_result["anima_prompt"] = final_prompt
-            await event.send(
-                event.plain_result(
-                    self._format_reverse_report(
-                        reverse_result, reverse_preset, reverse_categories
-                    )
-                )
-            )
+            if getattr(event, 'get_platform_name', lambda: '')() != 'aiocqhttp':
+                await event.send(event.plain_result('AAA_REVERSE_PROMPT=' + json.dumps({'positive': final_prompt}, ensure_ascii=False)))
+            report = self._format_reverse_report(reverse_result, reverse_preset, reverse_categories)
+            for offset in range(0, len(report), 1800):
+                await event.send(event.plain_result(report[offset:offset + 1800]))
             return
         if bool(self.config.get("show_reversed_tags", True)):
             header = f"图片反推 tags（{reverse_preset} / {safety_level}）"
@@ -2654,6 +3194,64 @@ class ComfyWorkflowBridge(SafetyBridge, Star):
             options["style"] = "当前画风"
         return extra_prompt, options, selected, selected_categories, reverse_only
 
+    @filter.event_message_type(EventMessageType.ALL, priority=sys.maxsize)
+    async def group_command_guard(self, event: AstrMessageEvent):
+        message = str(event.message_str or "").strip()
+        try:
+            if not self._group_request_matches(message):
+                return
+            decision = self._group_policy(event)
+            generation = bool(re.match(r"^(?:/?(?:aimg(?:_random5?|_chaos5?)?|ahq|arefine|aremake|aip|aicn|acopy|amulti|apalette)(?:\s|$)|来张好图|混沌时刻|混沌五连|五连抽|抽一抽|重跑一张|抄一抄|多人图|随机画风)", message))
+            if not decision.get("allowed", True) and (generation or decision.get("silent")):
+                event.should_call_llm(False)
+                event.stop_event()
+                if not decision.get("silent") or not self._native_group_key(event):
+                    await event.send(event.plain_result(decision.get("reason") or "本群不接受此任务"))
+        except WorkflowError as exc:
+            event.should_call_llm(False)
+            event.stop_event()
+            await event.send(event.plain_result(f"群权限检查失败：{exc}"))
+
+    @filter.command("aimg_nuser")
+    async def aimg_nuser(self, event: AstrMessageEvent, content: str = ""):
+        event.should_call_llm(False)
+        try:
+            yield event.plain_result(self._group_admin_command(event, "aimg_nuser", content))
+        except (WorkflowError, RuntimeError) as exc:
+            yield event.plain_result(str(exc))
+
+    @filter.command("aimg_grade")
+    async def aimg_grade(self, event: AstrMessageEvent, content: str = ""):
+        event.should_call_llm(False)
+        try:
+            yield event.plain_result(self._group_admin_command(event, "aimg_grade", content))
+        except (WorkflowError, RuntimeError) as exc:
+            yield event.plain_result(str(exc))
+
+    @filter.command("aimg_duser")
+    async def aimg_duser(self, event: AstrMessageEvent, content: str = ""):
+        event.should_call_llm(False)
+        try:
+            yield event.plain_result(self._group_admin_command(event, "aimg_duser", content))
+        except (WorkflowError, RuntimeError) as exc:
+            yield event.plain_result(str(exc))
+
+    @filter.command("aimg_safemode")
+    async def aimg_safemode(self, event: AstrMessageEvent, content: str = ""):
+        event.should_call_llm(False)
+        try:
+            yield event.plain_result(self._group_admin_command(event, "aimg_safemode"))
+        except (WorkflowError, RuntimeError) as exc:
+            yield event.plain_result(str(exc))
+
+    @filter.command("aimg_unsafemode")
+    async def aimg_unsafemode(self, event: AstrMessageEvent, content: str = ""):
+        event.should_call_llm(False)
+        try:
+            yield event.plain_result(self._group_admin_command(event, "aimg_unsafemode"))
+        except (WorkflowError, RuntimeError) as exc:
+            yield event.plain_result(str(exc))
+
     @filter.event_message_type(EventMessageType.ALL, priority=sys.maxsize - 1)
     async def idle_command_guard(self, event: AstrMessageEvent):
         """Record accepted generation commands before LLM/reverse preparation begins."""
@@ -2663,6 +3261,7 @@ class ComfyWorkflowBridge(SafetyBridge, Star):
         from .idle_guard_runtime import admission
         lease = None
         try:
+            self._platform_admit(event)
             root = self._character_dictionary_path().parent
             lease = admission(root)
             if lease is not None:
@@ -2676,14 +3275,15 @@ class ComfyWorkflowBridge(SafetyBridge, Star):
         except Exception as exc:
             event.should_call_llm(False)
             event.stop_event()
-            await event.send(event.plain_result(f'暂不接受新生图任务：{exc}'))
+            if not getattr(exc, "silent", False):
+                await event.send(event.plain_result(f'暂不接受新生图任务：{exc}'))
         finally:
             if lease:
                 lease.close()
 
     @filter.event_message_type(EventMessageType.ALL, priority=sys.maxsize - 2)
     async def safety_command_guard(self, event: AstrMessageEvent):
-        if not self._safety_policy().enabled:
+        if not self._safety_policy(event).enabled:
             return
         message = str(event.message_str or "").strip()
         if not re.match(r"^(?:/(?:aimg(?:_random5?|_chaos5?)?|ahq|arefine|aremake|aip|aicn|acopy|amulti)(?:\s|$)|来张好图|混沌时刻|混沌五连|五连抽|抽一抽|重跑一张|抄一抄|多人图)", message):
@@ -2702,10 +3302,10 @@ class ComfyWorkflowBridge(SafetyBridge, Star):
             yield event.plain_result("仅管理员可以查询安全信用")
             return
         qq = extract_command_body(event.message_str, qq, "aimg_safety_credit").strip()
-        if not re.fullmatch(r"[1-9][0-9]{4,14}", qq):
-            yield event.plain_result("用法：/aimg_safety_credit QQ号")
+        if not valid_credit_subject(qq):
+            yield event.plain_result("用法：/aimg_safety_credit QQ号 或 telegram:用户ID / discord:用户ID")
             return
-        yield event.plain_result(f"QQ={qq}，信用={self._safety_store.score(qq)}")
+        yield event.plain_result(f"用户={qq}，信用={self._safety_store.score(qq)}")
 
     @filter.command("aimg_safety_reset")
     async def aimg_safety_reset(self, event: AstrMessageEvent, qq: str = ""):
@@ -2714,11 +3314,11 @@ class ComfyWorkflowBridge(SafetyBridge, Star):
             yield event.plain_result("仅管理员可以重置安全信用")
             return
         qq = extract_command_body(event.message_str, qq, "aimg_safety_reset").strip()
-        if not re.fullmatch(r"[1-9][0-9]{4,14}", qq):
-            yield event.plain_result("用法：/aimg_safety_reset QQ号")
+        if not valid_credit_subject(qq):
+            yield event.plain_result("用法：/aimg_safety_reset QQ号 或 telegram:用户ID / discord:用户ID")
             return
         self._safety_store.reset(qq, str(event.get_sender_id()))
-        yield event.plain_result(f"QQ={qq}，信用已重置为10；历史去重和审计记录保留")
+        yield event.plain_result(f"用户={qq}，信用已重置为10；历史去重和审计记录保留")
 
     @filter.command("aaa_hub_deliver")
     async def aaa_hub_deliver(self, event: AstrMessageEvent, content: str = ""):
@@ -2743,7 +3343,7 @@ class ComfyWorkflowBridge(SafetyBridge, Star):
             logger.exception('Hub QQ delivery failed')
             await event.send(event.plain_result(f'图片投递失败：{exc}'))
 
-    @filter.event_message_type(EventMessageType.ALL, priority=sys.maxsize - 3)
+    @filter.event_message_type(EventMessageType.ALL, priority=sys.maxsize - 4)
     async def natural_random_picture_route(self, event: AstrMessageEvent):
         """Handle pending /aip images and slash-free random commands."""
         message = str(event.message_str or "").strip()
@@ -2944,13 +3544,32 @@ class ComfyWorkflowBridge(SafetyBridge, Star):
             return job, ids.index(asset["asset_id"])
         replies = [component for component in event.get_messages() if isinstance(component, Comp.Reply)]
         raw_replies = [segment for segment in self._image_resolver._raw_segments(event) if isinstance(segment, dict) and segment.get('type') == 'reply']
-        if not replies and not raw_replies:
-            raise WorkflowError("必须引用一张本插件生成的图片；不能只发送指令。")
+        discord_reference = (getattr(getattr(getattr(event.message_obj, 'raw_message', None), 'reference', None),
+                                     'message_id', None) if getattr(event, 'get_platform_name', lambda: '')() == 'discord' else None)
+        official_ids = qq_official_reply_ids(event)
         ids = {str(getattr(reply, 'id', '') or '') for reply in replies}
         ids.update(str(segment.get('data', {}).get('id', '')) for segment in raw_replies)
+        if discord_reference is not None:
+            ids.add(str(discord_reference))
+        ids.update(official_ids)
         ids.discard('')
-        if len(ids) > 1:
+        markers = set()
+        if getattr(event, 'get_platform_name', lambda: '')() == 'qq_official':
+            markers = qq_official_quote_markers(event, replies)
+            log_qq_official_quote_diagnostic(event, ids, self._job_store(), logger, quote_markers=markers)
+        if not replies and not raw_replies and discord_reference is None and not official_ids and not markers:
+            raise WorkflowError("必须引用一张本插件生成的图片；不能只发送指令。")
+        if len(ids) > 1 or len(markers) > 1:
             raise WorkflowError('请只引用一条图片消息')
+        if markers:
+            linked = self._job_store().parent_for_message(next(iter(markers)), delivery_scope(event))
+            if not linked:
+                raise WorkflowError('引用标记未关联到当前会话中的原任务；请引用机器人在当前会话发出的原图消息。')
+            for message_id in ids:
+                by_id = self._job_store().parent_for_message(message_id, delivery_scope(event))
+                if by_id and (by_id[0]['job_id'], by_id[1]) != (linked[0]['job_id'], linked[1]):
+                    raise WorkflowError('引用消息 ID 与标记关联冲突，未执行操作。')
+            return linked
         if ids:
             linked = self._job_store().parent_for_message(next(iter(ids)), delivery_scope(event))
             if linked:
@@ -2958,6 +3577,8 @@ class ComfyWorkflowBridge(SafetyBridge, Star):
                 # A persisted send receipt authorizes this exact destination scope,
                 # including Hub-origin jobs explicitly delivered into this QQ chat.
                 return parent, index
+        if getattr(event, 'get_platform_name', lambda: '')() == 'qq_official' and not ids:
+            raise WorkflowError('官方 QQ 的引用没有提供原消息 ID，且原消息没有 AAA-REF 标记；请引用安装新补丁后生成的图片。')
         path = await self._image_resolver.resolve(event)
         if not path:
             raise WorkflowError("引用消息中没有可读取的图片。")
@@ -2979,6 +3600,9 @@ class ComfyWorkflowBridge(SafetyBridge, Star):
         job = None
         store = self._job_store()
         try:
+            platform_admit = getattr(self, "_platform_admit", None)
+            if callable(platform_admit):
+                platform_admit(event)
             self._safety_guard(event)
             body = extract_command_body(event.message_str, content, "aremake")
             ticket_match = re.match(r'^(引用令牌=[0-9a-f]{32})(?:\s+|$)', body)
@@ -2991,7 +3615,7 @@ class ComfyWorkflowBridge(SafetyBridge, Star):
             from .replay_runtime import hq_replay_job
             parent = hq_replay_job(store, parent)
             workflow, seed, output_index = replay_workflow(parent, index, fixed_seed=fixed_seed)
-            safety_start = self._safety_policy().fingerprint
+            safety_start = self._safety_policy(event).fingerprint
             for text in positive_texts(workflow):
                 await self._safety_input(event, text)
             await self._safety_input(event, str(parent.get("input", {}).get("compiled_prompt", "")))
@@ -3030,7 +3654,7 @@ class ComfyWorkflowBridge(SafetyBridge, Star):
                     refs = extract_output_images(record)
                     if output_index >= len(refs):
                         raise WorkflowError("重跑输出数量与原任务不符。")
-                    paths = await self._download_images(session, prompt_id, [refs[output_index]], max_images_override=1)
+                    paths = await self._download_images(session, prompt_id, [refs[output_index]], max_images_override=1, event=event)
             if len(paths) != 1:
                 raise WorkflowError("重跑未得到一张完整图片。")
             from .output_storage_runtime import preferences, strip_outputs, watermark_image
@@ -3041,7 +3665,7 @@ class ComfyWorkflowBridge(SafetyBridge, Star):
                 strip_outputs(paths, [refs[output_index]], output_root)
             if storage.get("watermark") and self._safety_admin_exempt(event):
                 paths = [watermark_image(paths[0], root, output_root, storage)]
-            if safety_start != self._safety_policy().fingerprint:
+            if safety_start != self._safety_policy(event).fingerprint:
                 raise WorkflowError("任务期间安全配置变化，生成失败（未扣分）")
             paths = await self._safety_outputs(event, paths)
             asset = store.register_asset(paths[0], asset_type="result", job_id=job["job_id"], source="comfyui_download")
@@ -3049,11 +3673,27 @@ class ComfyWorkflowBridge(SafetyBridge, Star):
                 model=copy.deepcopy(parent.get("model", {})), sampling={**parent.get("sampling", {}), "seed": seed}, enhance=copy.deepcopy(parent.get("enhance", {})))
             job["result"]["assets"] = [asset["asset_id"]]
             store.save_job(job)
-            await event.send(event.plain_result(f"重跑完成｜seed={seed}｜任务={job['job_id']}"))
-            await send_tracked_image(event, paths[0], store, job['job_id'], 0, logger)
+            # Generation is complete even if the destination is temporarily down.
+            # An uncertain receipt must never trigger a second GPU job or resend.
+            job['result']['delivery'] = {'status': 'pending'}
+            store.save_job(job)
+            try:
+                await event.send(event.plain_result(f"重跑完成｜seed={seed}｜任务={job['job_id']}"))
+                await send_tracked_image(event, paths[0], store, job['job_id'], 0, logger)
+            except Exception as exc:
+                logger.warning('Replay completed but delivery was not confirmed: %s', type(exc).__name__)
+                job['result']['delivery'] = {'status': 'unconfirmed', 'error_type': type(exc).__name__}
+                store.save_job(job)
+                try:
+                    await event.send(event.plain_result('图片已生成并保留，但发送未确认；请先查看记录，不要重复提交生图。'))
+                except Exception:
+                    logger.warning('Replay delivery warning could not be sent')
+                return
+            job['result']['delivery'] = {'status': 'sent'}
+            store.save_job(job)
         except Exception as exc:
             logger.exception("Replay failed")
-            if job:
+            if job and job.get('status') != 'completed':
                 job["status"] = "failed"
                 job["result"]["error"] = {"code": "REPLAY_FAILED", "message": str(exc)}
                 store.save_job(job)
@@ -3065,7 +3705,9 @@ class ComfyWorkflowBridge(SafetyBridge, Star):
         if overrides.get('task_suite'):
             from .task_suite_runtime import bind_qq_suite
             overrides = bind_qq_suite(self, event, overrides)
-        prompt, options = copy_context(parent, index, overrides)
+        prompt, options = copy_context(parent, index, overrides,
+            camera_lora_name=str(getattr(self, 'config', {}).get('camera_extreme_lora_name', '')))
+        original_prompt = prompt
         if instruction:
             from .replay_runtime import prompt_parts, apply_prompt_patch
             await self._safety_input(event, instruction)
@@ -3104,17 +3746,24 @@ class ComfyWorkflowBridge(SafetyBridge, Star):
         options['_fixed_seed'] = seed
         options['fixed_seed'] = bool(overrides.get('fixed_seed'))
         options['_ordered_prompt'] = True
+        prompt = compile_prompt(prompt, self._character_dictionary_path(), strip_identity='character' in overrides)
         entries = parent.get('input', {}).get('source_entries', [])
         if entries:
             selected = 0 if len(entries) == 1 else index
             if selected >= len(entries):
                 raise WorkflowError('原图片词库编号不一致，拒绝错配')
-            options['_source_entries'] = [copy.deepcopy(entries[selected])]
+            source_entry = copy.deepcopy(entries[selected])
+            if instruction and prompt != original_prompt:
+                source_entry.setdefault('original_prompt', source_entry.get('prompt', ''))
+                source_entry.setdefault('original_user_addition', source_entry.get('user_addition', ''))
+                source_entry['prompt'] = prompt
+                source_entry['user_addition'] = ''  # Already included in the edited base prompt.
+                source_entry['edit_request'] = instruction
+            options['_source_entries'] = [source_entry]
         if kind == 'base_multi_person_v1':
             options['_base_multi'] = True
             if options.get('character') or options.get('style'):
                 raise WorkflowError('裸模多人图不支持全局角色/画风覆盖')
-        prompt = compile_prompt(prompt, self._character_dictionary_path(), strip_identity='character' in overrides)
         await event.send(event.plain_result('已读取原任务配置；覆盖指定参数并' + ('沿用原种子' if overrides.get('fixed_seed') else '使用新种子') + '。未指定的预设沿用快照。'))
         await self._deliver_generation(event, prompt=prompt, options=options,
             workflow_type=kind, profile=profile, source_image_path=source_path,
@@ -3127,14 +3776,13 @@ class ComfyWorkflowBridge(SafetyBridge, Star):
         event.stop_event()
         try:
             job, index = await self._quoted_job(event)
-            entries = job.get("input", {}).get("source_entries", [])
-            if len(entries) == 1:
-                index = 0
-            if index >= len(entries):
-                raise WorkflowError("该图没有保存抽取串快照（可能是旧图或非抽卡任务），不能从完整提示词反猜。")
-            entry = entries[index]
-            await event.send(event.plain_result(f"条目：{entry.get('id', '')}\n{entry.get('prompt', '')}"))
-        except WorkflowError as exc:
+            from .prompt_snapshot_runtime import image_prompt_snapshot, format_prompt_snapshot
+            snapshot = image_prompt_snapshot(job, index, self._job_store().get_job)
+            text = format_prompt_snapshot(snapshot)
+            # Send the entire evidence, not just the first QQ-sized fragment.
+            for offset in range(0, len(text), 1800):
+                await event.send(event.plain_result(text[offset:offset + 1800]))
+        except (WorkflowError, ValueError) as exc:
             await event.send(event.plain_result(str(exc)))
 
     @filter.command("astyle", alias={"查看画风"})
@@ -3151,14 +3799,13 @@ class ComfyWorkflowBridge(SafetyBridge, Star):
         except WorkflowError as exc:
             await event.send(event.plain_result(str(exc)))
 
-    @filter.permission_type(filter.PermissionType.ADMIN)
     @filter.command('asavestyle')
     async def asavestyle(self, event: AstrMessageEvent, content: str = ''):
         event.stop_event()
         event.should_call_llm(False)
         try:
-            if not self._event_is_admin(event):
-                raise WorkflowError('仅管理员可以保存全服画风预设')
+            if not self._group_can_manage_presets(event):
+                raise WorkflowError('仅管理员或已登记的 4 级用户可以新增全服画风预设')
             import shlex
             parts = shlex.split(extract_command_body(event.message_str, content, 'asavestyle'))
             overwrite = len(parts) == 2 and parts[1] == '--覆盖'
@@ -3178,6 +3825,8 @@ class ComfyWorkflowBridge(SafetyBridge, Star):
             presets = load_presets(self._preset_path())
             if name in presets['styles'] and not overwrite:
                 raise WorkflowError('同名预设已存在；请换名或明确追加 --覆盖')
+            if name in presets['styles'] and not self._event_is_admin(event):
+                raise WorkflowError('4 级用户只能新增预设；覆盖已有预设请联系管理员')
             presets['styles'][name] = preset
             save_presets(self._preset_path(), presets)
             await event.send(event.plain_result(f'已保存全服画风“{name}”：{len(preset["loras"])} 个 LoRA；沿用当次权重和画风提示词。'))
@@ -3194,7 +3843,7 @@ class ComfyWorkflowBridge(SafetyBridge, Star):
             text, images = gallery_view(self._character_dictionary_path().parent, body)
             await event.send(event.plain_result(text))
             for label, path in images:
-                policy = self._safety_policy()
+                policy = self._safety_policy(event)
                 if policy.enabled and not self._safety_store.approved(path.read_bytes(), policy.fingerprint):
                     await event.send(event.plain_result(label + '：未通过当前安全配置审核，暂不展示；请管理员更新画廊（不会扣除查看者信用）'))
                     continue
@@ -3236,6 +3885,9 @@ class ComfyWorkflowBridge(SafetyBridge, Star):
         event.should_call_llm(False)
         event.stop_event()
         try:
+            platform_admit = getattr(self, "_platform_admit", None)
+            if callable(platform_admit):
+                platform_admit(event)
             body = content or extract_command_body(event.message_str, content, "acopy")
             instruction, options, preset, categories, _ = self._parse_reverse_body(body)
             _, explicit_options = parse_generation_directives(body)
@@ -3250,10 +3902,11 @@ class ComfyWorkflowBridge(SafetyBridge, Star):
                 if not provider:
                     raise WorkflowError("文字修改需要 AstrBot 文本Provider；仅替换角色/画风可不填写修改要求。")
             source_tags = None
-            if any(isinstance(component, Comp.Reply) for component in event.get_messages()) or any(segment.get('type') == 'reply' for segment in self._image_resolver._raw_segments(event) if isinstance(segment, dict)):
+            if getattr(event, '_aaa_selected_quote', None) is not None or any(isinstance(component, Comp.Reply) for component in event.get_messages()) or any(segment.get('type') == 'reply' for segment in self._image_resolver._raw_segments(event) if isinstance(segment, dict)):
                 try:
                     parent, index = await self._quoted_job(event)
-                    source_tags, options = copy_context(parent, index, explicit_options)
+                    source_tags, options = copy_context(parent, index, explicit_options,
+                        camera_lora_name=str(self.config.get('camera_extreme_lora_name', '')))
                     await event.send(event.plain_result("已读取引用图片的原任务配置；显式参数优先覆盖。"))
                 except WorkflowError:
                     # No authorized/recoverable snapshot: inspect only supplied image.
@@ -3425,9 +4078,11 @@ class ComfyWorkflowBridge(SafetyBridge, Star):
             if parent_job_id:
                 parent = store.get_job(parent_job_id)
             elif image_path:
-                _, parent = store.parent_for_image(Path(image_path))
+                source_asset, parent = store.parent_for_image(Path(image_path))
                 if parent:
                     parent_job_id = str(parent.get("job_id", ""))
+                    if source_asset and source_asset['asset_id'] in parent.get('result', {}).get('assets', []):
+                        options['_source_image_index'] = parent['result']['assets'].index(source_asset['asset_id'])
 
             if parent and not image_path:
                 result_assets = parent.get("result", {}).get("assets", [])
@@ -3436,6 +4091,7 @@ class ComfyWorkflowBridge(SafetyBridge, Star):
                     candidate = Path(str(source_asset.get("path", "")))
                     if candidate.is_file():
                         image_path = str(candidate)
+                        options['_source_image_index'] = 0
 
             restored_exact = False
             if parent:
@@ -3689,9 +4345,12 @@ class ComfyWorkflowBridge(SafetyBridge, Star):
         event.stop_event()
         yield event.plain_result(
             "AAA 跑图速查（角色/画风请使用已保存名称）\n"
+            "Telegram：/amenu 打开按钮菜单；选模式、补充内容、确认提交（群聊临时菜单）。\n"
+            "Discord：/amenu 打开仅自己可见的模式菜单；文字模式弹窗填写，图片模式在原频道上传或回复原图，确认后排队。\n"
             "/aimg 角色=名称 画风=名称 比例=2:3 英文提示词\n"
             "来张好图抽一抽 B/N 角色=名称\n"
             "来张好图五连抽 N 角色=名称\n"
+            "随机抽卡可选：起手=1boy|1woman|1man|无；仅替换词库串开头的 1girl，省略时原样。\n"
             "混沌时刻（随机角色、画风、比例）\n"
             "/aip 角色=名称（同条附图或60秒内发送图片）\n"
             "/acopy 角色=名称（引用任务图时仅替换预设，无需LLM；可追加自然语言修改要求，修改正文才需要LLM）\n"
@@ -3737,58 +4396,10 @@ class ComfyWorkflowBridge(SafetyBridge, Star):
             )
             return
 
-        if bool(self.config.get("send_progress", True)) and getattr(event, 'get_platform_name', lambda: '')() != 'aiocqhttp':
-            yield event.plain_result("已提交生成请求，正在等待 ComfyUI…")
-
-        try:
-            async with self._generation_slot(event):
-                paths, seed, prompt_id, plan = await self._generate(
-                    prompt,
-                    options,
-                    event=event,
-                    allow_character_text_fallback=True,
-                )
-        except (WorkflowError, aiohttp.ClientError, asyncio.TimeoutError) as exc:
-            logger.warning("Comfy bridge generation failed: %s", exc)
-            yield event.plain_result(f"生成失败：{exc}")
-            return
-        except Exception as exc:
-            logger.exception("Unexpected Comfy bridge error")
-            yield event.plain_result(f"生成失败：未预期错误 {type(exc).__name__}: {exc}")
-            return
-
-        labels = []
-        if plan.get("style_name"):
-            labels.append(f"画风={plan['style_name']}")
-        if plan.get("character_name"):
-            labels.append(f"角色={plan['character_name']}")
-        sampler = plan.get("sampler", {})
-        if isinstance(sampler, dict) and sampler.get("custom"):
-            sampler_label = {
-                "original": "原有",
-                "2m": "2m",
-                "2m_sde": "2m_sde",
-                "2m_sde_gpu": "2m_sde_gpu",
-            }.get(str(sampler.get("preset")), str(sampler.get("preset")))
-            labels.append(
-                f"采样器={sampler_label}({sampler.get('sampler_name')},"
-                f"{sampler.get('steps')}步,CFG={sampler.get('cfg')},"
-                f"{sampler.get('scheduler')})"
-            )
-        preset_text = f"｜{'｜'.join(labels)}" if labels else ""
-        if getattr(event, 'get_platform_name', lambda: '')() == 'aiocqhttp':
-            from .delivery_runtime import basic_image_caption
-            for index, path in enumerate(paths):
-                await send_tracked_image(event, path, self._job_store(), str(plan.get('job_id', '')), index, logger,
-                                         caption=basic_image_caption(plan, options))
-            return
-        yield event.plain_result(
-            f"生成完成｜seed={seed if seed is not None else '保留工作流值'}"
-            f"｜任务={plan.get('job_id', prompt_id[:8])}"
-            f"｜Comfy={prompt_id[:8]}{preset_text}"
+        await self._deliver_generation(
+            event, prompt=prompt, options=options,
+            allow_character_text_fallback=True,
         )
-        for index, path in enumerate(paths):
-            await send_tracked_image(event, path, self._job_store(), str(plan.get('job_id', '')), index, logger)
 
     @filter.command("aimg_presets")
     async def aimg_presets(self, event: AstrMessageEvent):
@@ -4148,13 +4759,14 @@ class ComfyWorkflowBridge(SafetyBridge, Star):
         except WorkflowError as exc:
             await event.send(event.plain_result(f"删除失败：{exc}"))
 
-    @filter.permission_type(filter.PermissionType.ADMIN)
     @filter.command("aimg_style_set")
     async def aimg_style_set(self, event: AstrMessageEvent, content: str = ""):
         """管理员新建或覆盖画风预设。"""
         event.should_call_llm(False)
         body = extract_command_body(event.message_str, content, "aimg_style_set")
         try:
+            if not self._group_can_manage_presets(event):
+                raise WorkflowError("仅管理员或已登记的 4 级用户可以新增预设")
             name, preset = parse_style_definition(body)
             if (
                 str(self.config.get("style_lora_mode", "dynamic")).casefold()
@@ -4168,6 +4780,8 @@ class ComfyWorkflowBridge(SafetyBridge, Star):
             if len(preset["loras"]) > max_loras:
                 raise WorkflowError(f"画风 LoRA 数量不能超过 {max_loras}。")
             presets = load_presets(self._preset_path())
+            if name in presets["styles"] and not self._event_is_admin(event):
+                raise WorkflowError("4 级用户只能新增预设；覆盖已有预设请联系管理员")
             presets["styles"][name] = preset
             save_presets(self._preset_path(), presets)
             yield event.plain_result(
@@ -4178,15 +4792,18 @@ class ComfyWorkflowBridge(SafetyBridge, Star):
         except WorkflowError as exc:
             yield event.plain_result(f"保存失败：{exc}")
 
-    @filter.permission_type(filter.PermissionType.ADMIN)
     @filter.command("aimg_role_set")
     async def aimg_role_set(self, event: AstrMessageEvent, content: str = ""):
         """管理员新建或覆盖角色 LoRA 预设。"""
         event.should_call_llm(False)
         body = extract_command_body(event.message_str, content, "aimg_role_set")
         try:
+            if not self._group_can_manage_presets(event):
+                raise WorkflowError("仅管理员或已登记的 4 级用户可以新增预设")
             name, preset = parse_character_definition(body)
             presets = load_presets(self._preset_path())
+            if name in presets["characters"] and not self._event_is_admin(event):
+                raise WorkflowError("4 级用户只能新增预设；覆盖已有预设请联系管理员")
             previous = presets["characters"].get(name, {})
             if isinstance(previous, dict) and previous.get("variants"):
                 preset["variants"] = copy.deepcopy(previous["variants"])
@@ -4201,18 +4818,21 @@ class ComfyWorkflowBridge(SafetyBridge, Star):
         except WorkflowError as exc:
             yield event.plain_result(f"保存失败：{exc}")
 
-    @filter.permission_type(filter.PermissionType.ADMIN)
     @filter.command("aimg_role_text_set")
     async def aimg_role_text_set(self, event: AstrMessageEvent, content: str = ""):
         """管理员创建无需 LoRA 的底模直出角色固定串。"""
         event.should_call_llm(False)
         body = extract_command_body(event.message_str, content, "aimg_role_text_set")
         try:
+            if not self._group_can_manage_presets(event):
+                raise WorkflowError("仅管理员或已登记的 4 级用户可以新增预设")
             name, preset = parse_text_character_definition(body)
             presets = load_presets(self._preset_path())
+            if name in presets["characters"] and not self._event_is_admin(event):
+                raise WorkflowError("4 级用户只能新增预设；覆盖已有预设请联系管理员")
             previous = presets["characters"].get(name, {})
             if isinstance(previous, dict) and previous.get("variants"):
-                raise WorkflowError("该角色仍有 LoRA 造型，请先在管理端清空造型再改为文本角色。")
+                preset["variants"] = copy.deepcopy(previous["variants"])
             presets["characters"][name] = preset
             save_presets(self._preset_path(), presets)
             yield event.plain_result(
@@ -4375,7 +4995,7 @@ class ComfyWorkflowBridge(SafetyBridge, Star):
                 f"- HQ 工作流：{hq_path}｜profiles=stable, beauty\n"
                 f"- 放大重修工作流：{refine_path}｜profiles=light, medium\n"
                 f"- Job 记录：{job_count} 个｜{job_store.root}\n"
-                f"- 插件图片清理：{'启用' if bool(self.config.get('output_cleanup_enabled', True)) else '关闭'}｜"
+                f"- 插件图片清理：{'启用' if bool(self.config.get('output_cleanup_enabled', False)) else '关闭'}｜"
                 f"保留 {self._output_retention_hours():g} 小时｜"
                 f"每 {self._output_cleanup_interval_seconds() // 60} 分钟扫描｜"
                 f"{self._output_dir()}\n"
@@ -4409,6 +5029,14 @@ class ComfyWorkflowBridge(SafetyBridge, Star):
 
     async def terminate(self):
         """Cancel background tasks during reload or shutdown."""
+        self._telegram_menu_drafts.clear()
+        self._discord_menu_drafts.clear()
+        self._discord_menu_sources.clear()
+        for task in self._discord_menu_tasks:
+            task.cancel()
+        if self._discord_menu_tasks:
+            await asyncio.gather(*self._discord_menu_tasks, return_exceptions=True)
+        self._discord_menu_tasks.clear()
         notice_task = getattr(self, "_safety_notice_task", None)
         if notice_task is not None:
             notice_task.cancel()

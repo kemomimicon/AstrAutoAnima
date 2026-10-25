@@ -11,6 +11,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import __version__
+from .preset_queue import PresetQueue, PresetSubmission
 from .task_suites import SuiteWrite, list_suites, write_suite, delete_suite
 from .auth import AuthPrincipal, require_admin, require_reader
 from .character_catalog import search_character_dictionary
@@ -30,6 +31,10 @@ from .management import (
     update_prompt,
     write_preset,
 )
+from .prompt_groups import PromptGroupsWrite, read_groups, write_groups, validate_selected_groups
+from .prompt_catalog import CatalogWrite, catalog as prompt_catalog, write_catalog
+from .platform_switchboard import PlatformSwitches, read_board, write_board
+from .chat_groups import router as chat_groups_router
 from .lite_user_management import (
     create_lite_user,
     delete_lite_user,
@@ -49,6 +54,8 @@ from .personal_styles import (
     write_personal_style,
 )
 from .prompt_likes import promote_k_prompt, remove_prompt_favorite
+from .prompt_favorites import list_favorites
+from .favorite_bridge import publish_favorite_bridge
 from .repositories import (
     RepositoryError,
     file_revision,
@@ -56,10 +63,13 @@ from .repositories import (
     list_prompts,
 )
 from .remote_jobs import RemoteJobError, RemoteJobManager
+from .local_jobs import LocalJobManager
 from .prompt_reports import PromptReports
 from .style_gallery import StyleGallery, GalleryUpdate, GalleryGenerate
 from .image_storage import ImageStorage, router as image_storage_router
 from .idle_guard import admission
+from .extensions import router as extensions_router
+from .extension_host import ExtensionHost, admin as extension_admin, web as extension_web
 from .schemas import (
     HealthResponse,
     DeliveryTargetListResponse,
@@ -134,13 +144,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(application: FastAPI):
+        publish_favorite_bridge(resolved)
+        application.state.preset_queue.start()
+        await application.state.extension_host.start()
+        if isinstance(application.state.remote_jobs, LocalJobManager):
+            await application.state.remote_jobs.resume()
         storage_task = asyncio.create_task(application.state.image_storage.scheduler())
         yield
+        await asyncio.to_thread(application.state.preset_queue.close)
         storage_task.cancel()
         await asyncio.gather(storage_task, return_exceptions=True)
         await application.state.style_gallery.shutdown()
         await application.state.remote_jobs.shutdown()
         await application.state.civitai_downloads.shutdown()
+        await application.state.extension_host.close()
 
     app = FastAPI(
         title="AstrAutoAnima Hub",
@@ -149,12 +166,59 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         lifespan=lifespan,
     )
     app.state.settings = resolved
-    app.state.remote_jobs = RemoteJobManager(resolved)
+    app.state.preset_queue = PresetQueue(resolved)
+    app.include_router(chat_groups_router)
+    app.state.extension_host = ExtensionHost(resolved)
+    app.include_router(extensions_router)
+    app.include_router(extension_admin)
+    app.include_router(extension_web)
+    app.state.remote_jobs = (LocalJobManager(resolved) if resolved.execution_mode == "local"
+                             else RemoteJobManager(resolved))
     app.state.prompt_reports = PromptReports(resolved, app.state.remote_jobs)
     app.state.civitai_downloads = CivitaiDownloads(resolved)
     app.state.style_gallery = StyleGallery(resolved, app.state.remote_jobs)
     app.state.image_storage = ImageStorage(resolved, app.state.remote_jobs)
     app.include_router(image_storage_router)
+
+    @app.post('/api/v1/admin/preset-submissions', status_code=202, tags=['presets'])
+    def preset_submission(payload: PresetSubmission,
+                          principal: Annotated[AuthPrincipal, Depends(require_admin)]):
+        try:
+            return app.state.preset_queue.submit(payload, principal.subject)
+        except RepositoryError as exc:
+            _raise_management_error(exc)
+
+    @app.get('/api/v1/admin/preset-submissions/{identifier}', tags=['presets'],
+             dependencies=[Depends(require_admin)])
+    def preset_submission_status(identifier: str):
+        try:
+            return app.state.preset_queue.get(identifier)
+        except RepositoryError as exc:
+            _raise_management_error(exc)
+
+    @app.get('/api/v1/admin/platform-switchboard', tags=['platforms'],
+             dependencies=[Depends(require_admin)])
+    def platform_switchboard_get() -> dict[str, Any]:
+        if resolved.execution_mode == 'local':
+            raise HTTPException(409, '本机执行模式不启用平台接单开关')
+        try:
+            return read_board(resolved)
+        except RepositoryError as exc:
+            _raise_management_error(exc)
+
+    @app.put('/api/v1/admin/platform-switchboard', tags=['platforms'],
+             dependencies=[Depends(require_admin)])
+    def platform_switchboard_put(
+        payload: PlatformSwitches,
+        if_match: Annotated[str | None, Header(alias='If-Match')] = None,
+        device_name: Annotated[str | None, Header(alias='X-Device-Name')] = None,
+    ) -> dict[str, Any]:
+        if resolved.execution_mode == 'local':
+            raise HTTPException(409, '本机执行模式不启用平台接单开关')
+        try:
+            return write_board(resolved, payload, _expected_revision(if_match), _actor(device_name))
+        except RepositoryError as exc:
+            _raise_management_error(exc)
 
     @app.middleware('http')
     async def idle_admission(request, call_next):
@@ -313,7 +377,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/api/v1/health", response_model=HealthResponse, tags=["system"])
     async def health() -> HealthResponse:
         return HealthResponse(
-            version=__version__, timestamp=datetime.now().astimezone()
+            version=__version__, execution_mode=resolved.execution_mode,
+            timestamp=datetime.now().astimezone()
         )
 
     @app.post("/api/v1/lite/jobs/{job_id}/images/{image_id}/remake", response_model=RemoteJobResponse, status_code=202)
@@ -334,15 +399,28 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         source: str = Query(default="", max_length=16),
         safety: str = Query(default="", max_length=8),
         query: str = Query(default="", max_length=500),
+        custom_groups: str = Query(default="", max_length=1040),
         page: int = Query(default=1, ge=1),
         page_size: int = Query(default=20, ge=1, le=200),
     ) -> PromptPage:
         """Return enabled prompt records without exposing write operations."""
 
         try:
+            selected_groups = validate_selected_groups(resolved, custom_groups.split(',') if custom_groups else [])
+        except RepositoryError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        try:
+            if source.upper().strip() == "P":
+                if selected_groups:
+                    raise HTTPException(422, '个人收藏库不使用主库自定义分组，请移除分组筛选')
+                return list_favorites(
+                    resolved.prompt_favorites_path, principal,
+                    query=query, safety=safety, page=page, page_size=page_size,
+                )
             result = list_prompts(
                 resolved.prompt_pool_path,
                 owner=principal.subject,
+                custom_groups=selected_groups,
                 source=source,
                 safety=safety,
                 query=query,
@@ -355,6 +433,54 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if page > result.pages:
             raise HTTPException(status_code=404, detail="page out of range")
         return result
+
+    @app.get('/api/v1/lite/prompt-groups', tags=['lite'], dependencies=[Depends(require_reader)])
+    def lite_prompt_groups() -> dict[str, Any]:
+        # Small registry, read on demand. No polling of the full prompt catalog.
+        try:
+            return read_groups(resolved)
+        except RepositoryError as exc:
+            raise HTTPException(503, str(exc)) from exc
+
+    @app.get('/api/v1/lite/prompt-catalog', tags=['lite'])
+    def lite_prompt_catalog(response: Response,
+                            principal: Annotated[AuthPrincipal, Depends(require_reader)],
+                            if_none_match: Annotated[str | None, Header()] = None):
+        try:
+            result = prompt_catalog(resolved, principal)
+        except RepositoryError as exc:
+            raise HTTPException(503, str(exc)) from exc
+        etag = '"' + result["revision"] + '"'
+        headers = {"ETag": etag, "Cache-Control": "private, no-cache", "Vary": "Authorization"}
+        if if_none_match == etag:
+            return Response(status_code=304, headers=headers)
+        response.headers.update(headers)
+        return result
+
+    @app.put('/api/v1/admin/prompt-catalog')
+    def admin_prompt_catalog(payload: CatalogWrite,
+                             principal: Annotated[AuthPrincipal, Depends(require_admin)],
+                             if_match: Annotated[str | None, Header(alias="If-Match")] = None):
+        try:
+            return write_catalog(resolved, payload, _expected_revision(if_match), principal.subject)
+        except RepositoryError as exc:
+            _raise_management_error(exc)
+
+    @app.get('/api/v1/lite/local-capabilities', tags=['lite'])
+    def local_capabilities(principal: Annotated[AuthPrincipal, Depends(require_reader)]):
+        # On-demand only; the large catalog stays outside the managed main pool.
+        from .local_gufeng import gufeng_available
+        catalog = (resolved.local_gufeng_catalog_path if resolved.execution_mode == 'local'
+                   else resolved.plugin_data_dir / 'resources/gufeng/cards.sqlite3')
+        available = ((resolved.execution_mode != 'local' or principal.is_admin)
+                     and gufeng_available(catalog))
+        from .prompt_catalog import source_policy
+        row = source_policy(resolved, "V")
+        return {'execution_mode': resolved.execution_mode,
+                'random_groups': [{'id': 'v', 'name': row["name"], 'mode': 'full',
+                                   'safety_code': row["default_safety"],
+                                   'private_only': not row["allow_group"] or row["default_safety"] == "S"}]
+                if available and row["enabled"] else []}
 
     @app.post("/api/v1/lite/jobs/{job_id}/images/{image_id}/report")
     def report_prompt(job_id: str, image_id: str, principal: Annotated[AuthPrincipal, Depends(require_reader)]):
@@ -694,12 +820,62 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(status_code=409, detail="only successful jobs can be liked")
         if prompt_id not in job.prompt_ids:
             raise HTTPException(status_code=404, detail="prompt is not part of this job")
+        images = [image for image in job.images if image.prompt_id == prompt_id]
+        if len(images) != 1 or not images[0].source_prompt:
+            raise HTTPException(
+                status_code=409,
+                detail="无法唯一对应图片或旧任务缺少原串快照，请在具体图片下收藏；旧任务不能猜测附加内容",
+            )
         try:
-            result = promote_k_prompt(resolved, prompt_id, principal)
+            from .image_prompts import resolve_image_prompt, save_image_prompt
+            snapshot = resolve_image_prompt(resolved, job, images[0])
+            result = save_image_prompt(resolved, principal, snapshot, f'{job_id}-{images[0].id}')
         except RepositoryError as exc:
             _raise_management_error(exc)
         app.state.remote_jobs.mark_liked(job_id, prompt_id, principal)
         return result
+
+    @app.post(
+        "/api/v1/lite/jobs/{job_id}/images/{image_id}/favorite",
+        response_model=PromptLikeResponse,
+        tags=["lite"],
+    )
+    def lite_job_favorite_image(
+        job_id: str,
+        image_id: str,
+        principal: Annotated[AuthPrincipal, Depends(require_reader)],
+    ) -> PromptLikeResponse:
+        job = app.state.remote_jobs.get(job_id, principal)
+        if job is None:
+            raise HTTPException(status_code=404, detail="remote job not found")
+        image = next((item for item in job.images if item.id == image_id), None)
+        if image is None:
+            raise HTTPException(status_code=404, detail="image prompt not found")
+        try:
+            from .image_prompts import resolve_image_prompt, save_image_prompt
+            snapshot = resolve_image_prompt(resolved, job, image)
+            result = save_image_prompt(resolved, principal, snapshot, f'{job_id}-{image_id}')
+            if snapshot.get('kind') == 'compiled':
+                image.final_prompt = snapshot['positive']
+                image.negative_prompt = snapshot.get('negative', '')
+                image.prompt_stage = snapshot['stage']
+        except RepositoryError as exc:
+            _raise_management_error(exc)
+        app.state.remote_jobs.mark_liked(job_id, image.prompt_id, principal)
+        return result
+
+    @app.get('/api/v1/lite/jobs/{job_id}/images/{image_id}/prompt', tags=['lite'])
+    def lite_job_image_prompt(job_id: str, image_id: str,
+                             principal: Annotated[AuthPrincipal, Depends(require_reader)]):
+        job = app.state.remote_jobs.get(job_id, principal)
+        image = next((item for item in job.images if item.id == image_id), None) if job else None
+        if image is None:
+            raise HTTPException(status_code=404, detail='image not found')
+        try:
+            from .image_prompts import resolve_image_prompt
+            return resolve_image_prompt(resolved, job, image)
+        except (RepositoryError, OSError, ValueError) as exc:
+            raise HTTPException(status_code=409, detail='无法核对任务提示词：' + str(exc)) from exc
 
     @app.get(
         "/api/v1/workstation/status",
@@ -933,13 +1109,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         source: str = Query(default="", max_length=16),
         safety: str = Query(default="", max_length=8),
         query: str = Query(default="", max_length=500),
+        custom_groups: str = Query(default="", max_length=1040),
         enabled: bool | None = None,
         page: int = Query(default=1, ge=1),
         page_size: int = Query(default=20, ge=1, le=200),
     ) -> PromptPage:
         try:
+            selected_groups = validate_selected_groups(resolved, custom_groups.split(',') if custom_groups else [])
+        except RepositoryError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        try:
             result = list_prompts(
                 resolved.prompt_pool_path,
+                custom_groups=selected_groups,
                 source=source,
                 safety=safety,
                 query=query,
@@ -954,6 +1136,30 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return result
 
     @app.get(
+        "/api/v1/prompts/groups", tags=["prompts"],
+        dependencies=[Depends(require_admin)],
+    )
+    def prompt_groups_get() -> dict[str, Any]:
+        try:
+            return read_groups(resolved)
+        except RepositoryError as exc:
+            _raise_management_error(exc)
+
+    @app.put(
+        "/api/v1/prompts/groups", tags=["prompts"],
+        dependencies=[Depends(require_admin)],
+    )
+    def prompt_groups_put(
+        payload: PromptGroupsWrite,
+        if_match: Annotated[str | None, Header(alias="If-Match")] = None,
+        device_name: Annotated[str | None, Header(alias="X-Device-Name")] = None,
+    ) -> dict[str, Any]:
+        try:
+            return write_groups(resolved, payload, _expected_revision(if_match), _actor(device_name))
+        except RepositoryError as exc:
+            _raise_management_error(exc)
+
+    @app.get(
         "/api/v1/prompts/export",
         tags=["prompts"],
         dependencies=[Depends(require_admin)],
@@ -963,13 +1169,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         source: str = Query(default="", max_length=16),
         safety: str = Query(default="", max_length=8),
         query: str = Query(default="", max_length=500),
+        custom_groups: str = Query(default="", max_length=1040),
     ) -> dict[str, Any]:
+        try:
+            selected_groups = validate_selected_groups(resolved, custom_groups.split(',') if custom_groups else [])
+        except RepositoryError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
         try:
             payload = export_prompts(
                 resolved.prompt_pool_path,
                 source=source,
                 safety=safety,
                 query=query,
+                custom_groups=selected_groups,
             )
         except RepositoryError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc

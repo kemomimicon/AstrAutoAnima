@@ -67,7 +67,7 @@ class DownloadTests(unittest.TestCase):
                               DownloadNetwork('proxy', proxy='http://127.0.0.1:7890'))
         args = spawn.call_args.args[0]
         self.assertEqual(args[1], '--disable')
-        self.assertEqual(args[args.index('--retry') + 1], '2')
+        self.assertEqual(args[args.index('--retry') + 1], '0')  # Python owns bounded retries and resume offset.
         self.assertEqual(args[args.index('--proto-redir') + 1], '=https')
         self.assertEqual(args[args.index('--proxy') + 1], 'http://127.0.0.1:7890')
         for forbidden in ('-k', '--insecure', '--ssl-no-revoke', '--ssl-revoke-best-effort', '--location-trusted'):
@@ -103,7 +103,9 @@ class DownloadTests(unittest.TestCase):
                 with self.assertRaisesRegex(InstallError, 'SHA256'):
                     download_file('https://example.invalid/file', target, lambda _: None, expected_sha256=HASH)
             self.assertFalse(target.exists())
-            self.assertEqual(target.with_name('model.part').read_bytes(), b'wrong')
+            rejected = list(target.parent.glob('model.part.rejected.*'))
+            self.assertEqual(len(rejected), 2)
+            self.assertTrue(all(path.read_bytes() == b'wrong' for path in rejected))
 
     def test_complete_partial_and_final_skip_curl_even_local(self):
         with tempfile.TemporaryDirectory() as directory:

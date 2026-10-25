@@ -1,5 +1,6 @@
 {
   "schema": 1,
+  "public_display_version": "0.5.2-1.44",
   "candidate": "AAA-0.5.2-beta.1-build44-AutoDL-20261024",
   "baseline_software": "0.5.2-beta.1/build44",
   "deployment_revision": "entryfix.1",

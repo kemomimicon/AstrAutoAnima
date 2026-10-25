@@ -83,7 +83,7 @@ void main() {
     await tester.scrollUntilVisible(
         find.text('/workspace/ComfyUI/output/AAA-RandomStyle'), 250,
         scrollable: find.byType(Scrollable).first, maxScrolls: 30);
-    expect(find.text('5 张 · 1.0 MiB'), findsOneWidget);
+    expect(find.text('5 个文件 · 1.0 MiB'), findsOneWidget);
     expect(find.text('清理'), findsOneWidget);
   });
 }

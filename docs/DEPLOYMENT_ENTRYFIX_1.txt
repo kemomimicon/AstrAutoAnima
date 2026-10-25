@@ -1,0 +1,9 @@
+build44 entryfix.1 · 仅修复部署入口顺序
+
+修复命令行先执行main、后定义local_hq_workflow/configure_local导致第7步失败。
+主入口现在位于全部定义之后；合并生成器同步修复，并加入直接CLI与顺序回归测试。
+正常使用Deploy-Linux.sh/Deploy-Windows.cmd，无需临时import兼容命令。
+模型、词库、密钥、客户端二进制、工作流、采样参数均未修改。
+修订只针对部署器，不代表AutoDL/GPU/QQ全链路已经实测通过。
+模型下载可自选modelscope；GitHub克隆与AM下载链路需分别配置，不保证自动加速。
+原build44校验值不适用于本修订包；只使用随包新校验清单。

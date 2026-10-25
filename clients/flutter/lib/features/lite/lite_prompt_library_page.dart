@@ -3,7 +3,9 @@ import 'package:flutter/material.dart';
 
 import '../../core/hub_api.dart';
 import '../../core/models.dart';
+import '../../core/prompt_catalog.dart';
 import 'lite_prompt_details_dialog.dart';
+import '../prompts/prompt_group_selector.dart';
 
 class LitePromptLibraryPage extends StatefulWidget {
   const LitePromptLibraryPage({required this.api, super.key});
@@ -18,17 +20,50 @@ class _LitePromptLibraryPageState extends State<LitePromptLibraryPage> {
   final _queryController = TextEditingController();
   String _source = '';
   String _safety = '';
+  String _customGroup = '';
+  int _groupsRevision = 0;
   int _page = 1;
   late Future<PromptPageResult> _future = _load();
+  Map<String, dynamic>? _catalog;
+  @override
+  void initState() {
+    super.initState();
+    _loadCatalog();
+  }
+
+  @override
+  void didUpdateWidget(covariant LitePromptLibraryPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.api != widget.api) {
+      _catalog = null;
+      _source = _safety = _customGroup = '';
+      _queryController.clear();
+      _page = 1;
+      _future = _load();
+      _loadCatalog();
+    }
+  }
+
+  Future<void> _loadCatalog() async {
+    final api = widget.api;
+    try {
+      final catalog = await api.getPromptCatalog();
+      if (mounted && widget.api == api) setState(() => _catalog = catalog);
+    } catch (_) {
+      // Keep the current filter and the user's text. Server still validates all reads.
+    }
+  }
 
   Future<PromptPageResult> _load() => widget.api.getLitePrompts(
         source: _source,
         safety: _safety,
         query: _queryController.text.trim(),
+        customGroups: _customGroup.isEmpty ? const [] : [_customGroup],
         page: _page,
       );
 
   void _refresh({int? page}) {
+    _loadCatalog();
     setState(() {
       _page = page ?? 1;
       _future = _load();
@@ -89,14 +124,23 @@ class _LitePromptLibraryPageState extends State<LitePromptLibraryPage> {
                     child: DropdownButtonFormField<String>(
                       initialValue: _source,
                       decoration: const InputDecoration(labelText: '来源'),
-                      items: ['', 'B', 'G', 'D', 'C', 'R', 'P']
-                          .map((value) => DropdownMenuItem(
-                              value: value,
-                              child: Text(value.isEmpty
-                                  ? '全部'
-                                  : value == 'P'
-                                      ? '个人收藏'
-                                      : value)))
+                      key: ValueKey('$_source-${_catalog?['revision']}'),
+                      isExpanded: true,
+                      items: {
+                        '': '全部',
+                        for (final row in catalogRows(_catalog))
+                          if (row['browseable'] == true)
+                            '${row['id']}': '${row['name']}',
+                        if (_source.isNotEmpty &&
+                            !catalogRows(_catalog)
+                                .any((r) => r['id'] == _source))
+                          _source: '$_source（已选来源）',
+                      }
+                          .entries
+                          .map((row) => DropdownMenuItem(
+                              value: row.key,
+                              child: Text(row.value,
+                                  overflow: TextOverflow.ellipsis)))
                           .toList(),
                       onChanged: (value) {
                         _source = value ?? '';
@@ -121,9 +165,22 @@ class _LitePromptLibraryPageState extends State<LitePromptLibraryPage> {
                     ),
                   ),
                   FilledButton.tonalIcon(
-                      onPressed: _refresh,
+                      onPressed: () {
+                        _groupsRevision++;
+                        _refresh();
+                      },
                       icon: const CourtyardIcon(Icons.search),
                       label: const Text('查询')),
+                  SizedBox(
+                      width: 320,
+                      child: PromptGroupSelector(
+                          api: widget.api,
+                          value: _customGroup,
+                          revision: _groupsRevision,
+                          onChanged: (value) {
+                            _customGroup = value;
+                            _refresh();
+                          })),
                 ],
               ),
             ),
@@ -147,8 +204,8 @@ class _LitePromptLibraryPageState extends State<LitePromptLibraryPage> {
                 child: ListTile(
                   onTap: () => showLitePromptDetailsDialog(context, item),
                   title: Text(item.name.isEmpty
-                      ? item.id
-                      : '${item.id} · ${item.name}'),
+                      ? (item.originalId.isEmpty ? item.id : item.originalId)
+                      : '${item.originalId.isEmpty ? item.id : item.originalId} · ${item.name}'),
                   subtitle: Text(item.prompt,
                       maxLines: 3, overflow: TextOverflow.ellipsis),
                   trailing: Wrap(
@@ -156,7 +213,9 @@ class _LitePromptLibraryPageState extends State<LitePromptLibraryPage> {
                     crossAxisAlignment: WrapCrossAlignment.center,
                     children: [
                       Chip(
-                          label: Text('${item.sourceCode}/${item.safetyCode}')),
+                          label: Text(item.isUnreviewedOfflineScene
+                              ? '${item.sourceCode} · 未审核'
+                              : '${item.sourceCode}/${item.safetyCode}')),
                       IconButton(
                           tooltip: item.sourceCode == 'P' ? '取消收藏' : '点赞收藏',
                           onPressed: () => _favorite(item),

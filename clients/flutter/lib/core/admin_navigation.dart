@@ -16,25 +16,33 @@ const adminDestinations = [
   AdminDestination('characters', 'resources'),
   AdminDestination('reports', 'management'),
   AdminDestination('storage', 'management'),
+  AdminDestination('chatGroups', 'management'),
 ];
 
 class AdminNavigation {
-  AdminNavigation({this.includeStoragePreview = false});
+  AdminNavigation(
+      {this.includeStoragePreview = false, this.includeChatGroups = false});
   final bool includeStoragePreview;
+  bool includeChatGroups;
   String selectedId = 'instances';
   String _lastMainId = 'instances';
   String group = 'main';
   int get page => adminDestinations.indexWhere((d) => d.id == selectedId);
 
-  static List<int> indicesFor(String group, {bool includeStorage = true}) => [
+  static List<int> indicesFor(String group,
+          {bool includeStorage = true, bool includeChatGroups = false}) =>
+      [
         for (var i = 0; i < adminDestinations.length; i++)
           if (adminDestinations[i].group == group &&
-              (includeStorage || adminDestinations[i].id != 'storage'))
+              (includeStorage || adminDestinations[i].id != 'storage') &&
+              (includeChatGroups || adminDestinations[i].id != 'chatGroups'))
             i,
       ];
 
   List<int> get entries => [
-        ...indicesFor(group, includeStorage: includeStoragePreview),
+        ...indicesFor(group,
+            includeStorage: includeStoragePreview,
+            includeChatGroups: includeChatGroups),
         if (group == 'main') ...[-2, -3] else -1,
       ];
 

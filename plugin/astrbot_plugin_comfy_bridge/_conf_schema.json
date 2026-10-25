@@ -152,7 +152,7 @@
     "description": "SeedVR2 放大 API 工作流 JSON 路径",
     "type": "string",
     "default": "",
-    "hint": "用于 /arefine seedvr2；需要 SeedVR2 VideoUpscaler 与 SeedVR2 Tiling Upscaler 节点和对应模型。"
+    "hint": "需要原生 SeedVR2 VideoUpscaler 与匹配模型。公共模板关闭图像及 VAE 分块；显存不足时降低目标尺寸，不自动启用分块。"
   },
   "detail_repair_workflow_path": {
     "description": "手、脚、脸局部修复 API 工作流 JSON 路径",
@@ -579,7 +579,7 @@
     "description": "画风 LoRA 槽位节点 ID",
     "type": "string",
     "default": "46,47,48,49",
-    "hint": "已有 LoRA 槽位时按实际连接顺序填写，以英文逗号分隔。无 LoRA 节点的 Quick 使用 dynamic 时可留空，自动从采样器 MODEL 和提示词 CLIP 接入；fixed 必须配置真实槽位。"
+    "hint": "只有工作流确实包含旧 LoRA 槽位时才填写实际节点 ID；无 LoraLoader 的 Quick 工作流请留空并使用 dynamic。不要将 46,47,48,49 直接填入 Quick 工作流。"
   },
   "style_lora_mode": {
     "description": "画风 LoRA 加载模式",
@@ -735,14 +735,14 @@
   "output_cleanup_enabled": {
     "description": "自动清理插件结果图片",
     "type": "bool",
-    "default": true,
+    "default": false,
     "hint": "只清理插件 output_dir 中过期的常见图片，不处理 ComfyUI/output。"
   },
   "output_retention_hours": {
     "description": "插件结果图片保留小时数",
     "type": "float",
     "default": 48.0,
-    "hint": "依据文件最后修改时间判断，最小值为 1 小时。"
+    "hint": "依据文件最后修改时间判断，最小值为 48 小时（2 天）；旧值不足两天时也按两天执行。"
   },
   "output_cleanup_interval_minutes": {
     "description": "插件图片自动清理间隔（分钟）",

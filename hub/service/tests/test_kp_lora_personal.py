@@ -14,6 +14,7 @@ from astr_auto_anima_hub.personal_styles import (
     write_personal_style,
 )
 from astr_auto_anima_hub.prompt_likes import promote_k_prompt
+from astr_auto_anima_hub.prompt_favorites import list_favorites
 from astr_auto_anima_hub.remote_jobs import (
     RemoteJobError,
     _prompt_ids_from_plain,
@@ -108,9 +109,10 @@ class KpLoraPersonalTests(unittest.TestCase):
         self.assertEqual(first.action, "liked")
         self.assertEqual(second.action, "already_liked")
         pool = json.loads(self.settings.prompt_pool_path.read_text(encoding="utf-8"))
-        liked = [item for item in pool["prompts"] if item.get("source_code") == "P"]
-        self.assertEqual(len(liked), 1)
-        self.assertEqual(liked[0]["liked_from"], "kp-h01-safe")
+        self.assertFalse(any(item.get("source_code") == "P" for item in pool["prompts"]))
+        liked = list_favorites(self.settings.prompt_favorites_path, self.user)
+        self.assertEqual(liked.total, 1)
+        self.assertEqual(liked.items[0].id, first.saved_prompt_id)
 
     def test_lora_scan_classify_and_personal_three_slot_storage(self) -> None:
         scanned = scan_loras(self.settings, "admin:test")

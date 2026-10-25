@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math';
 import 'package:flutter/foundation.dart';
 
 import 'package:http/http.dart' as http;
@@ -16,12 +17,175 @@ class HubApiException implements Exception {
 }
 
 class HubApi {
+  final Map<String, String> _presetSubmissionIds = {};
+
+  Future<MutationResult> submitPreset(
+      {required String action,
+      required String kind,
+      Map<String, dynamic>? value,
+      PresetSummary? original}) async {
+    final body = <String, dynamic>{
+      'action': action,
+      'kind': kind,
+      'original_name': original?.name ?? '',
+      'value': value,
+      'expected': original == null
+          ? null
+          : {
+              'name': original.name,
+              'kind': original.kind,
+              'prompt': original.prompt,
+              'match': original.match,
+              'loras': original.loras,
+              'text_only': original.textOnly,
+              'variants': original.variants,
+            },
+    };
+    final key = jsonEncode(body);
+    final id = _presetSubmissionIds.putIfAbsent(
+        key,
+        () => List.generate(
+            16,
+            (_) => Random.secure()
+                .nextInt(256)
+                .toRadixString(16)
+                .padLeft(2, '0')).join());
+    body['request_id'] = id;
+    var state = await _post('/api/v1/admin/preset-submissions', body: body);
+    for (var attempt = 0; attempt < 30; attempt++) {
+      if (state['status'] == 'succeeded') {
+        catalogChanges.value++;
+        return MutationResult.fromJson(
+            Map<String, dynamic>.from(state['result'] as Map));
+      }
+      if (state['status'] == 'conflict' || state['status'] == 'failed') {
+        throw HubApiException('${state['message']}（提交 $id）', statusCode: 409);
+      }
+      await Future<void>.delayed(const Duration(seconds: 1));
+      state = await _get('/api/v1/admin/preset-submissions/$id');
+    }
+    throw HubApiException('提交已保留在服务器队列（$id），尚未确认完成；不要重写内容，再点保存将查询同一提交。');
+  }
+
+  Future<Map<String, dynamic>> openStudioSession() =>
+      _post('/api/v1/admin/extensions/anima-lora-studio/session', body: {});
+  Future<Map<String, dynamic>> closeStudioSession(String id) => _post(
+      '/api/v1/admin/extensions/anima-lora-studio/sessions/${Uri.encodeComponent(id)}/close',
+      body: {});
+  Future<Map<String, dynamic>> extensions() => _get('/api/v1/admin/extensions');
+  Future<Map<String, dynamic>> extensionStatus(String id) =>
+      _get('/api/v1/admin/extensions/${Uri.encodeComponent(id)}/status');
+  Future<Map<String, dynamic>> autoSleep() => _get('/api/v1/admin/auto-sleep');
+  Future<Map<String, dynamic>> setIdleCredentials(
+          Map<String, dynamic> values) =>
+      _post('/api/v1/admin/auto-sleep/credentials', body: values);
+  Future<Map<String, dynamic>> setAutoSleep(bool enabled, String instanceId) =>
+      _post('/api/v1/admin/auto-sleep', body: {
+        'enabled': enabled,
+        'confirmed': true,
+        'instance_id': instanceId,
+      });
   final ValueNotifier<int> catalogChanges = ValueNotifier(0);
-  HubApi({required String baseUrl, required this.token})
-      : baseUrl = baseUrl.replaceAll(RegExp(r'/+$'), '');
+  Map<String, dynamic>? _promptCatalog;
+  String? _promptCatalogEtag;
+  Future<Map<String, dynamic>>? _promptCatalogPending;
+
+  /// Per connection/token cache. Revalidate on demand; never run a polling timer.
+  Future<Map<String, dynamic>> getPromptCatalog() =>
+      _promptCatalogPending ??= _readPromptCatalog().whenComplete(() {
+        _promptCatalogPending = null;
+      });
+
+  Future<Map<String, dynamic>> _readPromptCatalog() async {
+    _requireActive();
+    final response = await _client.get(
+      Uri.parse('$baseUrl/api/v1/lite/prompt-catalog'),
+      headers: {
+        ..._headers,
+        if (_promptCatalogEtag != null) 'If-None-Match': _promptCatalogEtag!
+      },
+    ).timeout(const Duration(seconds: 12));
+    _requireActive();
+    if (response.statusCode == 304 && _promptCatalog != null) {
+      return Map<String, dynamic>.from(_promptCatalog!);
+    }
+    if (response.statusCode == 404) {
+      // Old servers can still use their default source. Do not invent private libraries.
+      return {
+        'legacy': true,
+        'sources': <dynamic>[],
+        'editable_sources': <dynamic>[]
+      };
+    }
+    if (response.statusCode != 200) {
+      throw HubApiException('读取服务器词库配置失败（${response.statusCode}）',
+          statusCode: response.statusCode);
+    }
+    final data = jsonDecode(utf8.decode(response.bodyBytes));
+    if (data is! Map ||
+        data['schema_version'] != 1 ||
+        data['sources'] is! List) {
+      throw const HubApiException('词库协议不兼容，请更新客户端；未采用其他实例的配置。');
+    }
+    _promptCatalog = Map<String, dynamic>.from(data);
+    _promptCatalogEtag = response.headers['etag'];
+    return Map<String, dynamic>.from(_promptCatalog!);
+  }
+
+  Future<Map<String, dynamic>> savePromptCatalog({
+    required String revision,
+    required List<Map<String, dynamic>> sources,
+  }) async {
+    final result = await _write('PUT', '/api/v1/admin/prompt-catalog',
+        revision: revision, body: {'sources': sources});
+    catalogChanges.value++;
+    return result;
+  }
+
+  HubApi({required String baseUrl, required this.token, http.Client? client})
+      : baseUrl = baseUrl.replaceAll(RegExp(r'/+$'), ''),
+        _client = client ?? http.Client();
 
   final String baseUrl;
   final String token;
+  final http.Client _client;
+  final String _imageCacheScope = List.generate(16,
+          (_) => Random.secure().nextInt(256).toRadixString(16).padLeft(2, '0'))
+      .join();
+  bool _disposed = false;
+  bool get isDisposed => _disposed;
+  void dispose() {
+    if (_disposed) return;
+    _disposed = true;
+    _client.close();
+    // Existing child widgets remove listeners during their own disposal.
+    // Do not notify stale catalog consumers when an old request finishes.
+  }
+
+  void _requireActive() {
+    if (_disposed) throw const HubApiException('连接已切换，已停止旧实例请求。');
+  }
+
+  Future<Map<String, dynamic>> capabilities() => _get('/api/v1/capabilities');
+  Future<Map<String, dynamic>> chatGroups() =>
+      _get('/api/v1/admin/chat-groups');
+  Future<Map<String, dynamic>> setChatGroupsEnabled(bool enabled) =>
+      _write('PUT', '/api/v1/admin/chat-groups/config',
+          revision: '', body: {'enabled': enabled});
+  Future<
+      Map<String,
+          dynamic>> saveChatGroup(Map<String, dynamic> value) => _write('PUT',
+      '/api/v1/admin/chat-groups/groups/${Uri.encodeComponent(value['key'] as String)}',
+      revision: '', body: value);
+  Future<Map<String, dynamic>> saveChatGroupUser(Map<String, dynamic> value) =>
+      _write('PUT', '/api/v1/admin/chat-groups/users',
+          revision: '', body: value);
+  Future<
+      Map<String,
+          dynamic>> deleteChatGroupUser(String key, String user) => _write(
+      'DELETE',
+      '/api/v1/admin/chat-groups/users?group_key=${Uri.encodeComponent(key)}&qq=${Uri.encodeComponent(user)}&confirmed=true',
+      revision: '');
   Future<Map<String, dynamic>> imageStorage() => _get('/api/v1/admin/storage');
   Future<Map<String, dynamic>> storageAction(
           String action, Map<String, dynamic> value) =>
@@ -38,9 +202,11 @@ class HubApi {
         if (slotIndex != null) 'slot_index': slotIndex
       });
   Future<Uint8List> galleryImage(String id) async {
-    final response = await http
+    _requireActive();
+    final response = await _client
         .get(Uri.parse('$baseUrl/api/v1/gallery/images/$id'), headers: _headers)
         .timeout(const Duration(seconds: 30));
+    _requireActive();
     if (response.statusCode != 200) throw const HubApiException('预览不可用或审核未通过');
     return response.bodyBytes;
   }
@@ -103,6 +269,20 @@ class HubApi {
     return '$baseUrl${path.startsWith('/') ? path : '/$path'}';
   }
 
+  String resolveImageUrl(String path) {
+    _requireActive();
+    if (!path.startsWith('/api/v1/')) {
+      throw const HubApiException('拒绝向外部图片地址发送当前连接的令牌');
+    }
+    final uri = Uri.parse(resolveUrl(path));
+    // NetworkImage equality omits Authorization headers. Partition its cache
+    // by a random, non-secret session ID, even when the Hub URL stays the same.
+    return uri.replace(queryParameters: {
+      ...uri.queryParameters,
+      '_client_image_scope': _imageCacheScope,
+    }).toString();
+  }
+
   Map<String, String> get _headers => {
         'Accept': 'application/json',
         if (token.isNotEmpty) 'Authorization': 'Bearer $token',
@@ -112,16 +292,19 @@ class HubApi {
     String path, {
     Map<String, String>? query,
     bool authenticated = true,
+    Duration timeout = const Duration(seconds: 8),
   }) async {
+    _requireActive();
     final uri = Uri.parse('$baseUrl$path').replace(queryParameters: query);
     late final http.Response response;
     try {
-      response = await http
+      response = await _client
           .get(uri, headers: authenticated ? _headers : const {})
-          .timeout(const Duration(seconds: 8));
+          .timeout(timeout);
     } on Exception catch (error) {
       throw HubApiException('无法连接工作站：$error');
     }
+    _requireActive();
     dynamic payload;
     try {
       payload = jsonDecode(utf8.decode(response.bodyBytes));
@@ -150,6 +333,7 @@ class HubApi {
     required String revision,
     Map<String, dynamic>? body,
   }) async {
+    _requireActive();
     final request = http.Request(method, Uri.parse('$baseUrl$path'));
     request.headers.addAll({
       ..._headers,
@@ -161,11 +345,12 @@ class HubApi {
     late final http.Response response;
     try {
       response = await http.Response.fromStream(
-        await request.send().timeout(const Duration(seconds: 30)),
+        await _client.send(request).timeout(const Duration(seconds: 30)),
       );
     } on Exception catch (error) {
       throw HubApiException('无法连接工作站：$error');
     }
+    _requireActive();
     dynamic payload;
     try {
       payload = jsonDecode(utf8.decode(response.bodyBytes));
@@ -186,7 +371,8 @@ class HubApi {
     }
     if (path.contains('/presets') ||
         path.contains('/personal-styles') ||
-        path.contains('/character-favorites')) {
+        path.contains('/character-favorites') ||
+        path == '/api/v1/prompts/groups') {
       catalogChanges.value++;
     }
     return Map<String, dynamic>.from(payload as Map);
@@ -196,9 +382,10 @@ class HubApi {
     String path, {
     required Map<String, dynamic> body,
   }) async {
+    _requireActive();
     late final http.Response response;
     try {
-      response = await http
+      response = await _client
           .post(
             Uri.parse('$baseUrl$path'),
             headers: {
@@ -211,6 +398,7 @@ class HubApi {
     } on Exception catch (error) {
       throw HubApiException('无法连接工作站：$error');
     }
+    _requireActive();
     dynamic payload;
     try {
       payload = jsonDecode(utf8.decode(response.bodyBytes));
@@ -232,6 +420,11 @@ class HubApi {
 
   Future<void> checkHealth() async {
     await _get('/api/v1/health', authenticated: false);
+  }
+
+  Future<String> getExecutionMode() async {
+    final health = await _get('/api/v1/health', authenticated: false);
+    return health['execution_mode'] as String? ?? 'remote';
   }
 
   Future<WorkstationStatus> getWorkstationStatus() async {
@@ -349,6 +542,7 @@ class HubApi {
     String source = '',
     String safety = '',
     String query = '',
+    List<String> customGroups = const [],
     bool? enabled,
     int page = 1,
     int pageSize = 30,
@@ -360,6 +554,7 @@ class HubApi {
           if (source.isNotEmpty) 'source': source,
           if (safety.isNotEmpty) 'safety': safety,
           if (query.isNotEmpty) 'query': query,
+          if (customGroups.isNotEmpty) 'custom_groups': customGroups.join(','),
           if (enabled != null) 'enabled': '$enabled',
           'page': '$page',
           'page_size': '$pageSize',
@@ -367,6 +562,32 @@ class HubApi {
       ),
     );
   }
+
+  Future<Map<String, dynamic>> getPromptGroups() =>
+      _get('/api/v1/prompts/groups');
+
+  Future<Map<String, dynamic>> getLitePromptGroups() =>
+      _get('/api/v1/lite/prompt-groups');
+
+  Future<Map<String, dynamic>> getLocalCapabilities() =>
+      _get('/api/v1/lite/local-capabilities');
+
+  Future<Map<String, dynamic>> getPlatformSwitchboard() =>
+      _get('/api/v1/admin/platform-switchboard');
+
+  Future<Map<String, dynamic>> savePlatformSwitchboard({
+    required String revision,
+    required Map<String, bool> acceptNew,
+  }) =>
+      _write('PUT', '/api/v1/admin/platform-switchboard',
+          revision: revision, body: acceptNew);
+
+  Future<Map<String, dynamic>> savePromptGroups({
+    required String revision,
+    required List<Map<String, dynamic>> groups,
+  }) =>
+      _write('PUT', '/api/v1/prompts/groups',
+          revision: revision, body: {'groups': groups});
 
   Future<PresetListResult> getPresets() async {
     return PresetListResult.fromJson(await _get('/api/v1/presets'));
@@ -453,6 +674,7 @@ class HubApi {
     String source = '',
     String safety = '',
     String query = '',
+    List<String> customGroups = const [],
     int page = 1,
     int pageSize = 30,
   }) async {
@@ -463,6 +685,7 @@ class HubApi {
           if (source.isNotEmpty) 'source': source,
           if (safety.isNotEmpty) 'safety': safety,
           if (query.isNotEmpty) 'query': query,
+          if (customGroups.isNotEmpty) 'custom_groups': customGroups.join(','),
           'page': '$page',
           'page_size': '$pageSize',
         },
@@ -486,7 +709,8 @@ class HubApi {
 
   Future<RemoteJobResult> getRemoteJob(String id) async {
     return RemoteJobResult.fromJson(
-      await _get('/api/v1/lite/jobs/${Uri.encodeComponent(id)}'),
+      await _get('/api/v1/lite/jobs/${Uri.encodeComponent(id)}',
+          timeout: const Duration(seconds: 20)),
     );
   }
 
@@ -505,6 +729,7 @@ class HubApi {
     return RemoteJobPageResult.fromJson(
       await _get(
         '/api/v1/lite/jobs',
+        timeout: const Duration(seconds: 20),
         query: {
           if (kind.isNotEmpty) 'kind': kind,
           if (status.isNotEmpty) 'status': status,
@@ -526,6 +751,21 @@ class HubApi {
       ),
     );
   }
+
+  Future<PromptLikeResult> favoriteJobImage({
+    required String jobId,
+    required String imageId,
+  }) async {
+    return PromptLikeResult.fromJson(await _post(
+      '/api/v1/lite/jobs/${Uri.encodeComponent(jobId)}/images/${Uri.encodeComponent(imageId)}/favorite',
+      body: const {},
+    ));
+  }
+
+  Future<
+      Map<String,
+          dynamic>> getImagePrompt(String jobId, String imageId) => _get(
+      '/api/v1/lite/jobs/${Uri.encodeComponent(jobId)}/images/${Uri.encodeComponent(imageId)}/prompt');
 
   Future<LoraCatalogResult> getLoraCatalog() async {
     return LoraCatalogResult.fromJson(await _get('/api/v1/admin/loras'));
@@ -601,17 +841,19 @@ class HubApi {
   }
 
   Future<Uint8List> downloadJobImage(RemoteJobImage image) async {
+    _requireActive();
     if (!image.downloadUrl.startsWith('/api/v1/lite/jobs/')) {
       throw const HubApiException('工作站返回了不安全的图片下载地址');
     }
     late final http.Response response;
     try {
-      response = await http
+      response = await _client
           .get(Uri.parse(resolveUrl(image.downloadUrl)), headers: _headers)
           .timeout(const Duration(minutes: 3));
     } on Exception catch (error) {
       throw HubApiException('图片下载失败：$error');
     }
+    _requireActive();
     if (response.statusCode < 200 || response.statusCode >= 300) {
       throw HubApiException(
         '图片下载失败（HTTP ${response.statusCode}）',
@@ -676,6 +918,7 @@ class HubApi {
     String source = '',
     String safety = '',
     String query = '',
+    List<String> customGroups = const [],
   }) async {
     final payload = await _get(
       '/api/v1/prompts/export',
@@ -683,6 +926,7 @@ class HubApi {
         if (source.isNotEmpty) 'source': source,
         if (safety.isNotEmpty) 'safety': safety,
         if (query.isNotEmpty) 'query': query,
+        if (customGroups.isNotEmpty) 'custom_groups': customGroups.join(','),
       },
     );
     return const JsonEncoder.withIndent('  ').convert(payload);

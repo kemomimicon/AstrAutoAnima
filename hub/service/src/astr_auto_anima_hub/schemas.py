@@ -10,6 +10,7 @@ class HealthResponse(BaseModel):
     service: str = "astr-auto-anima-hub"
     version: str
     status: Literal["ok"] = "ok"
+    execution_mode: Literal["remote", "local"] = "remote"
     timestamp: datetime
 
 
@@ -125,6 +126,8 @@ class SyncRevisionsResponse(BaseModel):
 
 class PromptRecord(BaseModel):
     id: str
+    original_id: str = ""
+    user_addition: str = ""
     name: str = ""
     prompt: str
     source_code: str
@@ -132,6 +135,7 @@ class PromptRecord(BaseModel):
     enabled: bool = True
     weight: int = 1
     categories: list[str] = Field(default_factory=list)
+    custom_groups: list[str] = Field(default_factory=list)
 
 
 class PromptPage(BaseModel):
@@ -216,7 +220,16 @@ class RemoteJobCreateRequest(BaseModel):
     target_id: str = Field(min_length=1, max_length=80)
     kind: Literal["direct", "chinese", "reverse", "random", "chaos", "hq", "refine", "remake", "multi"]
     five_draw: bool = False
+    random_subject_tag: Literal["", "1girl", "1boy", "1woman", "1man", "none"] = ""
     pool_filter: str = Field(default="", max_length=32)
+    custom_groups: list[str] = Field(default_factory=list, max_length=16)
+
+    @field_validator('custom_groups')
+    @classmethod
+    def valid_custom_groups(cls, value):
+        from .prompt_group_ids import normalize_group_ids
+        return normalize_group_ids(value)
+
     character: str = Field(default="", max_length=200)
     character_tag_mode: Literal["weak", "strong", "off"] = "weak"
     character_variant: str = Field(default="", max_length=64, pattern=r"^[A-Za-z0-9_-]*$")
@@ -266,8 +279,14 @@ class RemoteJobCreateRequest(BaseModel):
 
 
 class RemoteJobImage(BaseModel):
+    final_prompt: str = Field(default="", max_length=100_000)
+    negative_prompt: str = Field(default="", max_length=100_000)
+    prompt_stage: str = Field(default="", max_length=300)
     task_suite_index: int = Field(default=0, ge=0, le=20)
+    source_safety_code: Literal["", "N", "H", "S"] = ""
     prompt_id: str = Field(default="", max_length=300)
+    source_prompt: str = Field(default="", max_length=100_000)
+    user_addition: str = Field(default="", max_length=100_000)
     id: str = Field(min_length=1, max_length=80, pattern=r"^[A-Za-z0-9_.-]+$")
     filename: str = Field(min_length=1, max_length=255)
     content_type: str = Field(default="image/png", max_length=120)
@@ -277,6 +296,11 @@ class RemoteJobImage(BaseModel):
 
 
 class RemoteJobResponse(BaseModel):
+    # Small source snapshot, never the external catalog or a filesystem path.
+    prompt_provenance: dict[str, Any] = Field(default_factory=dict)
+    source_prompt: str = ""
+    converted_prompt: str = ""
+    final_prompt: str = ""
     task_suite_id: str = ''
     task_suite_name: str = ''
     task_suite_rows: list[dict[str, Any]] = Field(default_factory=list)
@@ -291,9 +315,12 @@ class RemoteJobResponse(BaseModel):
     target_label: str
     command_preview: str
     message: str = ""
+    delivery_status: Literal["not_requested", "pending", "sent", "failed"] = "not_requested"
+    delivery_error: str = Field(default="", max_length=300)
     images: list[RemoteJobImage] = Field(default_factory=list, max_length=20)
     prompt_ids: list[str] = Field(default_factory=list, max_length=20)
     liked_prompt_ids: list[str] = Field(default_factory=list, max_length=20)
+    liked_image_ids: list[str] = Field(default_factory=list, max_length=20)
     created_at: datetime
     updated_at: datetime
 
@@ -319,6 +346,7 @@ class PromptCreateRequest(BaseModel):
     enabled: bool = True
     weight: int = Field(default=1, ge=1, le=100)
     categories: list[str] = Field(default_factory=list, max_length=64)
+    custom_groups: list[str] = Field(default_factory=list, max_length=16)
 
 
 class PromptUpdateRequest(BaseModel):
@@ -329,6 +357,7 @@ class PromptUpdateRequest(BaseModel):
     enabled: bool | None = None
     weight: int | None = Field(default=None, ge=1, le=100)
     categories: list[str] | None = Field(default=None, max_length=64)
+    custom_groups: list[str] | None = Field(default=None, max_length=16)
 
 
 class PromptImportRequest(BaseModel):

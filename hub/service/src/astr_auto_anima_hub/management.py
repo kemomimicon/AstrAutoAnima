@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from .config import Settings
+from .prompt_groups import read_groups
 from .repositories import RepositoryError, read_json_object
 from .schemas import (
     MutationResponse,
@@ -20,6 +21,7 @@ from .storage import (
     SOURCE_NAMES,
     content_hash,
     clean_categories,
+    clean_custom_groups,
     move_to_trash,
     mutate_json,
     new_prompt_id,
@@ -36,6 +38,15 @@ def _find_prompt(data: dict[str, Any], prompt_id: str) -> dict[str, Any]:
         if isinstance(item, dict) and str(item.get("id", "")).casefold() == folded:
             return item
     raise ResourceNotFound(f"prompt not found: {prompt_id}")
+
+
+def _check_groups(settings: Settings, groups: list[str]) -> None:
+    if not groups:
+        return
+    known = {str(item.get("id", "")) for item in read_groups(settings)["groups"] if isinstance(item, dict)}
+    missing = sorted(set(groups) - known)
+    if missing:
+        raise RepositoryError("unknown custom group: " + ", ".join(missing))
 
 
 def _result(
@@ -62,6 +73,7 @@ def create_prompt(
     actor: str,
 ) -> MutationResponse:
     entry = prompt_entry(payload.model_dump())
+    _check_groups(settings, entry["custom_groups"])
 
     def mutate(data: dict[str, Any]) -> None:
         prompts = data.get("prompts")
@@ -93,6 +105,8 @@ def update_prompt(
     changes = payload.model_dump(exclude_unset=True)
     if not changes:
         raise RepositoryError("at least one prompt field must be supplied")
+    if "custom_groups" in changes:
+        _check_groups(settings, clean_custom_groups(changes["custom_groups"]))
 
     def mutate(data: dict[str, Any]) -> None:
         entry = _find_prompt(data, prompt_id)
@@ -118,6 +132,8 @@ def update_prompt(
             entry["weight"] = int(changes["weight"])
         if "categories" in changes:
             entry["categories"] = clean_categories(changes["categories"])
+        if "custom_groups" in changes:
+            entry["custom_groups"] = clean_custom_groups(changes["custom_groups"])
 
     _, revision, backup = mutate_json(
         path=settings.prompt_pool_path,
@@ -172,16 +188,31 @@ def import_prompts(
     expected_revision: str,
     actor: str,
 ) -> MutationResponse:
-    count = len(payload.prompts)
+    entries = [prompt_entry(item.model_dump(), prompt_id=new_prompt_id("import")) for item in payload.prompts]
+    _check_groups(settings, [group for entry in entries for group in entry["custom_groups"]])
 
-    def mutate(data: dict[str, Any]) -> None:
+    def mutate(data: dict[str, Any]) -> int:
         prompts = data.get("prompts")
         if not isinstance(prompts, list):
             raise RepositoryError("prompt pool must contain a prompts list")
-        for item in payload.prompts:
-            prompts.append(prompt_entry(item.model_dump(), prompt_id=new_prompt_id("import")))
+        def key(item: dict[str, Any]) -> tuple:
+            return (
+                " ".join(str(item.get("prompt", "")).strip().casefold().split()),
+                tuple(sorted(str(v) for v in item.get("custom_groups", []))),
+                str(item.get("source_code", "B")),
+                str(item.get("safety_code", "N")),
+            )
+        seen = {key(item) for item in prompts if isinstance(item, dict)}
+        added = 0
+        for entry in entries:
+            marker = key(entry)
+            if marker not in seen:
+                prompts.append(entry)
+                seen.add(marker)
+                added += 1
+        return added
 
-    _, revision, backup = mutate_json(
+    count, revision, backup = mutate_json(
         path=settings.prompt_pool_path,
         resource="prompts",
         expected_revision=expected_revision,
@@ -189,7 +220,7 @@ def import_prompts(
         audit_path=settings.audit_log_path,
         actor=actor,
         action="import",
-        target=f"{count} prompts",
+        target=f"{len(entries)} prompts",
         mutate=mutate,
     )
     return _result("imported", "prompts", revision, backup, count=count)
@@ -201,7 +232,10 @@ def export_prompts(
     source: str = "",
     safety: str = "",
     query: str = "",
+    custom_groups: list[str] | tuple[str, ...] = (),
 ) -> dict[str, Any]:
+    from .prompt_group_ids import normalize_group_ids
+    selected_groups = set(normalize_group_ids(list(custom_groups)))
     data = read_json_object(path)
     prompts = data.get("prompts")
     if not isinstance(prompts, list):
@@ -212,6 +246,10 @@ def export_prompts(
     selected = []
     for item in prompts:
         if not isinstance(item, dict):
+            continue
+        memberships = item.get('custom_groups', [])
+        if selected_groups and (not isinstance(memberships, list) or
+                not selected_groups.issubset({str(group).strip().casefold() for group in memberships})):
             continue
         if sources and str(item.get("source_code", "B")).upper() not in sources:
             continue
@@ -227,7 +265,8 @@ def export_prompts(
     return {
         "schema_version": 2,
         "exported_at": datetime.now().astimezone().isoformat(timespec="seconds"),
-        "filters": {"source": source, "safety": safety, "query": query},
+        "filters": {"source": source, "safety": safety, "query": query,
+                    "custom_groups": sorted(selected_groups)},
         "count": len(selected),
         "prompts": selected,
     }
@@ -260,8 +299,6 @@ def _preset_value(kind: str, payload: PresetWriteRequest) -> dict[str, Any]:
         if not loras and not prompt:
             raise RepositoryError("a text-only character requires a prompt")
         variants = [item.model_dump() for item in (payload.variants or [])]
-        if variants and not loras:
-            raise RepositoryError("角色造型需要角色 LoRA")
         if len({item["id"] for item in variants}) != len(variants):
             raise RepositoryError("角色造型 ID 不能重复")
         if any(not item["name"].strip() or not item["prompt"].strip(" ,\n\t") for item in variants):
@@ -317,8 +354,6 @@ def write_preset(
             if kind == "character" and payload.variants is None:
                 # Old clients omit the new field: preserve variants on ordinary edits.
                 existing_variants = collection[previous_name].get("variants", [])
-                if existing_variants and not value.get("lora"):
-                    raise RepositoryError("请先显式清空造型再改为文本角色")
                 value["variants"] = existing_variants
             del collection[previous_name]
         collection[name] = value

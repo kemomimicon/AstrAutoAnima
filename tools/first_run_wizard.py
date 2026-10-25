@@ -15,15 +15,27 @@ import webbrowser
 from first_run_config import SetupError, SetupSession, probe_health, target_record, validate_targets, validate_url, read_object
 import first_run_checks as checks
 
+STEP_GUIDES = (
+    '必做：选择 Start.cmd / Start.sh 旁的 runtime-env.json → 读取成功后再继续。找不到文件先看故障恢复，不要新建空配置。',
+    '必做：核对三种凭据，填写 Bot ID 与完整 AstrBot Key → 暂存。401 先核对 Key；不要反复生成 Hub 令牌。',
+    '首图需一个目标：建议先添加自己的 QQ 私聊。填完请点“暂存这个目标”，只输入而未暂存不会保存。',
+    '可稍后：Admin 验收首图无需新增用户；要用 Service 客户端再给自己建独立令牌。原用户不用重建。',
+    '可跳过：普通英文生图不依赖随机词库。导入失败保留原库；导错可只撤销本页，不必重装。',
+    '可跳过：角色词典不是 LoRA；先完成基础生图。导错可撤销本页，重新选正确 JSON。',
+    '必做：刷新预览 → 确认保存 → 领取新用户令牌。修改连接后正常重启 Hub；“Start”不会重启仍在运行的服务。',
+    '验收：检查模型 → 读取目标 → 提交一次 → 查询取图。超时先查任务；只有取回图片才算出图通过。',
+    '后续：先单图，再个人客户端与投递，再词库／角色，最后反推和放大。遇错按症状恢复，不要清空数据。',
+)
+
 
 def launch_gui(smoke: bool = False) -> int:
     import tkinter as tk
     from tkinter import filedialog, messagebox, ttk
 
     root = tk.Tk()
-    root.title('AstrAutoAnima · 首张图向导 1.1')
-    root.geometry('1080x800')
-    root.minsize(920, 700)
+    root.title('AstrAutoAnima · 首张图与恢复向导 1.2 候选版')
+    root.geometry(f'{min(1080, max(920, root.winfo_screenwidth() - 80))}x{min(800, max(600, root.winfo_screenheight() - 100))}')
+    root.minsize(920, 600)
     if smoke:
         root.withdraw()
     state = {'session': None, 'saved': False, 'editing': None, 'busy': False,
@@ -32,14 +44,26 @@ def launch_gui(smoke: bool = False) -> int:
     status = tk.StringVar(value='欢迎。先选择实际安装目录中的配置文件，读取不会修改任何内容。')
     ttk.Label(root, text='把服务配置好，再开始第一张图', font=('Microsoft YaHei UI', 18, 'bold')).pack(anchor='w', padx=22, pady=(16, 4))
     ttk.Label(root, text='无需手写 JSON · 保存前确认 · 自动备份 · 不自动重启或发群消息').pack(anchor='w', padx=22, pady=(0, 10))
+    step_hint = tk.StringVar(value=STEP_GUIDES[0])
+    ttk.Label(root, textvariable=step_hint, wraplength=980, justify='left').pack(fill='x', padx=22, pady=(0, 6))
     notebook = ttk.Notebook(root)
     notebook.pack(fill='both', expand=True, padx=20, pady=6)
     pages = []
+    page_canvases = []
     for title in ('① 安装', '② 授权', '③ 投递', '④ 用户', '⑤ 词库', '⑥ 角色词典', '⑦ 保存', '⑧ 首张图', '⑨ 工具与帮助'):
-        frame = ttk.Frame(notebook, padding=18)
+        tab = ttk.Frame(notebook)
+        canvas = tk.Canvas(tab, highlightthickness=0)
+        scroll = ttk.Scrollbar(tab, orient='vertical', command=canvas.yview)
+        scroll.pack(side='right', fill='y'); canvas.pack(side='left', fill='both', expand=True)
+        canvas.configure(yscrollcommand=scroll.set)
+        frame = ttk.Frame(canvas, padding=18)
+        window = canvas.create_window((0, 0), window=frame, anchor='nw')
+        frame.bind('<Configure>', lambda event, c=canvas: c.configure(scrollregion=c.bbox('all')))
+        canvas.bind('<Configure>', lambda event, c=canvas, w=window: c.itemconfigure(w, width=event.width))
         frame.columnconfigure(1, weight=1)
-        notebook.add(frame, text=title)
+        notebook.add(tab, text=title)
         pages.append(frame)
+        page_canvases.append(canvas)
 
     def note(frame, text, row):
         ttk.Label(frame, text=text, wraplength=890, justify='left').grid(row=row, column=0, columnspan=3, sticky='w', pady=8)
@@ -108,7 +132,8 @@ def launch_gui(smoke: bool = False) -> int:
         if state['session'] is not None and state['session'].pending_tokens and not state['session'].changes():
             if not messagebox.askyesno('请先保存令牌', '重新读取会清除本次生成令牌的明文。确认已经私下保存了吗？', parent=root):
                 return
-        if state['session'] is not None and state['session'].changes():
+        if state['session'] is not None and (state['session'].changes() or
+                any(var.get() != state['session'].env.get(key, '') for key, var in connections.items())):
             if not messagebox.askyesno('重新读取', '将放弃未保存的修改，是否继续？', parent=root):
                 return
         current = SetupSession(config_path.get())
@@ -120,9 +145,14 @@ def launch_gui(smoke: bool = False) -> int:
         install_info.set('读取成功。插件运行数据目录：\n' + str(current.data_path) + '\n\n未修改、未上传任何文件。请点击“下一步”。')
         refresh_lists()
         dictionary_info.set(f'当前词典：{len(current.dictionary.get("characters", []))} 条；目标：{current.paths["角色词典"]}')
+        target_options.clear(); target_select.configure(values=[]); target_choice.set('')
+        job_id.set(''); workflow_path.set(''); consent.set(False); deliver.set(False)
+        summary_box.configure(state='normal'); summary_box.delete('1.0', 'end'); summary_box.configure(state='disabled')
+        report_text('已读取另一轮配置。原服务器任务不会取消；可填写原任务 ID 查询。')
         status.set('配置已载入。所有后续修改先暂存，直到第 ⑦ 页确认才写入。')
     ttk.Button(frame, text='读取已有配置', command=protect(load)).grid(row=2, column=1, sticky='w', pady=8)
-    note(frame, '找不到文件？\n• 如果没有完成懒人包部署，请先回部署器安装。\n• 纯手动环境若只有 .env，请使用原启动方式配置；本版向导不会猜测或新建第二套运行配置。\n• 如果提示数据目录不存在，先启动 AstrBot 插件完成初始化，再读取。', 4)
+    note(frame, '找不到文件？\n• 首次安装未完成时先回部署器；已用过的安装请点下方“故障恢复”，不要重新初始化。\n• 纯手动环境若只有 .env，请使用原启动方式配置；本版向导不会猜测或新建第二套运行配置。\n• 首次安装可启动插件完成初始化；旧数据目录突然不存在时先核对运行路径、磁盘和备份。', 4)
+    ttk.Button(frame, text='已经安装过？故障恢复（不重装）', command=lambda: protect(recovery)()).grid(row=5, column=1, sticky='w', pady=8)
 
     # 2. Credentials
     frame = pages[1]
@@ -145,7 +175,7 @@ def launch_gui(smoke: bool = False) -> int:
     def test_hub():
         url = validate_url(hub_url.get())
         status.set('正在检查 Hub 健康接口，不发送密钥…')
-        threading.Thread(target=lambda: messages.put(probe_health(url)), daemon=True).start()
+        work(lambda: probe_health(url), status.set)
     ttk.Button(frame, text='检查 Hub 是否在线', command=protect(test_hub)).grid(row=7, column=2, padx=6)
     def stage_connections():
         session().set_connections({key: var.get() for key, var in connections.items()})
@@ -167,8 +197,8 @@ def launch_gui(smoke: bool = False) -> int:
     for key, label in [('id', '内部 ID'), ('label', '显示名称'), ('kind', '类型'), ('enabled', '启用')]:
         target_tree.heading(key, text=label); target_tree.column(key, width=160)
     target_tree.grid(row=1, column=0, columnspan=3, sticky='ew')
-    target_id = tk.StringVar(value='test-group'); target_label = tk.StringVar(value='我的测试群')
-    target_kind = tk.StringVar(value='群聊'); bot_var = tk.StringVar(); number = tk.StringVar()
+    target_id = tk.StringVar(value='test-private'); target_label = tk.StringVar(value='我的测试私聊')
+    target_kind = tk.StringVar(value='私聊'); bot_var = tk.StringVar(); number = tk.StringVar()
     field(frame, '名称（给人看）', target_label, 2)
     field(frame, '内部 ID（不要重名）', target_id, 3)
     ttk.Combobox(frame, textvariable=target_kind, values=('群聊', '私聊'), state='readonly', width=12).grid(row=2, column=2, padx=6)
@@ -182,7 +212,7 @@ def launch_gui(smoke: bool = False) -> int:
     def reset_target():
         state['editing'] = None
         target_id.set('target-' + secrets.token_hex(3)); target_label.set(''); number.set('')
-        target_kind.set('群聊'); enabled.set(True)
+        target_kind.set('私聊'); enabled.set(True)
         for key in levels: levels[key].set(key == 'N')
     def select_target(event=None):
         selected = target_tree.selection()
@@ -400,8 +430,8 @@ def launch_gui(smoke: bool = False) -> int:
                 report_text('状态：' + labels.get(job.get('status'), '未知') + '\n任务 ID：' + ident + '\n排队或运行时稍后再次查询；失败时在 App“记录”打开该任务及本机日志。不要反复提交。')
         work(query, done)
     def reset_test():
-        if messagebox.askyesno('确认旧任务已处理', '请先在 App 记录确认旧任务已经结束。网络超时不代表任务未创建。确定允许下一次手动提交？', parent=root):
-            state.update(submission=False, image=None, job=None); job_id.set('')
+        if messagebox.askyesno('确认旧任务已处理', '请先在 App 记录确认旧任务已经结束。网络超时不代表任务未创建。\n本操作不取消、不删除服务器任务，保留任务 ID 供查询；只允许下一次手动提交。确定继续？', parent=root):
+            state.update(submission=False, image=None, job=None)
     buttons = ttk.Frame(frame); buttons.grid(row=7, column=0, columnspan=3, sticky='w')
     for label, command in [('提交测试图', generate), ('查询 / 取图', query_job), ('旧任务结束后新一轮', reset_test)]:
         ttk.Button(buttons, text=label, command=protect(command)).pack(side='left', padx=4)
@@ -429,15 +459,58 @@ def launch_gui(smoke: bool = False) -> int:
 
     # 9. Offline help and bundled tools.
     frame = pages[8]
-    note(frame, '不用在终端输入代码：先按“首张图逐项操作”完成基础生图，再启用词库、角色、HQ 或反推。\n这是一份安装后向导，不会替代 ComfyUI / AstrBot / NapCat 的安装器，也不会偷偷改模型或启动服务。', 0)
-    def doc(name):
+    note(frame, '先完成 NapCat / OneBot 接通与授权，再按“首张图逐项操作”验收基础生图，之后启用词库、角色、HQ 或反推。\n本向导不自动安装或重启服务；NapCat 引导在下方单独打开，每项下载 / 安装都需确认。', 0)
+    def napcat_guide():
+        if getattr(sys, 'frozen', False):
+            command = [sys.executable, '--napcat-guide']
+        else:
+            command = [sys.executable, str(Path(__file__).with_name('napcat_setup.py'))]
+        subprocess.Popen(command)
+    ttk.Button(frame, text='NapCat 安装 / QQ 登录 / OneBot 连通引导',
+               command=protect(napcat_guide)).grid(row=12, column=1, sticky='w', pady=5)
+    def extensions():
+        command = [sys.executable, '--extensions'] if getattr(sys, 'frozen', False) else [sys.executable, str(Path(__file__).with_name('extension_guide.py'))]
+        subprocess.Popen(command, **({'creationflags': subprocess.CREATE_NO_WINDOW} if sys.platform == 'win32' else {}))
+    ttk.Button(frame, text='扩展装配说明 / 新版功能 / 可搜索 Q&A', command=protect(extensions)).grid(row=13, column=1, sticky='w', pady=5)
+    def doc(name, section=None):
         base = Path(sys.executable).parent if getattr(sys, 'frozen', False) else Path(__file__).resolve().parents[1]
         path = base / 'docs' / name
-        dialog = tk.Toplevel(root); dialog.title(name); dialog.geometry('950x720')
+        content = path.read_text('utf-8')
+        dialog = tk.Toplevel(root); dialog.title(section or name); dialog.geometry('950x720')
         view = tk.Text(dialog, wrap='word', padx=15, pady=15)
         scroll = ttk.Scrollbar(dialog, command=view.yview); scroll.pack(side='right', fill='y')
         view.configure(yscrollcommand=scroll.set); view.pack(fill='both', expand=True)
-        view.insert('1.0', path.read_text('utf-8')); view.configure(state='disabled')
+        view.insert('1.0', content)
+        if section:
+            position = view.search('## ' + section, '1.0', stopindex='end')
+            if position:
+                view.see(position)
+                view.tag_add('section', position, position + ' lineend')
+                view.tag_configure('section', background='#fff2b3')
+        view.configure(state='disabled')
+        return dialog
+    recovery_topics = (
+        '已安装用户：恢复起点', 'AstrBot 密码忘了（Windows / Linux）',
+        '401：分清是哪个服务拒绝', 'Hub 令牌丢失或需要换发',
+        'runtime-env.json 丢失、路径不存在或数据突然为空', '更新失败与安全回退',
+        'Windows KSampler：hostbuf_file_reader_read failed', 'Windows 安装路径、编码和下载失败',
+        'QQ 发消息没有反应', 'Hub 健康正常但客户端不显示图片',
+        '恢复后逐项验收与反馈模板',
+    )
+    def recovery():
+        dialog = tk.Toplevel(root); dialog.title('已经安装过：按症状恢复'); dialog.geometry('860x650')
+        ttk.Label(dialog, text='无需读取配置就能查看。只提供离线指引，不会重置密码、改文件或重启服务。',
+                  wraplength=800).pack(anchor='w', padx=18, pady=15)
+        choice = tk.StringVar(value=recovery_topics[0])
+        select = ttk.Combobox(dialog, textvariable=choice, values=recovery_topics, state='readonly', width=82)
+        select.pack(fill='x', padx=18, pady=10)
+        ttk.Button(dialog, text='查看这一项的恢复步骤',
+                   command=protect(lambda: doc('TROUBLESHOOTING.md', choice.get()))).pack(anchor='w', padx=18, pady=10)
+        ttk.Label(dialog, text='建议顺序：\n\n1. 确认实际运行实例和版本。\n2. 保留日志与更新前备份。\n3. 只改一项，再重启相关服务。\n4. 先验收普通单图，再验收高级功能。\n\n不要公开密码、API Key、令牌或完整配置文件。',
+                  wraplength=800, justify='left').pack(anchor='w', padx=18, pady=15)
+        return dialog
+    ttk.Button(frame, text='故障恢复（忘记密码 / 401 / 回退 / 配置丢失）',
+               command=protect(recovery)).grid(row=11, column=1, sticky='w', pady=5)
     for i, (label, name) in enumerate([
         ('首张图逐项操作 / 模型配置 / 失败排查', 'FIRST_IMAGE_WALKTHROUGH.md'),
         ('完整首次配置手册（含角色和群投递）', 'FIRST_RUN.md'),
@@ -460,7 +533,36 @@ def launch_gui(smoke: bool = False) -> int:
         ttk.Button(links, text=label, command=protect(lambda key=key: open_service(key))).pack(side='left', padx=4)
 
     footer = ttk.Frame(root); footer.pack(fill='x', padx=20, pady=10)
-    ttk.Label(footer, textvariable=status, wraplength=770, justify='left').pack(side='left', fill='x', expand=True)
+    ttk.Label(footer, textvariable=status, wraplength=550, justify='left').pack(side='left', fill='x', expand=True)
+    reset_sections = {1: '服务连接', 2: '投递目标', 3: '用户注册表', 4: '提示词库', 5: '角色词典'}
+    def reset_page():
+        index = notebook.index('current')
+        section = reset_sections.get(index)
+        if not section:
+            raise SetupError('本页没有可撤销配置。第①页可重新读取；第⑧页用“查询 / 取图”或确认旧任务结束后开启新一轮。')
+        current = session()
+        extra = '\n本次新增但未保存的用户和其令牌会从暂存区移除。已保存用户及本轮可领取的令牌不受影响。' if index == 3 else ''
+        if not messagebox.askyesno('只撤销本页未保存修改', f'将“{section}”恢复到最近读取／保存的状态。\n不删除磁盘文件，不改变其他页，不重启服务，不回滚已经保存的数据。{extra}\n是否继续？', parent=root): return
+        current.discard(section)
+        if index == 1:
+            for key, var in connections.items(): var.set(current.env.get(key, ''))
+            bot_var.set(current.env.get('AAH_ASTRBOT_BOT_ID', ''))
+        if index == 2: reset_target()
+        if index == 3:
+            user_qq.set(''); user_label.set(''); allow_group.set(False)
+        if index == 4: overwrite.set(False)
+        dictionary_info.set(f'当前暂存词典：{len(current.dictionary.get("characters", []))} 条；目标：{current.paths["角色词典"]}')
+        refresh_lists(); consent.set(False)
+        summary_box.configure(state='normal'); summary_box.delete('1.0', 'end'); summary_box.configure(state='disabled')
+        status.set(f'已撤销“{section}”未保存修改。磁盘与其他页不变；保存前请重新刷新预览。')
+    reset_button = ttk.Button(footer, text='撤销本页修改', command=protect(reset_page))
+    reset_button.pack(side='left', padx=5)
+    def page_changed(event=None):
+        index = notebook.index('current')
+        step_hint.set(f'第 {index + 1}/9 步 · ' + STEP_GUIDES[index])
+        reset_button.configure(state='normal' if index in reset_sections else 'disabled')
+    notebook.bind('<<NotebookTabChanged>>', page_changed)
+    page_changed()
     def previous(): notebook.select(max(0, notebook.index('current') - 1))
     def next_page():
         index = notebook.index('current')
@@ -493,6 +595,15 @@ def launch_gui(smoke: bool = False) -> int:
         import time
         import hashlib
         from unittest.mock import patch
+        assert state['session'] is None
+        recovery_dialog = recovery()
+        root.update_idletasks()
+        for topic in recovery_topics:
+            help_dialog = doc('TROUBLESHOOTING.md', topic)
+            root.update_idletasks()
+            help_dialog.destroy()
+        recovery_dialog.destroy()
+        assert state['session'] is None, 'Recovery must not load or change configuration'
         with tempfile.TemporaryDirectory(prefix='aaa-wizard-smoke-') as temporary:
             base = Path(temporary).resolve()
             data = base / 'data'; data.mkdir()
@@ -501,6 +612,13 @@ def launch_gui(smoke: bool = False) -> int:
                 'AAH_ADMIN_TOKEN': 'test-' + 'a' * 48, 'AAH_ASTRBOT_URL': 'http://127.0.0.1:6185',
                 'AAH_COMFYUI_URL': 'http://127.0.0.1:8188', 'AAH_ASTRBOT_BOT_ID': 'demo-bot'}), encoding='utf-8')
             config_path.set(str(runtime)); load()
+            with patch.object(messagebox, 'askyesno', return_value=True):
+                connections['AAH_ASTRBOT_BOT_ID'].set('unsaved-wrong')
+                notebook.select(1); reset_page()
+                assert connections['AAH_ASTRBOT_BOT_ID'].get() == 'demo-bot'
+                user_qq.set('987654321'); stage_user()
+                notebook.select(3); reset_page()
+                assert not session().users['users'] and not session().pending_tokens
             user_qq.set('123456789'); user_label.set('测试用户'); stage_user()
             number.set('123456789'); stage_target()
             dictionary_ready({'schema_version': '1.1', 'characters': [{'tag': 'example', 'aliases': ['示例']}]})
@@ -533,7 +651,7 @@ def launch_gui(smoke: bool = False) -> int:
                 else:
                     raise AssertionError('duplicate submission not blocked')
             root.update_idletasks(); root.update()
-            for page in pages:
+            for page in notebook.tabs():
                 notebook.select(page); root.update_idletasks()
             assert len(notebook.tabs()) == 9
         root.destroy()
@@ -548,7 +666,19 @@ if __name__ == '__main__':
     parser.add_argument('--smoke-test', action='store_true')
     parser.add_argument('--pool-manager', action='store_true')
     parser.add_argument('--user-manager', action='store_true')
+    parser.add_argument('--napcat-guide', action='store_true')
+    parser.add_argument('--extensions', action='store_true')
+    parser.add_argument('--online-importer', action='store_true')
     args = parser.parse_args()
+    if args.extensions:
+        import extension_guide
+        raise SystemExit(extension_guide.launch_gui(args.smoke_test))
+    if args.online_importer:
+        import online_prompt_importer
+        raise SystemExit(online_prompt_importer.launch_gui(args.smoke_test))
+    if args.napcat_guide:
+        import napcat_setup
+        raise SystemExit(napcat_setup.launch_gui(args.smoke_test))
     if args.pool_manager:
         import prompt_pool_manager
         raise SystemExit(prompt_pool_manager.launch_gui())

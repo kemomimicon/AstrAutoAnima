@@ -6,6 +6,7 @@ import unittest
 import asyncio
 import base64
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 import httpx
 
@@ -94,6 +95,35 @@ class RemoteJobTests(unittest.TestCase):
         )
         self.assertEqual(command, "来张好图抽一抽 N 角色=6ctmika 角色模式=弱")
         self.assertEqual(safety, "N")
+
+    def test_random_subject_tag_is_optional_and_follows_group_selector(self) -> None:
+        target = load_delivery_targets(self.path)[0]
+        changed, _ = build_remote_command(
+            RemoteJobCreateRequest(
+                target_id="main-group", kind="random", five_draw=True,
+                random_subject_tag="1boy", character="6ctmika",
+            ),
+            target,
+        )
+        self.assertEqual(
+            changed,
+            "来张好图五连抽 N 起手=1boy 角色=6ctmika 角色模式=弱",
+        )
+        omitted, _ = build_remote_command(
+            RemoteJobCreateRequest(
+                target_id="main-group", kind="random", random_subject_tag="none",
+            ),
+            target,
+        )
+        self.assertEqual(omitted, "来张好图抽一抽 N 起手=无")
+        with self.assertRaises(RemoteJobError):
+            build_remote_command(
+                RemoteJobCreateRequest(
+                    target_id="main-group", kind="direct", prompt="rain",
+                    random_subject_tag="1boy",
+                ),
+                target,
+            )
 
     def test_sampler_preset_is_forwarded_before_prompt(self) -> None:
         target = load_delivery_targets(self.path)[1]
@@ -373,6 +403,7 @@ class RemoteJobManagerTests(unittest.IsolatedAsyncioTestCase):
         self.sent_payload: dict = {}
         self.chat_payload: dict = {}
         self.stream_override = None
+        self.attachment_contents = {}
 
         def handler(request: httpx.Request) -> httpx.Response:
             if request.url.path == "/api/v1/chat":
@@ -417,7 +448,7 @@ class RemoteJobManagerTests(unittest.IsolatedAsyncioTestCase):
                 if request.method == "GET":
                     return httpx.Response(
                         200,
-                        content=b"\x89PNG\r\n\x1a\nfake-png",
+                        content=self.attachment_contents.get(request.url.params.get("attachment_id"), b"\x89PNG\r\n\x1a\nfake-png"),
                         headers={
                             "content-type": "application/octet-stream",
                             "content-disposition": 'attachment; filename="result.png"',
@@ -480,7 +511,7 @@ class RemoteJobManagerTests(unittest.IsolatedAsyncioTestCase):
         import hashlib
         content = b"\x89PNG\r\n\x1a\nfake-png"
         events = [
-            {'type': 'plain', 'data': 'AAA_IMAGE_SOURCE=' + json.dumps({'sha256': hashlib.sha256(content).hexdigest(), 'prompt_id': 'G260910_0123'})},
+            {'type': 'plain', 'data': 'AAA_IMAGE_SOURCE=' + json.dumps({'sha256': hashlib.sha256(content).hexdigest(), 'prompt_id': 'G260910_0123', 'source_prompt': 'edited blue bicycle', 'user_addition': '', 'safety_level': 'nsfw'})},
             {'type': 'attachment_saved', 'data': {'id': 'existing-attachment', 'type': 'image'}},
             {'type': 'error', 'data': 'later draw failed'},
         ]
@@ -494,7 +525,29 @@ class RemoteJobManagerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(current.status, 'failed')
         self.assertEqual(len(current.images), 1)
         self.assertEqual(current.images[0].prompt_id, 'G260910_0123')
+        self.assertEqual(current.images[0].source_prompt, 'edited blue bicycle')
+        self.assertEqual(current.images[0].user_addition, '')
+        self.assertEqual(current.images[0].source_safety_code, 'H')
         self.assertIn('G260910_0123', current.prompt_ids)
+
+    async def test_v_colon_id_keeps_image_snapshot_after_later_failure(self):
+        import hashlib
+        content = b"\x89PNG\r\n\x1a\nfake-png"
+        mapping = {'sha256': hashlib.sha256(content).hexdigest(), 'prompt_id': 'V:cn-123',
+                   'source_prompt': '1girl, solo, river', 'user_addition': 'sunset', 'safety_code': 'S'}
+        events = [{'type': 'plain', 'data': 'AAA_IMAGE_SOURCE=' + json.dumps(mapping)},
+                  {'type': 'attachment_saved', 'data': {'id': 'existing-attachment', 'type': 'image'}},
+                  {'type': 'error', 'data': 'later draw failed'}]
+        self.stream_override = ''.join('data: ' + json.dumps(e) + '\n\n' for e in events)
+        job = self.manager.create(RemoteJobCreateRequest(target_id='private', kind='random', deliver_to_im=False))
+        for _ in range(80):
+            current = self.manager.get(job.id)
+            if current.status in {'failed', 'succeeded'}: break
+            await asyncio.sleep(.01)
+        self.assertEqual(current.images[0].prompt_id, 'V:cn-123')
+        self.assertEqual(current.images[0].source_prompt, mapping['source_prompt'])
+        self.assertEqual(current.images[0].user_addition, 'sunset')
+        self.assertEqual(current.images[0].source_safety_code, 'S')
 
     async def test_chat_image_is_uploaded_and_sent_to_target(self) -> None:
         job = self.manager.create(
@@ -523,6 +576,78 @@ class RemoteJobManagerTests(unittest.IsolatedAsyncioTestCase):
         stored = self.manager.get_image(job.id, current.images[0].id)
         self.assertIsNotNone(stored)
         self.assertEqual(stored[1].read_bytes(), b"\x89PNG\r\n\x1a\nfake-png")
+
+    async def test_qq_timeout_does_not_erase_generated_image(self) -> None:
+        self.manager._send_im = AsyncMock(side_effect=TimeoutError("NapCat timeout"))
+        job = self.manager.create(RemoteJobCreateRequest(
+            target_id="private", kind="direct", prompt="1girl, solo"))
+        for _ in range(100):
+            current = self.manager.get(job.id)
+            if current and current.status in {"succeeded", "failed"}:
+                break
+            await asyncio.sleep(0.01)
+        current = self.manager.get(job.id)
+        self.assertEqual(current.status, "succeeded")
+        self.assertEqual(current.delivery_status, "failed")
+        self.assertEqual(len(current.images), 1)
+        self.assertIn("QQ 投递失败", current.message)
+        self.assertIsNotNone(self.manager.get_image(job.id, current.images[0].id))
+
+    async def _run_safe_stream_with_send_timeout(self, *, approve_second=True, tail_error=False):
+        safety = self.settings.plugin_data_dir / "safety"
+        safety.mkdir(parents=True, exist_ok=True)
+        (safety / "policy.json").write_text(json.dumps({"safety_mode_enabled": True}))
+        self.attachment_contents = {
+            "safe-first": b"\x89PNG\r\n\x1a\nfirst",
+            "safe-second": b"\x89PNG\r\n\x1a\nsecond",
+        }
+        store = self.manager._credit_store()
+        for key, content in self.attachment_contents.items():
+            if key == "safe-first" or approve_second:
+                store.approve(content, self.manager._safety_policy().fingerprint)
+        events = [
+            {"type": "attachment_saved", "data": {"id": key, "type": "image"}}
+            for key in self.attachment_contents
+        ]
+        if tail_error:
+            events.append({"type": "error", "data": "later generation failed"})
+        else:
+            events.append({"type": "end", "data": ""})
+        self.stream_override = "".join("data: " + json.dumps(event) + "\n\n" for event in events)
+        self.manager._send_im = AsyncMock(side_effect=TimeoutError("NapCat timeout"))
+        principal = AuthPrincipal(role="user", subject="stream-user", label="Stream", qq="123456")
+        job = self.manager.create(RemoteJobCreateRequest(
+            target_id="self-private", kind="random", five_draw=True), principal)
+        for _ in range(100):
+            current = self.manager.get(job.id, principal)
+            if current.status in {"succeeded", "failed"}:
+                break
+            await asyncio.sleep(.01)
+        self.manager._send_im.assert_awaited_once()
+        self.assertEqual(current.delivery_status, "failed")
+        self.assertIn("NapCat timeout", current.delivery_error)
+        self.assertNotIn(job.id, self.manager._admin_exempt_jobs)
+        for image in current.images:
+            self.assertIsNotNone(self.manager.get_image(job.id, image.id, principal))
+        return current
+
+    async def test_safe_stream_send_timeout_collects_all_without_retry(self):
+        current = await self._run_safe_stream_with_send_timeout()
+        self.assertEqual(current.status, "succeeded")
+        self.assertEqual(len(current.images), 2)
+        self.assertIn("QQ 投递失败", current.message)
+
+    async def test_safe_stream_send_timeout_does_not_hide_later_generation_error(self):
+        current = await self._run_safe_stream_with_send_timeout(tail_error=True)
+        self.assertEqual(current.status, "failed")
+        self.assertEqual(len(current.images), 2)
+        self.assertIn("later generation failed", current.message)
+
+    async def test_safe_stream_send_timeout_does_not_bypass_next_image_approval(self):
+        current = await self._run_safe_stream_with_send_timeout(approve_second=False)
+        self.assertEqual(current.status, "failed")
+        self.assertEqual(len(current.images), 1)
+        self.assertIn("未通过当前安全审核", current.message)
 
     async def test_queue_only_keeps_image_without_qq(self) -> None:
         job = self.manager.create(RemoteJobCreateRequest(target_id="private", kind="direct", prompt="garden", deliver_to_im=False))

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import copy
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -81,6 +82,7 @@ def scan_loras(settings: Settings, actor: str) -> LoraCatalogResponse:
     current = file_revision(settings.lora_catalog_path, "loras").revision or "missing"
 
     def mutate(data: dict[str, Any]) -> None:
+        before = copy.deepcopy(data)
         entries = data.setdefault("entries", {})
         if not isinstance(entries, dict):
             raise RepositoryError("LoRA catalog entries must be an object")
@@ -100,7 +102,13 @@ def scan_loras(settings: Settings, actor: str) -> LoraCatalogResponse:
             existing.update(scanned)
             existing["present"] = True
         data["schema_version"] = "1.0"
-        data["scanned_at"] = datetime.now().astimezone().isoformat(timespec="seconds")
+        try:
+            datetime.fromisoformat(str(data.get("scanned_at", "")))
+            valid_timestamp = True
+        except ValueError:
+            valid_timestamp = False
+        if data != before or not valid_timestamp:
+            data["scanned_at"] = datetime.now().astimezone().isoformat(timespec="seconds")
 
     _, revision, _ = mutate_json(
         path=settings.lora_catalog_path,
@@ -113,6 +121,7 @@ def scan_loras(settings: Settings, actor: str) -> LoraCatalogResponse:
         target=str(settings.lora_root),
         mutate=mutate,
         initialize=_empty_catalog,
+        skip_unchanged=True,
     )
     data = read_json_object(settings.lora_catalog_path)
     from .personal_styles import prune_missing_personal_style_loras

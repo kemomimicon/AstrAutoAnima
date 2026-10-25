@@ -3,16 +3,18 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../core/compshare_api.dart';
+import '../../core/hub_api.dart';
 
 class CompShareInstancePage extends StatefulWidget {
-  const CompShareInstancePage({super.key});
+  const CompShareInstancePage({this.api, super.key});
+  final HubApi? api;
 
   @override
   State<CompShareInstancePage> createState() => _CompShareInstancePageState();
 }
 
 class _CompShareInstancePageState extends State<CompShareInstancePage> {
-  final _store = CompShareConfigStore();
+  late final _store = CompShareConfigStore(scope: widget.api == null ? '' : '${widget.api!.baseUrl}|${widget.api!.token}');
   final _publicKey = TextEditingController();
   final _privateKey = TextEditingController();
   final _region = TextEditingController();

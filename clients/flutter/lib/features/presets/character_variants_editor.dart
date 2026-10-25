@@ -52,7 +52,8 @@ class CharacterVariantsEditor extends StatelessWidget {
         const ListTile(
             contentPadding: EdgeInsets.zero,
             title: Text('角色造型 · 默认保留'),
-            subtitle: Text('上方固定提示词为默认。新增造型请填写完整触发词组，将替换默认词组。')),
+            subtitle: Text(
+                '底模角色和 LoRA 角色均可使用。上方固定提示词为默认；新增造型填写完整的角色身份词＋服装 / 造型词，将替换默认词组。')),
         for (var i = 0; i < items.length; i++)
           ListTile(
             contentPadding: EdgeInsets.zero,

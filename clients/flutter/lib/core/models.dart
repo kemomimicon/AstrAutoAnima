@@ -292,6 +292,8 @@ class CharacterFavoriteListResult {
 class PromptRecord {
   const PromptRecord({
     required this.id,
+    this.originalId = '',
+    this.userAddition = '',
     required this.name,
     required this.prompt,
     required this.sourceCode,
@@ -299,11 +301,14 @@ class PromptRecord {
     required this.enabled,
     required this.weight,
     required this.categories,
+    this.customGroups = const [],
   });
 
   factory PromptRecord.fromJson(Map<String, dynamic> json) {
     return PromptRecord(
       id: json['id'] as String? ?? '',
+      originalId: json['original_id'] as String? ?? '',
+      userAddition: json['user_addition'] as String? ?? '',
       name: json['name'] as String? ?? '',
       prompt: json['prompt'] as String? ?? '',
       sourceCode: json['source_code'] as String? ?? '?',
@@ -313,10 +318,15 @@ class PromptRecord {
       categories: (json['categories'] as List? ?? const [])
           .map((value) => '$value')
           .toList(growable: false),
+      customGroups: (json['custom_groups'] as List? ?? const [])
+          .map((value) => '$value')
+          .toList(growable: false),
     );
   }
 
   final String id;
+  final String originalId;
+  final String userAddition;
   final String name;
   final String prompt;
   final String sourceCode;
@@ -324,6 +334,10 @@ class PromptRecord {
   final bool enabled;
   final int weight;
   final List<String> categories;
+  final List<String> customGroups;
+
+  bool get isUnreviewedOfflineScene =>
+      originalId.startsWith('V:') || id.startsWith('V:');
 }
 
 class PromptPageResult {
@@ -561,6 +575,8 @@ class RemoteJobImage {
   const RemoteJobImage({
     this.taskSuiteIndex = 0,
     this.promptId = '',
+    this.sourcePrompt = '',
+    this.userAddition = '',
     required this.id,
     required this.filename,
     required this.contentType,
@@ -573,6 +589,8 @@ class RemoteJobImage {
     return RemoteJobImage(
       taskSuiteIndex: json['task_suite_index'] as int? ?? 0,
       promptId: json['prompt_id'] as String? ?? '',
+      sourcePrompt: json['source_prompt'] as String? ?? '',
+      userAddition: json['user_addition'] as String? ?? '',
       id: json['id'] as String? ?? '',
       filename: json['filename'] as String? ?? 'generated-image.png',
       contentType: json['content_type'] as String? ?? 'image/png',
@@ -589,11 +607,17 @@ class RemoteJobImage {
   final String sha256;
   final String downloadUrl;
   final String promptId;
+  final String sourcePrompt;
+  final String userAddition;
   final int taskSuiteIndex;
 }
 
 class RemoteJobResult {
   const RemoteJobResult({
+    this.sourcePrompt = '',
+    this.convertedPrompt = '',
+    this.finalPrompt = '',
+    this.promptProvenance = const {},
     this.taskSuiteId = '',
     this.taskSuiteRows = const [],
     required this.id,
@@ -605,6 +629,9 @@ class RemoteJobResult {
     required this.targetLabel,
     required this.commandPreview,
     required this.message,
+    this.deliveryStatus = 'not_requested',
+    this.deliveryError = '',
+    this.likedImageIds = const [],
     required this.images,
     required this.promptIds,
     required this.likedPromptIds,
@@ -614,6 +641,11 @@ class RemoteJobResult {
 
   factory RemoteJobResult.fromJson(Map<String, dynamic> json) {
     return RemoteJobResult(
+      sourcePrompt: json['source_prompt'] as String? ?? '',
+      convertedPrompt: json['converted_prompt'] as String? ?? '',
+      finalPrompt: json['final_prompt'] as String? ?? '',
+      promptProvenance: Map<String, dynamic>.from(
+          json['prompt_provenance'] as Map? ?? const {}),
       taskSuiteId: json['task_suite_id'] as String? ?? '',
       taskSuiteRows: (json['task_suite_rows'] as List? ?? [])
           .map((e) => Map<String, dynamic>.from(e))
@@ -627,6 +659,11 @@ class RemoteJobResult {
       targetLabel: json['target_label'] as String? ?? '',
       commandPreview: json['command_preview'] as String? ?? '',
       message: json['message'] as String? ?? '',
+      deliveryStatus: json['delivery_status'] as String? ?? 'not_requested',
+      deliveryError: json['delivery_error'] as String? ?? '',
+      likedImageIds: (json['liked_image_ids'] as List? ?? const [])
+          .map((value) => value.toString())
+          .toList(growable: false),
       images: (json['images'] as List? ?? const [])
           .whereType<Map>()
           .map((item) =>
@@ -646,6 +683,10 @@ class RemoteJobResult {
   }
 
   final String id;
+  final String sourcePrompt;
+  final String convertedPrompt;
+  final String finalPrompt;
+  final Map<String, dynamic> promptProvenance;
   final String status;
   final String kind;
   final String safetyCode;
@@ -654,9 +695,12 @@ class RemoteJobResult {
   final String targetLabel;
   final String commandPreview;
   final String message;
+  final String deliveryStatus;
+  final String deliveryError;
   final List<RemoteJobImage> images;
   final List<String> promptIds;
   final List<String> likedPromptIds;
+  final List<String> likedImageIds;
   final DateTime createdAt;
   final DateTime updatedAt;
 

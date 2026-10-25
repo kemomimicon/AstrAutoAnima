@@ -5,6 +5,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import '../presets/task_suites_page.dart';
+import '../prompts/prompt_group_selector.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:crypto/crypto.dart';
@@ -12,16 +13,21 @@ import 'package:crypto/crypto.dart';
 import '../../core/command_builder.dart';
 import '../../core/character_use_request.dart';
 import '../../core/hub_api.dart';
+import '../../core/prompt_catalog.dart';
 import '../../core/job_image_store.dart';
 import '../../core/models.dart';
+import '../../core/random_subject_tag.dart';
 import '../dashboard/dashboard_page.dart';
 import 'visual_preset_fields.dart';
 import 'camera_control_fields.dart';
 import 'settings_subdrawer.dart';
+import 'bilingual_prompt_field.dart';
+import 'prompt_provenance_details.dart';
 
 class LiteGeneratePage extends StatefulWidget {
   const LiteGeneratePage({
     required this.api,
+    this.localMode = false,
     required this.serverOnlineReminderEnabled,
     required this.onServerOnlineReminderChanged,
     this.characterRequest,
@@ -30,6 +36,7 @@ class LiteGeneratePage extends StatefulWidget {
   });
 
   final HubApi api;
+  final bool localMode;
   final bool serverOnlineReminderEnabled;
   final bool? serverReachable;
   final ValueChanged<bool> onServerOnlineReminderChanged;
@@ -56,6 +63,14 @@ class _LiteGeneratePageState extends State<LiteGeneratePage> {
   bool _fiveDraw = false;
   bool _submitting = false;
   String _poolFilter = '';
+  String _customGroup = '';
+  bool _localRandomAvailable = false;
+  Map<String, dynamic>? _catalog;
+  String? _catalogError;
+  String _localLibraryName = '本机词库';
+  String _localLibrarySafety = 'N';
+  int _connectionRevision = 0;
+  int _groupsRevision = 0;
   String _character = '';
   String _characterVariant = '';
   String _presetCharacter = '';
@@ -92,17 +107,34 @@ class _LiteGeneratePageState extends State<LiteGeneratePage> {
   bool _detailFeet = false;
   bool _detailFace = false;
   bool _detailUpscale = false;
+  bool get _randomKind =>
+      _kind == ImageCommandKind.random || _kind == ImageCommandKind.chaos;
+  bool get _localRandom => widget.localMode && _kind == ImageCommandKind.random;
+  bool get _suiteSupported =>
+      !widget.localMode &&
+      const {
+        ImageCommandKind.direct,
+        ImageCommandKind.chinese,
+        ImageCommandKind.reverse
+      }.contains(_kind);
+  bool get _suiteActive => _suiteSupported && _suiteEnabled;
+  bool get _nativeUpscale =>
+      _kind == ImageCommandKind.refine && _profile == 'seedvr2';
+  bool get _visualSupported =>
+      !widget.localMode && !_nativeUpscale && _kind != ImageCommandKind.multi;
+  Map<String, String> get _taskVisual => _visualSupported ? _visual : const {};
   String get _advancedKey =>
       'aaa_advanced_${sha256.convert(utf8.encode('${widget.api.baseUrl}|${widget.api.token}'))}';
 
   Future<void> _loadAdvanced() async {
+    final revision = _connectionRevision;
+    final key = _advancedKey;
     final prefs = await SharedPreferences.getInstance();
     Map<String, dynamic> data = {};
     try {
-      data = jsonDecode(prefs.getString(_advancedKey) ?? '{}')
-          as Map<String, dynamic>;
+      data = jsonDecode(prefs.getString(key) ?? '{}') as Map<String, dynamic>;
     } catch (_) {}
-    if (!mounted) return;
+    if (!mounted || revision != _connectionRevision) return;
     setState(() {
       _sampler = (data['sampler'] as String?) ?? '';
       _visual = (data['visual'] as Map? ?? {})
@@ -145,22 +177,28 @@ class _LiteGeneratePageState extends State<LiteGeneratePage> {
   String _downloadDirectory = '';
   String _downloadDirectoryUri = '';
 
-  static const _poolFilters = <String, String>{
-    '': '来源默认 · 按下方分级',
-    'B': 'B · Basic',
-    'G': 'G · Generate',
-    'D': 'D · Discord',
-    'C': 'C · Codex',
-    'R': 'R · Reverse',
-    'K': 'K · KP 安全模板（独立库）',
-    'K/S': 'K/S · KP 成人模板（仅私聊）',
-    'P': 'P · 我点赞收藏的模板',
-    'B/N': 'B/N',
-    'D/N': 'D/N',
-    'C/N': 'C/N',
-    'C/H': 'C/H',
-    'C/S': 'C/S（仅私聊）',
-  };
+  Map<String, dynamic>? get _selectedSource {
+    for (final source in catalogRows(_catalog)) {
+      if (source['id'] == _poolFilter) return source;
+    }
+    return null;
+  }
+
+  Future<void> _loadPromptCatalog() async {
+    final revision = _connectionRevision;
+    try {
+      final value = await widget.api.getPromptCatalog();
+      if (!mounted || revision != _connectionRevision) return;
+      setState(() {
+        _catalog = value;
+        _catalogError = null;
+      });
+    } catch (_) {
+      if (!mounted || revision != _connectionRevision) return;
+      setState(() => _catalogError = '词库配置读取失败，请重试；已保留填写内容。');
+    }
+  }
+
   static const _ratios = [
     '',
     '1:1',
@@ -206,10 +244,90 @@ class _LiteGeneratePageState extends State<LiteGeneratePage> {
   @override
   void initState() {
     super.initState();
+    if (widget.localMode) {
+      _targetId = 'local';
+      _deliverToIm = false;
+    }
     widget.api.catalogChanges.addListener(_refresh);
     widget.characterRequest?.addListener(_applyCharacterRequest);
     unawaited(_loadDownloadSettings());
     unawaited(_loadAdvanced());
+    unawaited(_loadLocalCapabilities());
+    unawaited(_loadPromptCatalog());
+  }
+
+  Future<void> _loadLocalCapabilities() async {
+    final revision = _connectionRevision;
+    try {
+      final capabilities = await widget.api.getLocalCapabilities();
+      if (!mounted || revision != _connectionRevision) return;
+      setState(() {
+        _localRandomAvailable = capabilities['execution_mode'] == 'local' &&
+            (capabilities['random_groups'] as List? ?? const [])
+                .whereType<Map>()
+                .any((group) => group['id'] == 'v');
+        final rows = (capabilities['random_groups'] as List? ?? const [])
+            .whereType<Map>();
+        for (final row in rows) {
+          if (row['id'] == 'v') {
+            _localLibraryName = '${row['name'] ?? '本机词库'}';
+            _localLibrarySafety = '${row['safety_code'] ?? 'N'}';
+          }
+        }
+      });
+    } on Exception {
+      // An older Hub or an unavailable optional library keeps basic generation.
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant LiteGeneratePage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.characterRequest != widget.characterRequest) {
+      oldWidget.characterRequest?.removeListener(_applyCharacterRequest);
+      widget.characterRequest?.addListener(_applyCharacterRequest);
+    }
+    if (oldWidget.api == widget.api &&
+        oldWidget.localMode == widget.localMode) {
+      return;
+    }
+    oldWidget.api.catalogChanges.removeListener(_refresh);
+    widget.api.catalogChanges.addListener(_refresh);
+    _connectionRevision++;
+    _localRandomAvailable = false;
+    _catalog = null;
+    _catalogError = null;
+    _localLibraryName = '本机词库';
+    _localLibrarySafety = 'N';
+    _kind = ImageCommandKind.direct;
+    _customGroup = '';
+    _poolFilter = '';
+    _fiveDraw = false;
+    _randomStyle = false;
+    _suiteEnabled = false;
+    _suiteId = '';
+    _targetId = widget.localMode ? 'local' : '';
+    _deliverToIm = !widget.localMode;
+    _safety = 'N';
+    _character = _presetCharacter = _dictionaryCharacter = '';
+    _characterVariant = _style = '';
+    _useDictionaryCharacter = false;
+    _personalStyleSlot = 0;
+    _sampler = _scheduler = '';
+    _customSamplerParameters = false;
+    _advancedLoaded = false;
+    _submitting = false;
+    _job = null;
+    _activeJobs.clear();
+    for (final timer in _jobTimers.values) {
+      timer.cancel();
+    }
+    _jobTimers.clear();
+    _data = _loadData();
+    _groupsRevision++;
+    unawaited(_loadAdvanced());
+    unawaited(_loadLocalCapabilities());
+    unawaited(_loadPromptCatalog());
   }
 
   void _applyCharacterRequest() {
@@ -364,22 +482,32 @@ class _LiteGeneratePageState extends State<LiteGeneratePage> {
     super.dispose();
   }
 
-  void _refresh() => setState(() => _data = _loadData());
+  void _refresh() => setState(() {
+        _data = _loadData();
+        _groupsRevision++;
+        unawaited(_loadPromptCatalog());
+        unawaited(_loadLocalCapabilities());
+      });
 
   String _command() => buildImageCommand(
         kind: _kind,
-        visualPresets: _visual,
-        fiveDraw: _fiveDraw,
-        poolFilter: _poolFilter.isEmpty ? _safety : _poolFilter,
+        visualPresets: _taskVisual,
+        fiveDraw: widget.localMode ? false : _fiveDraw,
+        randomSubjectTag:
+            !widget.localMode || _localRandom ? randomSubjectTag.value : '',
+        poolFilter:
+            _localRandom ? '' : (_poolFilter.isEmpty ? _safety : _poolFilter),
+        customGroups:
+            _randomKind && _customGroup.isNotEmpty ? [_customGroup] : const [],
         character: _character,
         characterTagMode: _useDictionaryCharacter ? _characterTagMode : 'off',
         characterVariant: _useDictionaryCharacter ? '' : _characterVariant,
         style: _randomStyle ? '随机模式' : _style,
         ratio: _ratio,
-        sampler: _sampler,
-        scheduler: _scheduler,
-        steps: _customSamplerParameters ? _steps : null,
-        cfg: _customSamplerParameters ? _cfg : null,
+        sampler: _nativeUpscale ? '' : _sampler,
+        scheduler: _nativeUpscale ? '' : _scheduler,
+        steps: _customSamplerParameters && !_nativeUpscale ? _steps : null,
+        cfg: _customSamplerParameters && !_nativeUpscale ? _cfg : null,
         prompt: _promptController.text,
         reversePreset: _reversePreset,
         reverseCategories:
@@ -476,7 +604,12 @@ class _LiteGeneratePageState extends State<LiteGeneratePage> {
 
   Future<void> _submit(List<DeliveryTarget> targets) async {
     if (_submitting) return;
-    if (_suiteEnabled && _suiteId.isEmpty) {
+    final revision = _connectionRevision;
+    if (_localRandom && !_localRandomAvailable) {
+      _notice('本机 V 场景库不可用，请检查本机库安装。', error: true);
+      return;
+    }
+    if (_suiteActive && _suiteId.isEmpty) {
       _notice('请先选择任务套组。', error: true);
       return;
     }
@@ -517,6 +650,18 @@ class _LiteGeneratePageState extends State<LiteGeneratePage> {
       _notice('反推内容由模型判级，为防止越界只能返图到私聊。', error: true);
       return;
     }
+    if (_randomKind && !widget.localMode && _poolFilter.isNotEmpty) {
+      final source = _selectedSource;
+      if (_catalogError != null ||
+          source == null ||
+          !catalogAllows(source, target.kind, _safety) ||
+          (_customGroup.isNotEmpty &&
+              source['supports_custom_groups'] == false) ||
+          !(source['modes'] as List? ?? const []).contains(_kindValue)) {
+        _notice('词库已停用、分级或目标不再适用；请刷新后重新选择，填写内容已保留。', error: true);
+        return;
+      }
+    }
     final explicitSafety = RegExp(r'[NHS]')
         .allMatches(_poolFilter)
         .map((match) => match.group(0))
@@ -537,21 +682,28 @@ class _LiteGeneratePageState extends State<LiteGeneratePage> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(_deliverToIm ? '投递目标：${target.label}' : '仅排队并保留跑图记录，不发送 QQ'),
-            Text(
-              _kind == ImageCommandKind.reverse
-                  ? '内容级别：由反推模型判定（仅私聊）'
-                  : '内容级别：$effectiveSafety',
-            ),
+            Text(_deliverToIm
+                ? '投递目标：${target.label}'
+                : widget.localMode
+                    ? '本机 ComfyUI 执行；仅保存本机记录'
+                    : '仅排队并保留跑图记录，不发送 QQ'),
+            if (!_localRandom)
+              Text(
+                _kind == ImageCommandKind.reverse
+                    ? '内容级别：由反推模型判定（仅私聊）'
+                    : '内容级别：$effectiveSafety',
+              ),
             if (imageMode && _sourceImage != null)
               Text(
                   '${_kind == ImageCommandKind.refine ? '精修' : '反推'}图片：$_sourceImageName'),
             const SizedBox(height: 12),
-            Text(_deliverToIm
-                ? '生成完成后，AstrBot 会主动把结果发送到该会话。'
-                : '生成完成后仅存入本账户跑图记录，不主动投递私聊或群聊。'),
+            Text(widget.localMode
+                ? '生成完成后可在本机记录查看或保存，不经过 AstrBot。'
+                : _deliverToIm
+                    ? '生成完成后，AstrBot 会主动把结果发送到该会话。'
+                    : '生成完成后仅存入本账户跑图记录，不主动投递私聊或群聊。'),
             const SizedBox(height: 12),
-            SelectableText(_suiteEnabled
+            SelectableText(_suiteActive
                 ? '任务套组：按所选套组逐行生成\n基础提示词：${_promptController.text.trim()}'
                 : _command()),
           ],
@@ -568,82 +720,118 @@ class _LiteGeneratePageState extends State<LiteGeneratePage> {
         ],
       ),
     );
-    if (confirmed != true) return;
+    if (confirmed != true || !mounted || revision != _connectionRevision) {
+      return;
+    }
 
     setState(() => _submitting = true);
     try {
-      final job = await widget.api.createRemoteJob({
-        if (_suiteEnabled) 'task_suite_id': _suiteId,
-        'target_id': target.id,
-        'deliver_to_im': _deliverToIm,
-        'kind': _kindValue,
-        'five_draw': _fiveDraw,
-        'pool_filter': _poolFilter,
-        'character': _kind == ImageCommandKind.multi ? '' : _character,
-        'character_tag_mode':
-            _useDictionaryCharacter ? _characterTagMode : 'off',
-        'character_variant': _useDictionaryCharacter ||
-                _kind == ImageCommandKind.chaos ||
-                _kind == ImageCommandKind.multi
-            ? ''
-            : _characterVariant,
-        'style': _kind == ImageCommandKind.multi
-            ? ''
-            : (_randomStyle ? '随机模式' : _style),
-        if (_kind != ImageCommandKind.chaos &&
-            _kind != ImageCommandKind.multi &&
-            !_randomStyle &&
-            _personalStyleSlot > 0)
-          'personal_style_slot': _personalStyleSlot,
-        'ratio': _ratio,
-        'sampler': _sampler,
-        'scheduler': _scheduler,
-        'lighting_key': _visual['lighting_key'] ?? '',
-        'lighting_effect': _visual['lighting_effect'] ?? '',
-        'material_primary': _visual['material_primary'] ?? '',
-        'material_surface': _visual['material_surface'] ?? '',
-        'material_details': [
-          _visual['material_detail_1'],
-          _visual['material_detail_2']
-        ].whereType<String>().where((v) => v.isNotEmpty).toSet().toList(),
-        'camera_distance': _visual['camera_distance'] ?? '',
-        'camera_yaw': _visual['camera_yaw'] ?? '',
-        'camera_pitch': _visual['camera_pitch'] ?? '',
-        'camera_lens': _visual['camera_lens'] ?? '',
-        'camera_roll': _visual['camera_roll'] ?? '',
-        'camera_extreme_lora': _visual['camera_extreme_lora'] == 'true',
-        'detail_hands': _detailHands,
-        'detail_feet': _detailFeet,
-        'detail_face': _detailFace,
-        'detail_upscale': _detailUpscale,
-        if (_customSamplerParameters) 'steps': _steps,
-        if (_customSamplerParameters) 'cfg': _cfg,
-        'prompt': _promptController.text.trim(),
-        'safety_code': _safety,
-        if (_kind == ImageCommandKind.reverse) ...{
-          'reverse_preset': _reversePreset,
-          'reverse_categories':
-              _customReverseCategories ? _reverseCategories.toList() : [],
-          'reverse_only': _reverseOnly,
-          'source_image_name': _sourceImageName,
-          'source_image_data':
-              'data:$_sourceImageMime;base64,${base64Encode(_sourceImage!)}',
-        },
-        if (_kind == ImageCommandKind.hq ||
-            _kind == ImageCommandKind.refine) ...{
-          'profile': _profile,
-          if (_profile != 'seedvr2') 'scale': _enhanceScale,
-          if (_profile != 'seedvr2') 'denoise': _enhanceDenoise,
-          if (_kind == ImageCommandKind.refine)
-            'parent_job_id': _parentJobId.trim(),
-          if (_kind == ImageCommandKind.refine && _sourceImage != null) ...{
-            'source_image_name': _sourceImageName,
-            'source_image_data':
-                'data:$_sourceImageMime;base64,${base64Encode(_sourceImage!)}',
-          },
-        },
-      });
-      if (!mounted) return;
+      final job = await widget.api.createRemoteJob(widget.localMode
+          ? <String, dynamic>{
+              'target_id': 'local',
+              'deliver_to_im': false,
+              'kind': _kindValue,
+              if (_localRandom) ...{
+                'custom_groups': ['v'],
+                'pool_filter': '',
+                'random_subject_tag': randomSubjectTag.value,
+              },
+              'prompt': _promptController.text.trim(),
+              'character': _character,
+              'character_tag_mode':
+                  _useDictionaryCharacter ? _characterTagMode : 'off',
+              'character_variant':
+                  _useDictionaryCharacter ? '' : _characterVariant,
+              'style': _style,
+              'ratio': _ratio,
+              if (_sampler.isNotEmpty) 'sampler': _sampler,
+              if (_scheduler.isNotEmpty) 'scheduler': _scheduler,
+              if (_customSamplerParameters) 'steps': _steps,
+              if (_customSamplerParameters) 'cfg': _cfg,
+              'safety_code': _localRandom ? _localLibrarySafety : _safety,
+            }
+          : <String, dynamic>{
+              if (_suiteActive) 'task_suite_id': _suiteId,
+              'target_id': target.id,
+              'deliver_to_im': _deliverToIm,
+              'kind': _kindValue,
+              'five_draw': _fiveDraw,
+              if ((_kind == ImageCommandKind.random ||
+                      _kind == ImageCommandKind.chaos) &&
+                  randomSubjectTag.value.isNotEmpty)
+                'random_subject_tag': randomSubjectTag.value,
+              'pool_filter': _poolFilter,
+              if (_randomKind && _customGroup.isNotEmpty)
+                'custom_groups': [_customGroup],
+              'character': _kind == ImageCommandKind.multi ? '' : _character,
+              'character_tag_mode':
+                  _useDictionaryCharacter ? _characterTagMode : 'off',
+              'character_variant': _useDictionaryCharacter ||
+                      _kind == ImageCommandKind.chaos ||
+                      _kind == ImageCommandKind.multi
+                  ? ''
+                  : _characterVariant,
+              'style': _kind == ImageCommandKind.multi
+                  ? ''
+                  : (_randomStyle ? '随机模式' : _style),
+              if (_kind != ImageCommandKind.chaos &&
+                  _kind != ImageCommandKind.multi &&
+                  !_randomStyle &&
+                  _personalStyleSlot > 0)
+                'personal_style_slot': _personalStyleSlot,
+              'ratio': _ratio,
+              if (!_nativeUpscale) 'sampler': _sampler,
+              if (!_nativeUpscale) 'scheduler': _scheduler,
+              'lighting_key': _taskVisual['lighting_key'] ?? '',
+              'lighting_effect': _taskVisual['lighting_effect'] ?? '',
+              'material_primary': _taskVisual['material_primary'] ?? '',
+              'material_surface': _taskVisual['material_surface'] ?? '',
+              'material_details': [
+                _taskVisual['material_detail_1'],
+                _taskVisual['material_detail_2']
+              ].whereType<String>().where((v) => v.isNotEmpty).toSet().toList(),
+              'camera_distance': _taskVisual['camera_distance'] ?? '',
+              'camera_yaw': _taskVisual['camera_yaw'] ?? '',
+              'camera_pitch': _taskVisual['camera_pitch'] ?? '',
+              'camera_lens': _taskVisual['camera_lens'] ?? '',
+              'camera_roll': _taskVisual['camera_roll'] ?? '',
+              'camera_extreme_lora':
+                  _taskVisual['camera_extreme_lora'] == 'true',
+              if (_kind == ImageCommandKind.hq) ...{
+                'detail_hands': _detailHands,
+                'detail_feet': _detailFeet,
+                'detail_face': _detailFace,
+                'detail_upscale': _detailUpscale,
+              },
+              if (_customSamplerParameters && !_nativeUpscale) 'steps': _steps,
+              if (_customSamplerParameters && !_nativeUpscale) 'cfg': _cfg,
+              'prompt': _promptController.text.trim(),
+              'safety_code': _safety,
+              if (_kind == ImageCommandKind.reverse) ...{
+                'reverse_preset': _reversePreset,
+                'reverse_categories':
+                    _customReverseCategories ? _reverseCategories.toList() : [],
+                'reverse_only': _reverseOnly,
+                'source_image_name': _sourceImageName,
+                'source_image_data':
+                    'data:$_sourceImageMime;base64,${base64Encode(_sourceImage!)}',
+              },
+              if (_kind == ImageCommandKind.hq ||
+                  _kind == ImageCommandKind.refine) ...{
+                'profile': _profile,
+                if (_profile != 'seedvr2') 'scale': _enhanceScale,
+                if (_profile != 'seedvr2') 'denoise': _enhanceDenoise,
+                if (_kind == ImageCommandKind.refine)
+                  'parent_job_id': _parentJobId.trim(),
+                if (_kind == ImageCommandKind.refine &&
+                    _sourceImage != null) ...{
+                  'source_image_name': _sourceImageName,
+                  'source_image_data':
+                      'data:$_sourceImageMime;base64,${base64Encode(_sourceImage!)}',
+                },
+              },
+            });
+      if (!mounted || revision != _connectionRevision) return;
       setState(() {
         _job = job;
         _activeJobs[job.id] = job;
@@ -656,16 +844,20 @@ class _LiteGeneratePageState extends State<LiteGeneratePage> {
       _notice('任务已加入队列，可继续提交新任务。');
       unawaited(_pollJob(job.id));
     } on HubApiException catch (error) {
+      if (!mounted || revision != _connectionRevision) return;
       _notice(error.message, error: true);
     } finally {
-      if (mounted) setState(() => _submitting = false);
+      if (mounted && revision == _connectionRevision) {
+        setState(() => _submitting = false);
+      }
     }
   }
 
   Future<void> _pollJob(String id) async {
+    final revision = _connectionRevision;
     try {
       final job = await widget.api.getRemoteJob(id);
-      if (!mounted) return;
+      if (!mounted || revision != _connectionRevision) return;
       setState(() {
         if (job.isFinished) {
           _activeJobs.remove(id);
@@ -686,6 +878,7 @@ class _LiteGeneratePageState extends State<LiteGeneratePage> {
         await _autoDownload(job);
       }
     } on HubApiException catch (error) {
+      if (!mounted || revision != _connectionRevision) return;
       _jobTimers.remove(id)?.cancel();
       if (mounted) {
         setState(() {
@@ -737,6 +930,7 @@ class _LiteGeneratePageState extends State<LiteGeneratePage> {
         final selectedTarget =
             targets.where((item) => item.id == _targetId).firstOrNull;
         return ListView(
+          key: ValueKey('generate-connection-$_connectionRevision'),
           padding: const EdgeInsets.all(24),
           children: [
             Row(
@@ -748,7 +942,9 @@ class _LiteGeneratePageState extends State<LiteGeneratePage> {
                       Text('快捷跑图',
                           style: Theme.of(context).textTheme.headlineMedium),
                       const SizedBox(height: 4),
-                      const Text('一键提交到 Hub，完成后由 AstrBot 主动返图'),
+                      Text(widget.localMode
+                          ? '直连本机 ComfyUI；中文模式由 Hub 调用已配置的 LLM API'
+                          : '一键提交到 Hub，完成后由 AstrBot 主动返图'),
                     ],
                   ),
                 ),
@@ -762,11 +958,12 @@ class _LiteGeneratePageState extends State<LiteGeneratePage> {
               ],
             ),
             const SizedBox(height: 20),
-            ServerReminderCard(
-              enabled: widget.serverOnlineReminderEnabled,
-              reachable: widget.serverReachable,
-              onChanged: widget.onServerOnlineReminderChanged,
-            ),
+            if (!widget.localMode)
+              ServerReminderCard(
+                enabled: widget.serverOnlineReminderEnabled,
+                reachable: widget.serverReachable,
+                onChanged: widget.onServerOnlineReminderChanged,
+              ),
             const SizedBox(height: 12),
             Card(
               child: Column(
@@ -816,79 +1013,102 @@ class _LiteGeneratePageState extends State<LiteGeneratePage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    DropdownButtonFormField<String>(
-                      initialValue: _targetId,
-                      decoration: const InputDecoration(labelText: '返图目标'),
-                      items: [
-                        const DropdownMenuItem(value: '', child: Text('请选择')),
-                        ...targets.map(
-                          (target) => DropdownMenuItem(
-                            value: target.id,
-                            child: Text(
-                                '${target.label} · ${target.isGroup ? '群聊' : '私聊'}'),
+                    if (!widget.localMode)
+                      DropdownButtonFormField<String>(
+                        initialValue: _targetId,
+                        decoration: const InputDecoration(labelText: '返图目标'),
+                        items: [
+                          const DropdownMenuItem(value: '', child: Text('请选择')),
+                          ...targets.map(
+                            (target) => DropdownMenuItem(
+                              value: target.id,
+                              child: Text(
+                                  '${target.label} · ${target.isGroup ? '群聊' : '私聊'}'),
+                            ),
                           ),
-                        ),
-                      ],
-                      onChanged: (value) {
-                        final next = targets
-                            .where((item) => item.id == value)
-                            .firstOrNull;
-                        setState(() {
-                          _targetId = value ?? '';
-                          if ((next?.isGroup ?? false) && _safety == 'S') {
-                            _safety = 'N';
-                          }
-                        });
-                      },
-                    ),
-                    if (targets.isEmpty && snapshot.hasData)
+                        ],
+                        onChanged: (value) {
+                          final next = targets
+                              .where((item) => item.id == value)
+                              .firstOrNull;
+                          setState(() {
+                            _targetId = value ?? '';
+                            if ((next?.isGroup ?? false) && _safety == 'S') {
+                              _safety = 'N';
+                            }
+                          });
+                        },
+                      ),
+                    if (!widget.localMode &&
+                        targets.isEmpty &&
+                        snapshot.hasData)
                       const Padding(
                         padding: EdgeInsets.only(top: 8),
                         child: Text('管理员尚未配置可投递目标。'),
                       ),
-                    SwitchListTile(
-                      title: const Text('生成后发送到 QQ'),
-                      subtitle: const Text('关闭后仅在 App 跑图记录查看；仍按所选目标校验权限与安全级别。'),
-                      value: _deliverToIm,
-                      onChanged: (value) =>
-                          setState(() => _deliverToIm = value),
-                    ),
+                    if (!widget.localMode)
+                      SwitchListTile(
+                        title: const Text('生成后发送到 QQ'),
+                        subtitle:
+                            const Text('关闭后仅在 App 跑图记录查看；仍按所选目标校验权限与安全级别。'),
+                        value: _deliverToIm,
+                        onChanged: (value) =>
+                            setState(() => _deliverToIm = value),
+                      ),
                     const SizedBox(height: 12),
                     DropdownButtonFormField<ImageCommandKind>(
+                      key: ValueKey('generation-kind-$_kind'),
                       initialValue: _kind,
                       decoration: const InputDecoration(labelText: '跑图方式'),
-                      items: const [
-                        DropdownMenuItem(
+                      items: [
+                        const DropdownMenuItem(
                             value: ImageCommandKind.direct,
                             child: Text('直接生图 /aimg')),
-                        DropdownMenuItem(
+                        const DropdownMenuItem(
                             value: ImageCommandKind.chinese,
                             child: Text('中文生图 /aicn')),
-                        DropdownMenuItem(
-                            value: ImageCommandKind.reverse,
-                            child: Text('图片反推 /aip')),
-                        DropdownMenuItem(
+                        if (widget.localMode)
+                          const DropdownMenuItem(
                             value: ImageCommandKind.hq,
-                            child: Text('HQ 高清生图 /ahq')),
-                        DropdownMenuItem(
-                            value: ImageCommandKind.refine,
-                            child: Text('放大精修 /arefine')),
-                        DropdownMenuItem(
+                            child: Text('本机 HQ · 二段采样'),
+                          ),
+                        if (widget.localMode && _localRandomAvailable)
+                          const DropdownMenuItem(
                             value: ImageCommandKind.random,
-                            child: Text('来张好图')),
-                        DropdownMenuItem(
-                            value: ImageCommandKind.chaos, child: Text('混沌时刻')),
-                        DropdownMenuItem(
-                            value: ImageCommandKind.multi,
-                            child: Text('裸模多人图 /amulti')),
+                            child: Text('来张好图'),
+                          ),
+                        if (!widget.localMode) ...const [
+                          DropdownMenuItem(
+                              value: ImageCommandKind.reverse,
+                              child: Text('图片反推 /aip')),
+                          DropdownMenuItem(
+                              value: ImageCommandKind.hq,
+                              child: Text('HQ 高清生图 /ahq')),
+                          DropdownMenuItem(
+                              value: ImageCommandKind.refine,
+                              child: Text('放大精修 /arefine')),
+                          DropdownMenuItem(
+                              value: ImageCommandKind.random,
+                              child: Text('来张好图')),
+                          DropdownMenuItem(
+                              value: ImageCommandKind.chaos,
+                              child: Text('混沌时刻')),
+                          DropdownMenuItem(
+                              value: ImageCommandKind.multi,
+                              child: Text('裸模多人图 /amulti')),
+                        ],
                       ],
                       onChanged: (value) => setState(() {
                         _kind = value ?? _kind;
+                        if (widget.localMode) {
+                          _customGroup = _localRandom ? 'v' : '';
+                          _poolFilter = '';
+                          _fiveDraw = false;
+                        }
                         if (_kind == ImageCommandKind.multi) {
                           _character = '';
                           _style = '';
                           _randomStyle = false;
-                          _suiteEnabled = false;
                           _personalStyleSlot = 0;
                           _ratio = '3:2';
                           if (_promptController.text.trim().isEmpty) {
@@ -912,18 +1132,26 @@ class _LiteGeneratePageState extends State<LiteGeneratePage> {
                         }
                       }),
                     ),
-                    if (!reverse) ...[
+                    if (!reverse && !_localRandom) ...[
                       const SizedBox(height: 12),
                       DropdownButtonFormField<String>(
                         initialValue: _safety,
                         decoration: const InputDecoration(labelText: '本次内容级别'),
-                        items: const [
-                          DropdownMenuItem(
-                              value: 'N', child: Text('N · Normal')),
-                          DropdownMenuItem(value: 'H', child: Text('H · NSFW')),
-                          DropdownMenuItem(
-                              value: 'S', child: Text('S · Sexual（仅私聊）')),
-                        ],
+                        key: ValueKey(
+                            'levels-$_poolFilter-$_safety-${_catalog?['revision']}'),
+                        items: {
+                          ...catalogLevels(
+                              _randomKind ? _selectedSource : null),
+                          _safety
+                        }
+                            .map((code) => DropdownMenuItem(
+                                value: code,
+                                enabled: catalogLevels(
+                                        _randomKind ? _selectedSource : null)
+                                    .contains(code),
+                                child: Text(
+                                    '$code${code == 'S' ? ' · 仅私聊' : ''}')))
+                            .toList(),
                         onChanged: (value) {
                           if ((selectedTarget?.isGroup ?? false) &&
                               value == 'S') {
@@ -934,22 +1162,79 @@ class _LiteGeneratePageState extends State<LiteGeneratePage> {
                         },
                       ),
                     ],
-                    if (random) ...[
+                    if (_localRandom) ...[
+                      const SizedBox(height: 12),
+                      Text(_localLibraryName),
+                      const SizedBox(height: 6),
+                      Text(
+                          '服务器分级：$_localLibrarySafety。当前每次生成单张；默认补 1girl, solo。附加英文内容可留空，不会自动联网翻译。'),
+                    ],
+                    if (random && !widget.localMode) ...[
+                      PromptGroupSelector(
+                          api: widget.api,
+                          forGeneration: true,
+                          value: _customGroup,
+                          revision: _groupsRevision,
+                          privateTarget: selectedTarget?.kind == 'private',
+                          onChanged: (value) =>
+                              setState(() => _customGroup = value)),
                       const SizedBox(height: 12),
                       DropdownButtonFormField<String>(
                         initialValue: _poolFilter,
+                        isExpanded: true,
                         decoration:
                             const InputDecoration(labelText: '提示词来源 / 显式分级'),
-                        items: _poolFilters.entries
-                            .map((entry) => DropdownMenuItem(
-                                value: entry.key, child: Text(entry.value)))
-                            .toList(),
+                        key: ValueKey(
+                            'sources-$_poolFilter-${_catalog?['revision']}'),
+                        items: <String, String>{
+                          '': '服务器默认来源',
+                          for (final row in catalogRows(_catalog))
+                            if ((row['modes'] as List? ?? const [])
+                                .contains(_kindValue))
+                              '${row['id']}': '${row['name']}',
+                          if (_poolFilter.isNotEmpty &&
+                              (_selectedSource == null ||
+                                  !(_selectedSource!['modes'] as List? ??
+                                          const [])
+                                      .contains(_kindValue)))
+                            _poolFilter: '$_poolFilter（已选来源不可用）',
+                        }.entries.map((entry) {
+                          final row = catalogRows(_catalog)
+                              .where((r) => r['id'] == entry.key)
+                              .firstOrNull;
+                          final allowed = entry.key.isEmpty ||
+                              (row != null &&
+                                  (row['modes'] as List? ?? const [])
+                                      .contains(_kindValue) &&
+                                  catalogLevels(row).any((s) => catalogAllows(
+                                      row,
+                                      selectedTarget?.kind ?? 'private',
+                                      s)));
+                          return DropdownMenuItem(
+                              value: entry.key,
+                              enabled: allowed,
+                              child: Text(
+                                  '${entry.value}${allowed ? '' : '（当前目标不可用）'}',
+                                  overflow: TextOverflow.ellipsis));
+                        }).toList(),
                         onChanged: (value) => setState(() {
                           _poolFilter = value ?? '';
-                          if (_poolFilter == 'K') _safety = 'N';
-                          if (_poolFilter == 'K/S') _safety = 'S';
+                          final source = _selectedSource;
+                          if (source != null) {
+                            _safety = '${source['default_safety']}';
+                          }
+                          if (source?['supports_custom_groups'] == false) {
+                            _customGroup = '';
+                          }
                         }),
                       ),
+                      if (_catalogError != null || _catalog?['legacy'] == true)
+                        TextButton.icon(
+                          onPressed: _loadPromptCatalog,
+                          icon: const Icon(Icons.refresh),
+                          label: Text(
+                              _catalogError ?? '旧服务器仅显示默认来源，请升级 Hub 获取动态词库'),
+                        ),
                       CheckboxListTile(
                         value: _fiveDraw,
                         onChanged: (value) =>
@@ -959,6 +1244,41 @@ class _LiteGeneratePageState extends State<LiteGeneratePage> {
                         contentPadding: EdgeInsets.zero,
                       ),
                     ],
+                    if (random)
+                      ValueListenableBuilder<bool>(
+                        valueListenable: randomSubjectTagLocked,
+                        builder: (context, locked, _) {
+                          if (locked) return const SizedBox.shrink();
+                          return ValueListenableBuilder<String>(
+                            valueListenable: randomSubjectTag,
+                            builder: (context, selected, _) =>
+                                DropdownButtonFormField<String>(
+                              key: ValueKey('random-subject-$selected'),
+                              initialValue: selected,
+                              decoration: InputDecoration(
+                                labelText: '随机串开头人物 Tag',
+                                helperText: _localRandom
+                                    ? '默认补 1girl, solo；不指定人物 Tag 时仍保留 solo'
+                                    : '仅替换词库串开头的 1girl；solo、K 组不变',
+                              ),
+                              items: randomSubjectChoices.entries
+                                  .map((entry) => DropdownMenuItem(
+                                        value: entry.key,
+                                        child: Text(
+                                            _localRandom && entry.key.isEmpty
+                                                ? '默认（1girl）'
+                                                : entry.value),
+                                      ))
+                                  .toList(),
+                              onChanged: (value) {
+                                if (value != null) {
+                                  unawaited(saveRandomSubjectTag(value));
+                                }
+                              },
+                            ),
+                          );
+                        },
+                      ),
                     if (reverse) ...[
                       const SizedBox(height: 12),
                       DropdownButtonFormField<String>(
@@ -1019,7 +1339,7 @@ class _LiteGeneratePageState extends State<LiteGeneratePage> {
                       ],
                       CheckboxListTile(
                         value: _reverseOnly,
-                        onChanged: _suiteEnabled
+                        onChanged: _suiteActive
                             ? null
                             : (value) =>
                                 setState(() => _reverseOnly = value ?? false),
@@ -1089,7 +1409,7 @@ class _LiteGeneratePageState extends State<LiteGeneratePage> {
                           ),
                         ),
                     ],
-                    if (enhance) ...[
+                    if (enhance && !widget.localMode) ...[
                       const SizedBox(height: 12),
                       DropdownButtonFormField<String>(
                         initialValue: _profile,
@@ -1218,11 +1538,7 @@ class _LiteGeneratePageState extends State<LiteGeneratePage> {
                       ],
                     ],
                     const SizedBox(height: 12),
-                    if ({
-                      ImageCommandKind.direct,
-                      ImageCommandKind.chinese,
-                      ImageCommandKind.reverse
-                    }.contains(_kind)) ...[
+                    if (_suiteSupported) ...[
                       SwitchListTile(
                           title: const Text('启用任务套组'),
                           subtitle: const Text('按套组逐行生成，替代当前角色与画风'),
@@ -1234,13 +1550,13 @@ class _LiteGeneratePageState extends State<LiteGeneratePage> {
                                   _reverseOnly = false;
                                 }
                               })),
-                      if (_suiteEnabled)
+                      if (_suiteActive)
                         TaskSuiteSelector(
                             api: widget.api,
                             value: _suiteId,
                             onChanged: (v) => setState(() => _suiteId = v)),
                     ],
-                    if (!_suiteEnabled) ...[
+                    if (!_suiteActive) ...[
                       DropdownButtonFormField<String>(
                         key: ValueKey('preset-character-$_presetCharacter'),
                         initialValue: _presetCharacter,
@@ -1406,32 +1722,34 @@ class _LiteGeneratePageState extends State<LiteGeneratePage> {
                                 }),
                       ),
                       const SizedBox(height: 12),
-                      DropdownButtonFormField<int>(
-                        key: ValueKey('personal-style-$_personalStyleSlot'),
-                        initialValue: _personalStyleSlot,
-                        decoration: InputDecoration(
-                          labelText: '我的画风预设',
-                          helperText: chaos
-                              ? '混沌时刻不使用个人预设'
-                              : personalStyles.isEmpty
-                                  ? '请先到“预设”页创建方案'
-                                  : '与上方公共画风二选一',
+                      if (!widget.localMode)
+                        DropdownButtonFormField<int>(
+                          key: ValueKey('personal-style-$_personalStyleSlot'),
+                          initialValue: _personalStyleSlot,
+                          decoration: InputDecoration(
+                            labelText: '我的画风预设',
+                            helperText: chaos
+                                ? '混沌时刻不使用个人预设'
+                                : personalStyles.isEmpty
+                                    ? '请先到“预设”页创建方案'
+                                    : '与上方公共画风二选一',
+                          ),
+                          items: [
+                            const DropdownMenuItem<int>(
+                                value: 0, child: Text('不使用')),
+                            ...personalStyles.map((item) =>
+                                DropdownMenuItem<int>(
+                                  value: item.slot,
+                                  child: Text('槽位 ${item.slot} · ${item.name}'),
+                                )),
+                          ],
+                          onChanged: chaos || _randomStyle
+                              ? null
+                              : (value) => setState(() {
+                                    _personalStyleSlot = value ?? 0;
+                                    if (_personalStyleSlot > 0) _style = '';
+                                  }),
                         ),
-                        items: [
-                          const DropdownMenuItem<int>(
-                              value: 0, child: Text('不使用')),
-                          ...personalStyles.map((item) => DropdownMenuItem<int>(
-                                value: item.slot,
-                                child: Text('槽位 ${item.slot} · ${item.name}'),
-                              )),
-                        ],
-                        onChanged: chaos || _randomStyle
-                            ? null
-                            : (value) => setState(() {
-                                  _personalStyleSlot = value ?? 0;
-                                  if (_personalStyleSlot > 0) _style = '';
-                                }),
-                      ),
                       const SizedBox(height: 12),
                     ],
                     DropdownButtonFormField<String>(
@@ -1449,9 +1767,10 @@ class _LiteGeneratePageState extends State<LiteGeneratePage> {
                           : (value) => setState(() => _ratio = value ?? ''),
                     ),
                     const SizedBox(height: 12),
-                    if (!chaos &&
+                    if (!widget.localMode &&
+                        !chaos &&
                         _kind != ImageCommandKind.multi &&
-                        !_suiteEnabled)
+                        !_suiteActive)
                       SwitchListTile(
                         title: const Text('随机画风预设'),
                         subtitle: const Text('逐张从有效公共预设与自己的个人预设中选择；不是混沌混合'),
@@ -1459,80 +1778,100 @@ class _LiteGeneratePageState extends State<LiteGeneratePage> {
                         onChanged: (value) =>
                             setState(() => _randomStyle = value),
                       ),
+                    if (widget.localMode)
+                      const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 8),
+                        child: Text(
+                            '本机直接／中文／场景抽取为单段采样；本机 HQ 为二段采样。支持角色、画风预设、比例及采样参数。'),
+                      ),
                     ExpansionTile(
                         key: ValueKey('advanced-$_advancedLoaded'),
                         title: const Text('高级设置'),
-                        subtitle: const Text('光影、材质、相机、HQ 修复及采样参数自动保存'),
+                        subtitle: Text(widget.localMode
+                            ? '采样参数自动保存'
+                            : '光影、材质、相机、HQ 修复及采样参数自动保存'),
                         children: [
-                          SettingsSubdrawer(
-                              title: '光影与材质',
-                              revision: _advancedRevision,
-                              children: () => [
-                                    VisualPresetFields(
-                                        api: widget.api,
+                          if (!widget.localMode) ...[
+                            if (!_visualSupported)
+                              const Padding(
+                                  padding: EdgeInsets.all(12),
+                                  child: Text(
+                                      '当前模式不使用光影、材质和相机设置；已保存的选择保留，切回支持模式后生效。')),
+                            if (_nativeUpscale)
+                              const Padding(
+                                  padding: EdgeInsets.all(12),
+                                  child: Text(
+                                      'SeedVR2 不使用采样器、调度器、Steps 或 CFG；这些设置本次不提交。')),
+                            SettingsSubdrawer(
+                                title: '光影与材质',
+                                revision: _advancedRevision,
+                                children: () => [
+                                      VisualPresetFields(
+                                          api: widget.api,
+                                          values: _visual,
+                                          onChanged: (values) {
+                                            setState(() => _visual = values);
+                                            unawaited(_saveAdvanced());
+                                          }),
+                                      const SizedBox(height: 12),
+                                    ]),
+                            SettingsSubdrawer(
+                                title: '构图与视角',
+                                revision: _advancedRevision,
+                                children: () => [
+                                      CameraControlFields(
                                         values: _visual,
                                         onChanged: (values) {
                                           setState(() => _visual = values);
                                           unawaited(_saveAdvanced());
-                                        }),
-                                    const SizedBox(height: 12),
-                                  ]),
-                          SettingsSubdrawer(
-                              title: '构图与视角',
-                              revision: _advancedRevision,
-                              children: () => [
-                                    CameraControlFields(
-                                      values: _visual,
-                                      onChanged: (values) {
-                                        setState(() => _visual = values);
-                                        unawaited(_saveAdvanced());
-                                      },
-                                    ),
-                                  ]),
-                          const Divider(height: 24),
-                          if (hq) ...[
-                            SwitchListTile(
-                              value: _detailHands,
-                              onChanged: (value) => setState(() {
-                                _detailHands = value;
-                                unawaited(_saveAdvanced());
-                              }),
-                              title: const Text('HQ 修复手部'),
-                              subtitle: const Text('默认关闭；仅修补检测到的手部'),
-                              contentPadding: EdgeInsets.zero,
-                            ),
-                            SwitchListTile(
-                              value: _detailFeet,
-                              onChanged: (value) => setState(() {
-                                _detailFeet = value;
-                                unawaited(_saveAdvanced());
-                              }),
-                              title: const Text('HQ 修复脚部'),
-                              subtitle: const Text('默认关闭；需要 foot_yolov8x.pt'),
-                              contentPadding: EdgeInsets.zero,
-                            ),
-                            SwitchListTile(
-                              value: _detailFace,
-                              onChanged: (value) => setState(() {
-                                _detailFace = value;
-                                unawaited(_saveAdvanced());
-                              }),
-                              title: const Text('HQ 修复脸部（备用）'),
-                              subtitle: const Text('默认关闭；仅在脸部确实崩坏时开启'),
-                              contentPadding: EdgeInsets.zero,
-                            ),
-                            SwitchListTile(
-                              value: _detailUpscale,
-                              onChanged: (value) => setState(() {
-                                _detailUpscale = value;
-                                unawaited(_saveAdvanced());
-                              }),
-                              title: const Text('局部修复后继续 SeedVR2 放大'),
-                              subtitle:
-                                  const Text('默认关闭；关闭时直接返回修复结果。手、脚、脸均可分别选择'),
-                              contentPadding: EdgeInsets.zero,
-                            ),
+                                        },
+                                      ),
+                                    ]),
                             const Divider(height: 24),
+                            if (hq) ...[
+                              SwitchListTile(
+                                value: _detailHands,
+                                onChanged: (value) => setState(() {
+                                  _detailHands = value;
+                                  unawaited(_saveAdvanced());
+                                }),
+                                title: const Text('HQ 修复手部'),
+                                subtitle: const Text('默认关闭；仅修补检测到的手部'),
+                                contentPadding: EdgeInsets.zero,
+                              ),
+                              SwitchListTile(
+                                value: _detailFeet,
+                                onChanged: (value) => setState(() {
+                                  _detailFeet = value;
+                                  unawaited(_saveAdvanced());
+                                }),
+                                title: const Text('HQ 修复脚部'),
+                                subtitle: const Text('默认关闭；需要 foot_yolov8x.pt'),
+                                contentPadding: EdgeInsets.zero,
+                              ),
+                              SwitchListTile(
+                                value: _detailFace,
+                                onChanged: (value) => setState(() {
+                                  _detailFace = value;
+                                  unawaited(_saveAdvanced());
+                                }),
+                                title: const Text('HQ 修复脸部（备用）'),
+                                subtitle: const Text('默认关闭；仅在脸部确实崩坏时开启'),
+                                contentPadding: EdgeInsets.zero,
+                              ),
+                              SwitchListTile(
+                                value: _detailUpscale,
+                                onChanged: (value) => setState(() {
+                                  _detailUpscale = value;
+                                  unawaited(_saveAdvanced());
+                                }),
+                                title: const Text('局部修复后继续 SeedVR2 放大'),
+                                subtitle:
+                                    const Text('默认关闭；关闭时直接返回修复结果。手、脚、脸均可分别选择'),
+                                contentPadding: EdgeInsets.zero,
+                              ),
+                              const Divider(height: 24),
+                            ],
                           ],
                           SettingsSubdrawer(
                               title: '调度器、采样器与自定义参数',
@@ -1540,29 +1879,34 @@ class _LiteGeneratePageState extends State<LiteGeneratePage> {
                               children: () => [
                                     DropdownButtonFormField<String>(
                                       initialValue: _sampler,
-                                      decoration: const InputDecoration(
+                                      decoration: InputDecoration(
                                         labelText: '采样器预设',
-                                        helperText: 'DPM 预设默认 30 步、CFG 6',
+                                        helperText: widget.localMode
+                                            ? '未自定义时沿用本机工作流的步数与 CFG'
+                                            : 'DPM 预设默认 30 步、CFG 6',
                                       ),
-                                      items: const [
+                                      items: [
                                         DropdownMenuItem(
                                           value: '',
                                           child: Text('原有 · 沿用工作流采样器'),
                                         ),
                                         DropdownMenuItem(
                                           value: '2m',
-                                          child:
-                                              Text('DPM++ 2M · 30 步 · CFG 6'),
+                                          child: Text(widget.localMode
+                                              ? 'DPM++ 2M'
+                                              : 'DPM++ 2M · 30 步 · CFG 6'),
                                         ),
                                         DropdownMenuItem(
                                           value: '2m_sde',
-                                          child: Text(
-                                              'DPM++ 2M SDE · 30 步 · CFG 6'),
+                                          child: Text(widget.localMode
+                                              ? 'DPM++ 2M SDE'
+                                              : 'DPM++ 2M SDE · 30 步 · CFG 6'),
                                         ),
                                         DropdownMenuItem(
                                           value: '2m_sde_gpu',
-                                          child: Text(
-                                              'DPM++ 2M SDE GPU · 30 步 · CFG 6'),
+                                          child: Text(widget.localMode
+                                              ? 'DPM++ 2M SDE GPU'
+                                              : 'DPM++ 2M SDE GPU · 30 步 · CFG 6'),
                                         ),
                                         DropdownMenuItem(
                                             value: 'original',
@@ -1666,25 +2010,24 @@ class _LiteGeneratePageState extends State<LiteGeneratePage> {
                                     const SizedBox(height: 12),
                                   ]),
                         ]),
-                    TextField(
+                    BilingualPromptField(
                       controller: _promptController,
                       minLines: 4,
                       maxLines: 10,
-                      onChanged: (_) => setState(() {}),
-                      decoration: InputDecoration(
-                        labelText: reverse
-                            ? _reverseOnly
-                                ? '附加提示词（可选，仅追加到返回的合并提示词）'
-                                : '额外提示词（可选，会追加到反推结果）'
-                            : refine
-                                ? '补充/覆盖提示词（历史任务可留空）'
-                                : chinese
-                                    ? '中文描述'
-                                    : random
-                                        ? '补充提示词（可选）'
-                                        : '提示词',
-                        alignLabelWithHint: true,
-                      ),
+                      onChanged: () => setState(() {}),
+                      label: reverse
+                          ? _reverseOnly
+                              ? '附加提示词（可选，仅追加到返回的合并提示词）'
+                              : '额外提示词（可选，会追加到反推结果）'
+                          : refine
+                              ? '补充/覆盖提示词（历史任务可留空）'
+                              : chinese
+                                  ? '中文描述'
+                                  : random
+                                      ? (_localRandom
+                                          ? '附加英文内容（可选）'
+                                          : '补充提示词（可选）')
+                                      : '提示词',
                     ),
                     const SizedBox(height: 16),
                     Container(
@@ -1695,8 +2038,11 @@ class _LiteGeneratePageState extends State<LiteGeneratePage> {
                             .surfaceContainerHighest,
                         borderRadius: BorderRadius.circular(12),
                       ),
-                      child: SelectableText(
-                          _suiteEnabled ? '任务套组已启用，角色与画风按套组逐行替换' : _command()),
+                      child: SelectableText(widget.localMode
+                          ? _promptController.text.trim()
+                          : _suiteActive
+                              ? '任务套组已启用，角色与画风按套组逐行替换'
+                              : _command()),
                     ),
                     if (_job case final job?) ...[
                       const SizedBox(height: 14),
@@ -1731,11 +2077,12 @@ class _LiteGeneratePageState extends State<LiteGeneratePage> {
                       ),
                     ),
                     const SizedBox(height: 10),
-                    OutlinedButton.icon(
-                      onPressed: snapshot.hasError ? null : _copy,
-                      icon: const Icon(Icons.copy_all_outlined),
-                      label: const Text('仅复制指令（备用）'),
-                    ),
+                    if (!_localRandom)
+                      OutlinedButton.icon(
+                        onPressed: snapshot.hasError ? null : _copy,
+                        icon: const Icon(Icons.copy_all_outlined),
+                        label: const Text('仅复制指令（备用）'),
+                      ),
                     if (snapshot.connectionState == ConnectionState.waiting)
                       const Padding(
                           padding: EdgeInsets.only(top: 12),
@@ -1768,7 +2115,11 @@ class _JobStatusCard extends StatelessWidget {
     final (icon, color, label) = switch (job.status) {
       'queued' => (Icons.schedule, Colors.orange, '排队中'),
       'running' => (Icons.auto_awesome, Colors.blue, '生成中'),
-      'succeeded' => (Icons.check_circle, Colors.green, '已发送'),
+      'succeeded' => (
+          Icons.check_circle,
+          Colors.green,
+          job.targetId == 'local' ? '已生成' : '已发送'
+        ),
       _ => (Icons.error, Colors.red, '失败'),
     };
     return Container(
@@ -1787,6 +2138,18 @@ class _JobStatusCard extends StatelessWidget {
               Expanded(child: Text('$label · ${job.message}')),
             ],
           ),
+          if (job.convertedPrompt.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            const Text('中文转换结果'),
+            SelectableText(job.convertedPrompt),
+          ],
+          if (job.finalPrompt.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            const Text('实际提交提示词'),
+            SelectableText(job.finalPrompt),
+          ],
+          PromptProvenanceDetails(
+              jobId: job.id, provenance: job.promptProvenance),
           if (job.promptIds.isNotEmpty) ...[
             const SizedBox(height: 10),
             Text('本次提示词编号', style: Theme.of(context).textTheme.labelMedium),

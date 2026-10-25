@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import hashlib
+import copy
 import json
 import os
 import secrets
+import re
 import shutil
 import threading
 from datetime import datetime
@@ -58,6 +60,17 @@ def clean_categories(values: list[str]) -> list[str]:
     return result
 
 
+def clean_custom_groups(values: list[str]) -> list[str]:
+    result: list[str] = []
+    for raw in values:
+        value = str(raw).strip().casefold()
+        if not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,63}", value):
+            raise RepositoryError("invalid custom group id")
+        if value not in result:
+            result.append(value)
+    return result
+
+
 def new_prompt_id(prefix: str = "hub") -> str:
     return (
         f"{prefix}-{datetime.now().strftime('%Y%m%d-%H%M%S')}-"
@@ -82,6 +95,7 @@ def prompt_entry(payload: dict[str, Any], *, prompt_id: str | None = None) -> di
         "prompt": prompt,
         "prompt_position": "suffix",
         "categories": clean_categories(payload.get("categories", [])),
+        "custom_groups": clean_custom_groups(payload.get("custom_groups", [])),
         "safety_level": SAFETY_NAMES[safety],
         "safety_matches": [],
         "duplicate_of": None,
@@ -191,10 +205,13 @@ def mutate_json(
     target: str,
     mutate: Callable[[dict[str, Any]], Any],
     initialize: Callable[[], dict[str, Any]] | None = None,
+    skip_unchanged: bool = False,
 ) -> tuple[Any, str, Path | None]:
     if not expected_revision:
         raise RepositoryError("If-Match revision is required")
-    with _write_lock:
+    from contextlib import nullcontext
+    from .preset_lock import preset_file_lock
+    with _write_lock, (preset_file_lock(path) if resource == 'presets' else nullcontext()):
         current = file_revision(path, resource).revision or "missing"
         if expected_revision != current:
             raise RevisionConflict(current)
@@ -204,9 +221,15 @@ def mutate_json(
             data = initialize()
         else:
             raise ResourceNotFound(f"resource does not exist: {path}")
+        before = copy.deepcopy(data) if skip_unchanged else None
         result = mutate(data)
         if resource == "prompts":
             _recalculate_prompt_metadata(data)
+        if skip_unchanged and data == before:
+            latest = file_revision(path, resource).revision or "missing"
+            if latest != current:
+                raise RevisionConflict(latest)
+            return result, current, None
         backup = _backup(path, backup_root, resource)
         # AstrBot's QQ-side manager is a separate process and does not share
         # this lock. Recheck immediately before replacement so a concurrent QQ
