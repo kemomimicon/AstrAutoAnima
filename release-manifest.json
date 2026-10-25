@@ -1,5 +1,7 @@
 {
   "public_display_version": "0.5.2-1.44",
+  "installation_revision": "install.1",
+  "installer_selfcheck_review": "20261025-quick-doctor-helper-and-payload-consistency",
   "release_coordination": "video-and-public-image-together-after-acceptance",
   "publication_preparation_date": "2026-10-25",
   "public_image_rebuild_and_acceptance_required": true,

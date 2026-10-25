@@ -477,6 +477,32 @@ def _bypass_lora_node(workflow: dict[str, Any], node_id: str) -> None:
     del workflow[str(node_id)]
 
 
+def _slotless_style_sources(workflow, sampler_node_id, positive_node_id, negative_node_id):
+    """Resolve an unambiguous no-LoRA graph without assuming model node IDs."""
+    if any(isinstance(node, dict) and "lora" in str(node.get("class_type", "")).casefold()
+           for node in workflow.values()):
+        raise WorkflowError("工作流包含 LoRA 节点，但未配置与之匹配的旧槽位；请填写实际节点 ID。")
+
+    def inputs(node_id):
+        node = workflow.get(str(node_id))
+        values = node.get("inputs") if isinstance(node, dict) else None
+        if not isinstance(values, dict):
+            raise WorkflowError(f"动态画风无法定位节点 {node_id} 的 inputs，请核对采样器及提示词节点配置。")
+        return values
+
+    model = inputs(sampler_node_id).get("model")
+    clip = inputs(positive_node_id).get("clip")
+    for link in (model, clip):
+        if not (isinstance(link, list) and len(link) == 2
+                and isinstance(link[0], str) and link[0] in workflow
+                and isinstance(workflow[link[0]], dict)
+                and type(link[1]) is int and link[1] >= 0):
+            raise WorkflowError("动态画风无法从采样器和正向提示词节点定位基础 MODEL/CLIP 接线。")
+    if negative_node_id and inputs(negative_node_id).get("clip") != clip:
+        raise WorkflowError("正负提示词节点的 CLIP 接线不一致，无法安全插入动态画风；请先核对工作流。")
+    return list(model), list(clip)
+
+
 def apply_lora_plan(
     workflow: dict[str, Any],
     *,
@@ -517,32 +543,9 @@ def apply_lora_plan(
                 for node_id in reversed(style_slot_ids):
                     _bypass_lora_node(workflow, node_id)
             else:
-                # Quick workflows have no legacy LoRA slots. Use their existing
-                # MODEL/CLIP connections as the head of the per-task dynamic chain.
-                if any(
-                    isinstance(node, dict) and "lora" in str(node.get("class_type", "")).casefold()
-                    for node in workflow.values()
-                ):
-                    raise WorkflowError("工作流包含 LoRA 节点，但未配置与之匹配的旧槽位；请填写实际节点 ID。")
-                sampler_inputs = workflow.get(str(sampler_node_id), {}).get("inputs", {})
-                positive_inputs = workflow.get(str(positive_node_id), {}).get("inputs", {})
-                base_model = sampler_inputs.get("model") if isinstance(sampler_inputs, dict) else None
-                base_clip = positive_inputs.get("clip") if isinstance(positive_inputs, dict) else None
-                if not all(
-                    isinstance(link, list)
-                    and len(link) == 2
-                    and isinstance(link[0], str) and link[0] in workflow
-                    and isinstance(workflow[link[0]], dict)
-                    and type(link[1]) is int and link[1] >= 0
-                    for link in (base_model, base_clip)
-                ):
-                    raise WorkflowError("动态画风无法从采样器和正向提示词节点定位基础 MODEL/CLIP 接线。")
-                base_model, base_clip = list(base_model), list(base_clip)
-                negative_inputs = workflow.get(str(negative_node_id), {}).get("inputs", {})
-                if negative_node_id and (
-                    not isinstance(negative_inputs, dict) or negative_inputs.get("clip") != base_clip
-                ):
-                    raise WorkflowError("正负提示词节点的 CLIP 连线不一致，无法安全插入动态画风；请先核对工作流。")
+                base_model, base_clip = _slotless_style_sources(
+                    workflow, sampler_node_id, positive_node_id, negative_node_id
+                )
             tail_model, tail_clip = base_model, base_clip
             for index, lora in enumerate(loras):
                 node_id = str(dynamic_style_node_id_start + index)
