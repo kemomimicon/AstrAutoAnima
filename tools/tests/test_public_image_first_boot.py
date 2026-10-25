@@ -13,6 +13,36 @@ boot=importlib.util.module_from_spec(spec);spec.loader.exec_module(boot)
 
 
 class FirstBootTests(unittest.TestCase):
+    def layers(self, temp):
+        base=Path(temp)/'autodl-tmp';base.mkdir();image=Path(temp)/'image';image.mkdir()
+        data=b'public-resource-fixture'
+        archive=image/'runtime.tar.gz'
+        with tarfile.open(archive,'w:gz') as tar:
+            item=tarfile.TarInfo('autodl-tmp/example/shared');item.size=len(data)
+            tar.addfile(item,io.BytesIO(data))
+        extra=image/'public-resources.tar.gz'
+        with tarfile.open(extra,'w:gz') as tar:
+            item=tarfile.TarInfo('autodl-tmp/example/alias');item.type=tarfile.LNKTYPE
+            item.linkname='autodl-tmp/example/shared';tar.addfile(item)
+        manifest={'top_roots':['example'],'unique_bytes':len(data),'sha256':boot.sha256(archive),
+                  'extra_archives':[{'file':extra.name,'sha256':boot.sha256(extra),'entries':1}]}
+        (image/'payload-manifest.json').write_text(json.dumps(manifest))
+        return base,image,manifest
+
+    def test_public_resource_alias_links_to_verified_base_archive(self):
+        with tempfile.TemporaryDirectory() as temp,contextlib.redirect_stdout(io.StringIO()):
+            base,image,_=self.layers(temp);boot.extract(image,base)
+            self.assertEqual((base/'example/alias').read_bytes(),b'public-resource-fixture')
+            self.assertEqual((base/'example/alias').stat().st_ino,(base/'example/shared').stat().st_ino)
+
+    def test_all_archive_hashes_are_checked_before_writing(self):
+        with tempfile.TemporaryDirectory() as temp,contextlib.redirect_stdout(io.StringIO()):
+            base,image,manifest=self.layers(temp)
+            manifest['extra_archives'][0]['sha256']='0'*64
+            (image/'payload-manifest.json').write_text(json.dumps(manifest))
+            with self.assertRaises(ValueError):boot.extract(image,base)
+            self.assertFalse((base/'example').exists())
+
     def create(self, base):
         root=base/'aaa-install'; defaults=root/'.image-defaults';defaults.mkdir(parents=True)
         (defaults/'templates.json').write_text(json.dumps({'env_full':{'AAH_ASTRBOT_API_KEY':''},'env_local':{},'astrbot':{'dashboard':{}}}))

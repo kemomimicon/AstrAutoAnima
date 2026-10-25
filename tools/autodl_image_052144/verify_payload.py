@@ -58,7 +58,20 @@ def main():
     astro=defaults['astrbot']
     if any(astro.get(k) for k in ['platform','provider_sources','provider','admins_id']):raise ValueError('AstrBot template carries configured identity')
     if any(astro['dashboard'].get(k) for k in ['password','pbkdf2_password','jwt_secret']):raise ValueError('AstrBot template carries password')
-    result={'schema':1,'archive_sha256':manifest['sha256'],'entries':count,'small_files_credential_scanned':scanned,'known_credentials_absent':True,'optional_weights_excluded':True,'private_runtime_paths_excluded':True,'crc_stream_read_ok':True,'status':'payload-integrity-and-privacy-verified'}
+    extras=0
+    for row in manifest.get('extra_archives',[]):
+        path=IMAGE/row['file']
+        if path.parent!=IMAGE or sha256(path)!=row['sha256']:raise ValueError('Supplemental archive SHA mismatch')
+        added=0
+        with tarfile.open(path,'r:gz') as tar:
+            for item in tar:
+                if not allowed_member(item) or item.name in names:raise ValueError('Supplemental archive path')
+                # Public resource aliases refer only to already-verified base members.
+                if not item.islnk() or item.linkname not in names:raise ValueError('Supplemental resource link')
+                names.add(item.name);added+=1
+        if added!=row['entries']:raise ValueError('Supplemental member count')
+        extras+=added
+    result={'schema':1,'archive_sha256':manifest['sha256'],'entries':count,'supplemental_entries':extras,'small_files_credential_scanned':scanned,'known_credentials_absent':True,'optional_weights_excluded':True,'private_runtime_paths_excluded':True,'crc_stream_read_ok':True,'status':'payload-integrity-and-privacy-verified'}
     (IMAGE/'payload-validation.json').write_text(json.dumps(result,indent=2)+'\n')
     print('PAYLOAD_VALIDATED',json.dumps(result),flush=True)
 

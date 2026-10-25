@@ -126,20 +126,28 @@ def extract(image, base):
             raise ValueError('Existing destination found; no merge or overwrite: ' + str(path))
     if shutil.disk_usage(base).free < manifest['unique_bytes'] + 2 * 1024**3:
         raise ValueError('Insufficient data disk; free payload size plus 2 GiB first')
-    print('Verifying compressed payload SHA256; please wait.', flush=True)
-    if sha256(archive) != manifest['sha256']:
-        raise ValueError('Payload SHA256 mismatch; no extraction started')
+    archives = [(archive, manifest['sha256'])]
+    for extra in manifest.get('extra_archives', []):
+        name = extra['file']
+        if Path(name).name != name or not name.endswith('.tar.gz'):
+            raise ValueError('Invalid supplemental archive name')
+        archives.append((image / name, extra['sha256']))
+    print('正在校验运行环境，请稍候。', flush=True)
+    for path, expected in archives:
+        if sha256(path) != expected:
+            raise ValueError('运行环境校验失败：' + path.name)
     print('Extracting payload to original absolute paths; do not interrupt.', flush=True)
     # Stream in archive order; hardlinks refer to preceding archive members.
-    with tarfile.open(archive, 'r|gz') as tar:
-        count = 0
-        for member in tar:
-            if not allowed_member(member):
-                raise ValueError('Unsafe archive entry; extraction stopped')
-            tar.extract(member, path=base.parent, filter='data')
-            count += 1
-            if count % 10000 == 0:
-                print('Extracted entries:', count, flush=True)
+    count = 0
+    for path, _ in archives:
+        with tarfile.open(path, 'r|gz') as tar:
+            for member in tar:
+                if not allowed_member(member):
+                    raise ValueError('Unsafe archive entry; extraction stopped')
+                tar.extract(member, path=base.parent, filter='data')
+                count += 1
+                if count % 10000 == 0:
+                    print('已释放文件：', count, flush=True)
     print('Extraction finished:', count, flush=True)
 
 
