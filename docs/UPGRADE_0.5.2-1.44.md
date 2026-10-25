@@ -112,7 +112,7 @@ python3 -B update.py --rollback /your/AAA-install/aaa_update_backups/to_0.5.2-1.
 - 提示版本比补丁新：不要降级，用匹配的新版本更新包。
 - 缺 Pillow/aiohttp：使用实际 AstrBot Python 补齐；Desktop 通过其插件管理器处理。
 - 缺 Hub 依赖：按提示选择补齐依赖，或由管理员在该 Hub Python 环境安装。
-- 旧令牌长度不足：新版要求 Hub 管理员令牌至少 32 字符，个人令牌也需满足长度且与管理员令牌不同；工具停止更新，由本人先处理，不会自动轮换密钥。
+- 旧令牌长度不足：新版要求 Hub 管理员令牌至少 32 字符，旧全局 AAH_LITE_TOKEN（如配置）也需满足长度且与管理员令牌不同；工具停止更新，由本人先处理，不会自动轮换用户表中的个人令牌。
 - 新 HQ/反推/放大选项未绑定：在独立模板目录中配置自己的模型并选择，原工作流保持可用。
 
 完整操作见 docs/TOOLS.md、docs/TROUBLESHOOTING.md。反馈可在 bilibili 联系「ケモミミロリコン」，附旧版本、更新日志和报错截图，收起凭据。

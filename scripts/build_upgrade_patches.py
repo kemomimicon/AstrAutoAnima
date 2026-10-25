@@ -71,7 +71,7 @@ def build(baseline,output):
         entries=create_entries(base,platform,commit)
         with zipfile.ZipFile(path,'x',compression=zipfile.ZIP_DEFLATED,compresslevel=6) as archive:
             for name,data in sorted(entries.items()):
-                info=zipfile.ZipInfo(prefix+'/'+name,TIME);info.external_attr=(0o755 if name.endswith('.sh') else 0o644)<<16
+                info=zipfile.ZipInfo(prefix+'/'+name,TIME);info.create_system=3;info.external_attr=(0o755 if name.endswith('.sh') else 0o644)<<16
                 info.compress_type=zipfile.ZIP_STORED if name.endswith('.zip') else zipfile.ZIP_DEFLATED
                 archive.writestr(info,data)
         if read_zip(path.read_bytes(),True)!=entries:raise ValueError('补丁回读校验失败')
