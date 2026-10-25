@@ -317,13 +317,18 @@ class RelocationTests(unittest.TestCase):
         with self.assertRaises(r.RepairError): r.prepare_repair(dest)
 
     def test_real_venv_migration_repairs_pth_import(self):
+        # Keep the runtime fixture representable by its real Windows locale;
+        # synthetic CP936/Chinese fixtures above exercise decoding separately.
+        runtime_temp = tempfile.TemporaryDirectory(prefix='AAA-runtime-')
+        self.addCleanup(runtime_temp.cleanup)
+        runtime_base = Path(runtime_temp.name)
         native_encoding = r.locale.getencoding()
         try:
             '中文'.encode(native_encoding)
             suffix = ' 中文'
         except UnicodeEncodeError:
             suffix = ''
-        source, dest = self.base / ('real source' + suffix), self.base / ('real moved' + suffix)
+        source, dest = runtime_base / ('real source' + suffix), runtime_base / ('real moved' + suffix)
         source.mkdir()
         dest.mkdir()  # Match the user's folder-picker-created empty directory.
         put(source / r.MARKER, b''); put(source / 'Start.cmd', b'@echo off')
