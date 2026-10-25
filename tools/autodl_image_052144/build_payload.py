@@ -31,7 +31,8 @@ def tree(paths, root, exclude=()):
         raise ValueError('Source directory: ' + str(root))
     for parent, dirs, files in os.walk(root, followlinks=False):
         current = Path(parent)
-        dirs[:] = sorted(n for n in dirs if n not in SKIP and (current/n).relative_to(root).as_posix() not in exclude)
+        skip = SKIP - {'node_modules'} if root.name == 'node-v22.20.0-linux-x64' else SKIP
+        dirs[:] = sorted(n for n in dirs if n not in skip and (current/n).relative_to(root).as_posix() not in exclude)
         paths.add(current)
         for name in dirs + sorted(files):
             p = current/name
@@ -144,6 +145,7 @@ def build():
                         resolved=p.resolve()
                         if resolved.is_relative_to(Path('/root/miniconda3/bin')) and resolved.is_file() and p.name.startswith('python'):
                             source=resolved;info.type=tarfile.REGTYPE;info.linkname='';info.size=resolved.stat().st_size
+                            info.mode=resolved.stat().st_mode & 0o777
                         else:
                             if info.linkname.startswith('/'):
                                 if not resolved.is_relative_to(BASE):raise ValueError('External link: '+name)
