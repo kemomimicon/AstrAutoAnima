@@ -52,7 +52,7 @@ bash /root/AAA-Credentials.sh --show hub --profile full
 ## 4. 词库、词典与 Studio
 
 - G 组词库已装配，可继续导入自己的分组和条目。
-- V 国风古韵在本机工作站模式使用；切换入口为 `Start-Local.sh`，配置与完整服务模式分别保存。
+- V 国风古韵已接通完整服务和本机工作站两种模式，可在来张好图中选择。
 - 角色词典可在管理端查询和装配；LoRA 文件与角色预设按自己的模型选择。
 - Studio 已安装独立环境，复用基础模型；在管理端的扩展页打开，即可准备数据、配置训练项目。
 - 可视化词库编辑器、批量导入导出、令牌管理、搬家与路径修复工具均在对应发行包的工具目录。
@@ -66,7 +66,12 @@ python3 /opt/aaa-image-052144/optional_models.py \
   --profile seedvr2-fp16 --mode modelscope --apply --accept-model-license
 ```
 
-下载后正常重启 ComfyUI，再在管理端选择 SeedVR2。图像及 VAE 分块保持关闭。
+下载后用下面两条命令重启 ComfyUI，再在管理端选择 SeedVR2。图像及 VAE 分块保持关闭。
+
+```bash
+bash /opt/aaa-image-052144/Service.sh comfy stop --apply --confirm-idle
+bash /root/AAA-Start.sh
+```
 JoyCaption、量化模型与 NapCat 安装入口见仓库 `docs/EXTENSIONS_GUIDE.md`、`docs/NAPCAT_SETUP.md`。
 QQ 使用者完成扫码登录后，将 NapCat WebSocket 客户端连接到 `ws://127.0.0.1:6199/ws`，
 两端填写同一个 OneBot Token。
