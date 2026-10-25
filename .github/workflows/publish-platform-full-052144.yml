@@ -1,0 +1,78 @@
+name: publish-platform-full-052144
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPOSITORY: kemomimicon/AstrAutoAnima
+      TAG: v0.5.2-1.44
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: 8abedc6
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Download the published integrity-pinned install.2 baseline
+        run: |
+          mkdir -p "$RUNNER_TEMP/input" "$RUNNER_TEMP/output"
+          gh release download "$TAG" --repo "$REPOSITORY" --dir "$RUNNER_TEMP/input" --pattern 'AstrAutoAnima-0.5.2-1.44-install.2-complete.zip' --pattern 'PLATFORM_PACKAGE_ACCEPTANCE.json'
+      - name: Reproduce the complete suites from the frozen public source
+        run: |
+          python -B scripts/build_platform_full_suites.py --baseline "$RUNNER_TEMP/input/AstrAutoAnima-0.5.2-1.44-install.2-complete.zip" --output "$RUNNER_TEMP/output"
+      - name: Check actual ZIPs, nested components and manifests
+        run: |
+          python -B - <<'PY'
+          import hashlib,json,os,sys
+          from pathlib import Path
+          sys.path[:0]=['scripts','tools']
+          from build_platform_full_suites import read_zip
+          from verify_complete_suite import verify
+          from verify_release_archives import check
+          temp=Path(os.environ['RUNNER_TEMP']);out=temp/'output'
+          previous=json.loads((temp/'input/PLATFORM_PACKAGE_ACCEPTANCE.json').read_text())
+          reports=[];cache={}
+          for platform in ['Windows','Linux']:
+              z=out/f'AstrAutoAnima-{platform}-0.5.2-1.44-Full.zip'
+              entries=read_zip(z.read_bytes(),True);root=temp/'validation'/platform;root.mkdir(parents=True)
+              for name,data in entries.items():
+                  p=root/name;p.parent.mkdir(parents=True,exist_ok=True);p.write_bytes(data)
+              count=verify(root);assert not check(z)
+              nested=[]
+              for p in root.rglob('*'):
+                  if p.is_file() and p.suffix in {'.zip','.apk'}:
+                      digest=hashlib.sha256(p.read_bytes()).hexdigest()
+                      if digest not in cache:cache[digest]=check(p)
+                      assert not cache[digest],p.name
+                      nested.append({'name':p.relative_to(root).as_posix(),'sha256':digest})
+              old=next(r for r in previous['platforms'] if r['platform']==platform)
+              # Compiled software and nested component archives must retain the local acceptance bytes.
+              for item in nested:
+                  if not item['name'].startswith('source/'):
+                      assert item in old['nested_assets']
+              reports.append({'platform':platform,'archive':z.name,'bytes':z.stat().st_size,'sha256':hashlib.sha256(z.read_bytes()).hexdigest(),'manifest_files_verified':count,'outer_privacy_structure_passed':True,'nested_components_privacy_passed':True,'nested_assets':nested})
+          manifest=json.loads((temp/'validation/Windows/suite-manifest.json').read_text())
+          previous['platforms']=reports
+          previous['github_runner_rebuild']='same frozen public source; compiled component bytes unchanged'
+          (out/'PLATFORM_PACKAGE_ACCEPTANCE.json').write_text(json.dumps(previous,ensure_ascii=False,indent=2)+'\n')
+          public={'public_display_version':'0.5.2-1.44','public_build':44,'packaging_revision':'full.1','package_source_commit':manifest['package_source_commit'],'component_source_commit':manifest['component_source_commit'],'platforms':reports,'models_downloaded_by_user_selection':True,'private_data_included':False,'readme':'00_安装与使用说明.html'}
+          (out/'platform-full-assets.json').write_text(json.dumps(public,ensure_ascii=False,indent=2)+'\n')
+          print('PASS: both actual full suites and unchanged compiled components')
+          PY
+          find "$RUNNER_TEMP/validation/Linux" -name '*.sh' -exec sh -n '{}' \;
+      - name: Publish only the two platform suites and their companion files
+        working-directory: ${{ runner.temp }}/output
+        run: |
+          gh release upload "$TAG" --repo "$REPOSITORY" --clobber ./*.zip ./*.sha256.txt ./*-README.txt ./PLATFORM_FULL_SHA256SUMS.txt ./platform-full-assets.json ./PLATFORM_PACKAGE_ACCEPTANCE.json
