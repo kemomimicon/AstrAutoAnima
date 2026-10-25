@@ -317,7 +317,13 @@ class RelocationTests(unittest.TestCase):
         with self.assertRaises(r.RepairError): r.prepare_repair(dest)
 
     def test_real_venv_migration_repairs_pth_import(self):
-        source, dest = self.base / 'real source 中文', self.base / 'real moved 中文'
+        native_encoding = r.locale.getencoding()
+        try:
+            '中文'.encode(native_encoding)
+            suffix = ' 中文'
+        except UnicodeEncodeError:
+            suffix = ''
+        source, dest = self.base / ('real source' + suffix), self.base / ('real moved' + suffix)
         source.mkdir()
         dest.mkdir()  # Match the user's folder-picker-created empty directory.
         put(source / r.MARKER, b''); put(source / 'Start.cmd', b'@echo off')
@@ -325,11 +331,11 @@ class RelocationTests(unittest.TestCase):
         put(source / 'hub/src/astr_auto_anima_hub/__init__.py', b'# harmless test module\n')
         result = subprocess.run([sys.executable, '-m', 'venv', '--without-pip', str(source / 'hub/.venv')], capture_output=True)
         self.assertEqual(result.returncode, 0)
-        put(source / 'hub/.venv/Lib/site-packages/test-editable.pth', (str(source / 'hub/src') + '\r\n').encode('cp936'))
+        put(source / 'hub/.venv/Lib/site-packages/test-editable.pth', (str(source / 'hub/src') + '\r\n').encode(native_encoding))
         put(source / 'runtime-env.json', {'AAH_ADMIN_TOKEN': 'test-unchanged'})
         put(source / 'services.json', [{'name': 'Hub', 'cwd': str(source / 'hub'),
             'command': [str(source / 'hub/.venv/Scripts/python.exe'), '-m', 'astr_auto_anima_hub'], 'port': 6278}])
-        with patch.object(r, 'assert_idle'), patch.object(r.locale, 'getencoding', return_value='cp936'):
+        with patch.object(r, 'assert_idle'), patch.object(r.locale, 'getencoding', return_value=native_encoding):
             r.migrate_install(source, dest, lambda _: None)
         r.check_runtime(r.prepare_repair(dest))
         self.assertTrue((source / 'hub/.venv/Scripts/python.exe').is_file())
@@ -338,7 +344,7 @@ class RelocationTests(unittest.TestCase):
             # Test the shipped EXE, not just the source module: reintroduce stale
             # references in THIS disposable fixture and verify real repair/probe.
             put(dest / 'services.json', r.read_json(source / 'services.json'))
-            put(dest / 'hub/.venv/Lib/site-packages/test-editable.pth', (str(source / 'hub/src') + '\r\n').encode('cp936'))
+            put(dest / 'hub/.venv/Lib/site-packages/test-editable.pth', (str(source / 'hub/src') + '\r\n').encode(native_encoding))
             result = subprocess.run([exe, '--repair', str(dest), '--confirm'], timeout=50,
                 creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
             self.assertEqual(result.returncode, 0)

@@ -178,7 +178,7 @@ class GuFengResourceTests(unittest.TestCase):
         deployer.deploy(local, lambda _: None)
         local_environment = json.loads((root / 'runtime-env.local.json').read_text('utf-8'))
         catalog = root / 'hub/resources/gufeng/cards.sqlite3'
-        self.assertEqual(local_environment[resource.ENV_KEY], str(catalog))
+        self.assertEqual(Path(local_environment[resource.ENV_KEY]).resolve(), catalog.resolve())
         local_environment['MY_USER_SETTING'] = 'keep'
         deployer.json_write(root / 'runtime-env.local.json', local_environment)
         pool = root / 'data/local/anima_random_prompt_pool.json'

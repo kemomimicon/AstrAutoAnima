@@ -80,8 +80,12 @@ class DeploymentCLIEntryTests(unittest.TestCase):
             before = plan.read_bytes()
             result = subprocess.run([sys.executable, '-B', str(DEPLOY), '--plan', str(plan)],
                                     cwd=ROOT, capture_output=True, text=True, encoding='utf-8')
-            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
-            self.assertIn('追加 --apply', result.stdout)
+            if sys.version_info < (3, 12):
+                self.assertEqual(result.returncode, 1)
+                self.assertIn('Python 3.12+', result.stderr)
+            else:
+                self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+                self.assertIn('追加 --apply', result.stdout)
             self.assertFalse(destination.exists())
             self.assertEqual(plan.read_bytes(), before)
 

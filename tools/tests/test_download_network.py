@@ -88,9 +88,11 @@ class DownloadTests(unittest.TestCase):
         process.__enter__.return_value = process
         process.returncode = 0
         process.communicate.return_value = (b'', None)
-        with (patch('download_network.subprocess.run', return_value=subprocess.CompletedProcess([], 0, 'curl Schannel', '')),
+        partial = Path('missing.part')
+        with (patch('download_network.os.name', 'nt'),
+              patch('download_network.subprocess.run', return_value=subprocess.CompletedProcess([], 0, 'curl Schannel', '')),
               patch('download_network.subprocess.Popen', return_value=process) as spawn):
-            fetch_public_file('curl', 'https://example.invalid/file', Path('missing.part'), lambda _: None,
+            fetch_public_file('curl', 'https://example.invalid/file', partial, lambda _: None,
                               DownloadNetwork(revoke_best_effort=True))
         self.assertIn('--ssl-revoke-best-effort', spawn.call_args.args[0])
 
