@@ -1,0 +1,47 @@
+name: autodl-image-materials
+
+on:
+  push:
+    paths:
+      - '.github/workflows/autodl-image-materials.yml'
+      - 'tools/autodl_public_image_20261025/**'
+      - 'tools/tests/test_autodl_image*.py'
+      - 'scripts/check_autodl_image_materials.py'
+      - 'docs/AUTODL_*.md'
+      - 'examples/autodl_image_acceptance.pending.json'
+  pull_request:
+    paths:
+      - '.github/workflows/autodl-image-materials.yml'
+      - 'tools/autodl_public_image_20261025/**'
+      - 'tools/tests/test_autodl_image*.py'
+      - 'scripts/check_autodl_image_materials.py'
+      - 'docs/AUTODL_*.md'
+      - 'examples/autodl_image_acceptance.pending.json'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  offline-materials:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ['3.11', '3.12']
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python }}
+      - name: CPU-only fixture tests, not cloud or GPU acceptance
+        run: python -B -m unittest discover -s tools/tests -p 'test_autodl_image*.py' -v
+      - name: Validate materials and pending acceptance boundary
+        run: python -B scripts/check_autodl_image_materials.py
+      - name: Existing repository privacy scan
+        run: python -B scripts/privacy_scan.py .

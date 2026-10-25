@@ -1,5 +1,11 @@
 # AstrAutoAnima
 
+> **AutoDL 公开镜像准备中，尚未发布。** 候选镜像基线为 `0.5.2-beta.1/build44`，
+> 与下面现有 `0.5.0-beta.2` 下载包不同。本次仅准备镜像文档和只读检查工具，
+> 不升级本分支的运行时代码，也不表示克隆验收已通过。
+> 见 [镜像使用说明](docs/AUTODL_IMAGE.md)、[公开发布检查表](docs/AUTODL_IMAGE_PUBLISH.md)
+> 和 [平台发布文案草稿](docs/AUTODL_ART_DESCRIPTION.md)。不要用本分支旧版安装器覆盖镜像恢复目录。
+
 > **2026-10-17 恢复发布：0.5.0-beta.2-remake.2。** 据维护者最新反馈，此前 Windows `hostbuf_file_reader_read failed` 问题未复现为补丁缺陷，目前无证据将其归因于本补丁；恢复原版本及附件，不宣称已修复该 ComfyUI 错误。保持 Beta 验证边界。已被替代的 remake.1 继续保留为草稿。[下载发布包](https://github.com/kemomimicon/AstrAutoAnima/releases/tag/v0.5.0-beta.2-remake.2) · [升级说明](docs/REMAKE_HOTFIX.md)。已有用户优先使用代码补丁，不覆盖个人词库与配置；已经安装 remake.2 的用户无需重复更新。
 
 > Windows 紧急补丁：**0.5.0-beta.2-windows.2**。新增按目标 ComfyUI 枚举匹配 LoRA 路径，修复“列表中有但 Value not in list”；包含 windows.1 的假休眠、反推保存、词典和清理保护及此前 Quick 动态画风修复。已部署用户请按 [最小补丁说明](docs/WINDOWS_COMPAT_HOTFIX.md) 更新，不要覆盖个人数据。

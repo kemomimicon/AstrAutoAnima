@@ -1,0 +1,29 @@
+{
+  "schema": 1,
+  "candidate": "AAA-0.5.2-beta.1-build44-AutoDL-20261024",
+  "baseline_software": "0.5.2-beta.1/build44",
+  "deployment_revision": "entryfix.1",
+  "payload_sha256": "4fe464b162af9a4f3c706fec22f632674bf9b75379ad6f63d114e877e594f196",
+  "template_only": true,
+  "public_release_approved": false,
+  "gates": {
+    "exact_public_source_mapping": "pending",
+    "third_party_redistribution": "pending",
+    "host_and_payload_privacy": "pending",
+    "new_instance_ssh_jupyter_identity": "pending",
+    "independent_application_credentials": "pending",
+    "payload_restore": "pending",
+    "password_change_and_restart": "pending",
+    "gpu_base_generation": "pending",
+    "openapi_authentication": "pending",
+    "qq_delivery_and_reply_link": "pending",
+    "client_preview_download": "pending",
+    "libraries_and_character_dictionary": "pending",
+    "studio_without_training": "pending",
+    "seedvr2_optional_inference": "pending",
+    "clean_final_candidate_restore": "pending"
+  },
+  "excluded_capabilities": ["JoyCaption complete inference environment", "automatic training", "image or VAE tiling"],
+  "evidence": {},
+  "note": "Template, not a completed report. Copy before filling; never include credentials or private screenshots."
+}
