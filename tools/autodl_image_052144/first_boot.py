@@ -89,10 +89,10 @@ def initialize(root, image, napcat):
              'totpSecret': '', 'ipWhitelist': [], 'ipBlacklist': [], 'enableXForwardedFor': False}
     private_json(napcat, webui)
     private_json(root / '.image-initialized.json', {'schema': 1, 'image': '0.5.2-1.44-image.1', 'credentials_independent': True})
-    print('Initialized independent credentials. Values were NOT printed.')
-    print('Private credential record:', root / 'INITIAL_CREDENTIALS.json')
-    print('View deliberately: bash /opt/aaa-image-052144/Show-Credentials.sh --show initial')
-    print('OpenAPI Key and OneBot setup still require your own authorization. Read IMAGE_START_HERE.txt.')
+    print('首次配置已生成，凭据文件：', root / 'INITIAL_CREDENTIALS.json')
+    print('查看账号密码：bash /root/AAA-Credentials.sh --show initial')
+    print('查看管理令牌：bash /root/AAA-Credentials.sh --show hub --profile full')
+    print('下一步：登录 AstrBot 创建 OpenAPI Key，再在 AAA 管理端完成连接。')
 
 
 def allowed_member(member):
@@ -206,5 +206,5 @@ if __name__ == '__main__':
     os.umask(0o077)
     try:
         main()
-    except (ValueError, OSError, KeyError, tarfile.TarError):
-        raise SystemExit('STOPPED: no secret values printed. Inspect image status and private configuration; never delete an existing installation to bypass this check.')
+    except (ValueError, OSError, KeyError, tarfile.TarError) as exc:
+        raise SystemExit('启动失败：' + str(exc) + '\n启动日志：/root/autodl-tmp/AAA-image-start.log\n反馈：bilibili「ケモミミロリコン」')

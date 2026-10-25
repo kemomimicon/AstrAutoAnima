@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+exec > >(tee -a /root/autodl-tmp/AAA-image-start.log) 2>&1
 if [[ -x /root/autodl-tmp/aaa-bootstrap-py312/bin/python ]]; then
     aaa_python=/root/autodl-tmp/aaa-bootstrap-py312/bin/python
 elif [[ -x /root/miniconda3/bin/python3 ]]; then

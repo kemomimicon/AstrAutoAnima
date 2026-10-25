@@ -67,7 +67,7 @@ python3 /opt/aaa-image-052144/optional_models.py \
 ```
 
 下载后正常重启 ComfyUI，再在管理端选择 SeedVR2。图像及 VAE 分块保持关闭。
-JoyCaption、量化模型与 NapCat 安装入口见仓库 `docs/EXTENSIONS.md`、`docs/NAPCAT_SETUP.md`。
+JoyCaption、量化模型与 NapCat 安装入口见仓库 `docs/EXTENSIONS_GUIDE.md`、`docs/NAPCAT_SETUP.md`。
 QQ 使用者完成扫码登录后，将 NapCat WebSocket 客户端连接到 `ws://127.0.0.1:6199/ws`，
 两端填写同一个 OneBot Token。
 
