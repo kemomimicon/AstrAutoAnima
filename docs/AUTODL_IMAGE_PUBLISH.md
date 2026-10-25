@@ -2,6 +2,11 @@
 
 发行软件版本：**0.5.2-1.44 / build44 / install.2**。
 
+本次母版：`image-7476818e64`，`AstrAutoAnima-0.5.2-1.44-V042`，11.34GB。
+2026-10-25 已在 RTX 5090 新实例完成恢复、首次改密重启、基础生图和 Hub 图片下载验收。
+验收记录：`docs/acceptance/AUTODL_0.5.2-1.44_IMAGE1.json`。
+镜像内源码提交为 `6bb7d6d81f8de1585885f5fc72ce6dd99ba4249e`；后续发行材料更新保留这一对应关系。
+
 ## 1. 准备镜像母版
 
 使用新建的发布副本，放入对应版本仓库 `/root/AstrAutoAnima`、启动工具、许可证和初始化说明。
@@ -26,6 +31,9 @@ SeedVR2 大权重和 JoyCaption 通过勾选项下载。
 3. 导入上一步新保存的镜像。
 4. 镜像 README 使用 [平台介绍](AUTODL_ART_DESCRIPTION.md)。
 5. 提交后根据平台审核结果补充材料。
+
+导入参数：平台数字版本填 `44`，描述中写完整版本 `0.5.2-1.44`；PyTorch `2.11.0`，
+CUDA `12.8`，建议数据盘 `50GB`。选择上述已验收的母版，验收实例中的个人设置保留在验收数据盘。
 
 `/root/AstrAutoAnima` 提供对应源码；可运行 `python3 -B scripts/validate_release.py .` 验证仓库结构。
 镜像内容按 [第三方清单](AUTODL_IMAGE_REDISTRIBUTION.md) 配套许可证和来源。

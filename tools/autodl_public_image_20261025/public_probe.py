@@ -9,14 +9,13 @@ import sys
 
 sys.dont_write_bytecode = True
 
-EXPECTED_SHA = "4fe464b162af9a4f3c706fec22f632674bf9b75379ad6f63d114e877e594f196"
-EXPECTED_BYTES = 18253077643
-EXPECTED_ENTRIES = 148043
-EXPECTED_UNIQUE_BYTES = 28335000502
+EXPECTED_SHA = "416ca962fc1c78c024dce0396775f1991184dc630d60e783e7a4b5cefa61dbf9"
+EXPECTED_BYTES = 11928121690
+EXPECTED_ENTRIES = 129054
+EXPECTED_UNIQUE_BYTES = 18850893037
 EXPECTED_ROOTS = {
     "aaa-install", "apps/AnimaLoraStudio", "apps/node-v22.20.0-linux-x64",
     "apps/Start-Studio.sh", "aaa-bootstrap-py312",
-    "aaa-upload-build44/AstrAutoAnima-0.5.2-beta.1",
 }
 
 
@@ -31,7 +30,7 @@ def add(report, name, state, message):
 def probe(image: Path, repo: Path, full_hash: bool = False) -> dict:
     report = {
         "schema": 1,
-        "probe_revision": "20261025.1",
+        "probe_revision": "20261025.2",
         "purpose": "read-only CPU structural inspection; not release approval",
         "services_started": False, "files_written": False, "network_used": False,
         "gpu_test": "not performed", "privacy_certification": "not performed",
@@ -80,8 +79,8 @@ def probe(image: Path, repo: Path, full_hash: bool = False) -> dict:
         add(report, "archive_sha256", "pass" if matched else "fail",
             "Sealed payload SHA256 matches." if matched else "SHA256 mismatch; no extraction attempted.")
     else:
-        add(report, "archive_sha256", "pending", "Not hashed. --verify-payload reads about 17 GiB; nothing is extracted.")
-    for filename in ("image_first_boot.py", "Start-Image.sh", "Show-Credentials.sh"):
+        add(report, "archive_sha256", "pending", "Not hashed. --verify-payload reads about 11.1 GiB; nothing is extracted.")
+    for filename in ("first_boot.py", "Start-Image.sh", "Show-Credentials.sh"):
         p = image / filename
         ok = unlinked(p) and p.is_file()
         add(report, "entry_" + filename, "pass" if ok else "fail", "Present; not executed." if ok else "Missing or linked entry.")
@@ -103,9 +102,9 @@ def finish(report):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--image-dir", type=Path, default=Path("/opt/aaa-image-20261024"))
+    parser.add_argument("--image-dir", type=Path, default=Path("/opt/aaa-image-052144"))
     parser.add_argument("--repo", type=Path, default=Path("/root/AstrAutoAnima"))
-    parser.add_argument("--verify-payload", action="store_true", help="Stream SHA256 of the existing 17 GiB archive; no extraction.")
+    parser.add_argument("--verify-payload", action="store_true", help="Stream SHA256 of the existing 11.1 GiB archive; no extraction.")
     args = parser.parse_args(argv)
     try:
         result = probe(args.image_dir, args.repo, args.verify_payload)

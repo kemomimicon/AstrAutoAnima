@@ -1,10 +1,10 @@
 {
   "schema": 1,
   "public_display_version": "0.5.2-1.44",
-  "candidate": "AAA-0.5.2-beta.1-build44-AutoDL-20261024",
+  "candidate": "AstrAutoAnima-0.5.2-1.44-V042",
   "baseline_software": "0.5.2-beta.1/build44",
-  "deployment_revision": "entryfix.1",
-  "payload_sha256": "4fe464b162af9a4f3c706fec22f632674bf9b75379ad6f63d114e877e594f196",
+  "deployment_revision": "image.1",
+  "payload_sha256": "416ca962fc1c78c024dce0396775f1991184dc630d60e783e7a4b5cefa61dbf9",
   "template_only": true,
   "public_release_approved": false,
   "gates": {
@@ -24,7 +24,11 @@
     "seedvr2_optional_inference": "pending",
     "clean_final_candidate_restore": "pending"
   },
-  "excluded_capabilities": ["JoyCaption complete inference environment", "automatic training", "image or VAE tiling"],
+  "excluded_capabilities": [
+    "JoyCaption complete inference environment",
+    "automatic training",
+    "image or VAE tiling"
+  ],
   "evidence": {},
   "note": "Template, not a completed report. Copy before filling; never include credentials or private screenshots."
 }

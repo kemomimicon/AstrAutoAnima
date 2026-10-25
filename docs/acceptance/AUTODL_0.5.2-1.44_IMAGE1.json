@@ -1,0 +1,80 @@
+{
+  "success": true,
+  "source_image": "image-7476818e64",
+  "payload_sha256": "416ca962fc1c78c024dce0396775f1991184dc630d60e783e7a4b5cefa61dbf9",
+  "scope": "fresh_cloud_image_restore_first_login_restart_OpenAPI_Hub_GPU_generation_and_download",
+  "base": {
+    "preflight": {
+      "fresh_data_disk": true,
+      "source_image": "image-7476818e64",
+      "V_version": "0.4.2",
+      "GPU": "NVIDIA GeForce RTX 5090, 32607 MiB, 595.71.05",
+      "fresh_SSH_host_key": true,
+      "public_source_commit": "6bb7d6d81f8de1585885f5fc72ce6dd99ba4249e"
+    },
+    "restored_components": {
+      "one_command_restore": true,
+      "initial_password_login": true,
+      "separate_full_local_admin_tokens": true,
+      "OpenAPI_key_starts_blank": true,
+      "V_full_local_alias_and_hash": true,
+      "character_count": 21051,
+      "Studio_ready": true,
+      "Comfy_CUDA_health": true,
+      "AnimaReverseCompiler": true
+    },
+    "repeat_start": {
+      "existing_credentials_preserved": true
+    },
+    "base_generation": {
+      "canvas": "1024x1536",
+      "single_image": true,
+      "HTTP_download_matches_output": true,
+      "image_sha256": "531d7cbbc5910ca10170484ffe65b57dafa573d2098b87573c110c5062eb01b2",
+      "image_bytes": 1775034
+    }
+  },
+  "authentication": {
+    "normal_first_login_setup": true,
+    "password_change_and_graceful_restart": true,
+    "new_password_login_after_restart": true,
+    "OpenAPI_chat_file_key_after_restart": true,
+    "Hub_configured_with_full_key": true,
+    "credentials_in_report": false
+  },
+  "Hub_image_chain": {
+    "status": "succeeded",
+    "download_hash_size_verified": true,
+    "image_count": 1
+  },
+  "G_prompts": 4000,
+  "V_chinese_full_cards": 193339,
+  "public_source_commit": "6bb7d6d81f8de1585885f5fc72ce6dd99ba4249e",
+  "public_source_validation": true,
+  "temporary_delivery_fixture_restored": true,
+  "training_started": false,
+  "schema": 1,
+  "public_display_version": "0.5.2-1.44",
+  "image_name": "AstrAutoAnima-0.5.2-1.44-V042",
+  "image_revision": "image.1",
+  "acceptance_date": "2026-10-25",
+  "independent_credentials": {
+    "all_initial_credentials_differ_from_mother": true,
+    "compared_fields": [
+      "astrbot_initial_password",
+      "hub_admin_token",
+      "hub_local_admin_token",
+      "napcat_webui_token",
+      "onebot_token_pending_manual_setup"
+    ],
+    "values_disclosed": false
+  },
+  "software_source_commit": "29882ba009719f1707ac0bb2690b04df1763dff7",
+  "evidence_context": {
+    "fresh_RTX5090": "Full restore, independent credentials, first login, password change, restart, OpenAPI, base image and Hub download passed.",
+    "RTX4090D": "HQ, Anima refine, WD categories and SeedVR2 FP16 whole-image acceptance recorded in PUBLICATION_0.5.2-1.44.md.",
+    "QQ_delivery": "Maintainer confirmed.",
+    "models": "Licenses and attribution included in /opt/aaa-image-052144/licenses.",
+    "privacy": "Sealed payload checked; application credentials regenerated on the fresh instance."
+  }
+}
