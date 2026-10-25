@@ -36,7 +36,8 @@
       "name": "SeedVR2 放大节点",
       "kind": "git",
       "url": "https://github.com/numz/ComfyUI-SeedVR2_VideoUpscaler.git",
-      "target": "custom_nodes/ComfyUI-SeedVR2_VideoUpscaler"
+      "target": "custom_nodes/ComfyUI-SeedVR2_VideoUpscaler",
+      "commit": "4490bd1f482e026674543386bb2a4d176da245b9"
     },
     {
       "id": "wd_eva02_model",
@@ -81,8 +82,18 @@
       "name": "JoyCaption Q4_K_M + mmproj（约5.80GB；8GB显存尝试档，需手动切模型）",
       "kind": "download_set",
       "files": [
-        {"url":"https://huggingface.co/mradermacher/llama-joycaption-beta-one-hf-llava-GGUF/resolve/8559a8f14c1c545f3351e0a544e60baaecabdd5c/llama-joycaption-beta-one-hf-llava.Q4_K_M.gguf?download=true","target":"models/llava_gguf/llama-joycaption-beta-one-hf-llava.Q4_K_M.gguf","size":4920736416,"sha256":"afbf943e9f2fed20e0889146b0d3940c8a6bfc519a61daac61188cf9ef511f77"},
-        {"url":"https://huggingface.co/concedo/llama-joycaption-beta-one-hf-llava-mmproj-gguf/resolve/acfe6bf78ae4e411cd5c7c8f4a71ba01f26a5b97/llama-joycaption-beta-one-llava-mmproj-model-f16.gguf?download=true","target":"models/llava_gguf/llama-joycaption-beta-one-llava-mmproj-model-f16.gguf","size":877771808,"sha256":"94002cb5c354c7c9e538e64f37d593db9eceeca2e94573bae6cd3b2bd8bb1952"}
+        {
+          "url": "https://huggingface.co/mradermacher/llama-joycaption-beta-one-hf-llava-GGUF/resolve/8559a8f14c1c545f3351e0a544e60baaecabdd5c/llama-joycaption-beta-one-hf-llava.Q4_K_M.gguf?download=true",
+          "target": "models/llava_gguf/llama-joycaption-beta-one-hf-llava.Q4_K_M.gguf",
+          "size": 4920736416,
+          "sha256": "afbf943e9f2fed20e0889146b0d3940c8a6bfc519a61daac61188cf9ef511f77"
+        },
+        {
+          "url": "https://huggingface.co/concedo/llama-joycaption-beta-one-hf-llava-mmproj-gguf/resolve/acfe6bf78ae4e411cd5c7c8f4a71ba01f26a5b97/llama-joycaption-beta-one-llava-mmproj-model-f16.gguf?download=true",
+          "target": "models/llava_gguf/llama-joycaption-beta-one-llava-mmproj-model-f16.gguf",
+          "size": 877771808,
+          "sha256": "94002cb5c354c7c9e538e64f37d593db9eceeca2e94573bae6cd3b2bd8bb1952"
+        }
       ]
     },
     {
@@ -90,8 +101,19 @@
       "name": "SeedVR2 3B Q4_K_M + VAE（约2.50GB；整图试配，不保证8GB可运行）",
       "kind": "download_set",
       "files": [
-        {"url":"https://huggingface.co/cmeka/SeedVR2-GGUF/resolve/de058a1261f2fc4bb41f39e9ddf313877e4ebf0d/seedvr2_ema_3b-Q4_K_M.gguf?download=true","target":"models/SEEDVR2/seedvr2_ema_3b-Q4_K_M.gguf","size":1995344224,"sha256":"e665e3909de1a8c88a69c609bca9d43ff5a134647face2ce4497640cc3597f0e"},
-        {"url":"https://huggingface.co/numz/SeedVR2_comfyUI/resolve/09ced71023636e9bc8cdf9cdecfb2625d1e691e8/ema_vae_fp16.safetensors?download=true","target":"models/SEEDVR2/ema_vae_fp16.safetensors","size":501324814,"sha256":"20678548f420d98d26f11442d3528f8b8c94e57ee046ef93dbb7633da8612ca1"}
+        {
+          "url": "https://huggingface.co/cmeka/SeedVR2-GGUF/resolve/de058a1261f2fc4bb41f39e9ddf313877e4ebf0d/seedvr2_ema_3b-Q4_K_M.gguf?download=true",
+          "target": "models/SEEDVR2/seedvr2_ema_3b-Q4_K_M.gguf",
+          "size": 1995344224,
+          "sha256": "e665e3909de1a8c88a69c609bca9d43ff5a134647face2ce4497640cc3597f0e"
+        },
+        {
+          "url": "https://huggingface.co/numz/SeedVR2_comfyUI/resolve/09ced71023636e9bc8cdf9cdecfb2625d1e691e8/ema_vae_fp16.safetensors?download=true",
+          "target": "models/SEEDVR2/ema_vae_fp16.safetensors",
+          "size": 501324814,
+          "sha256": "20678548f420d98d26f11442d3528f8b8c94e57ee046ef93dbb7633da8612ca1",
+          "modelscope_url": "https://modelscope.cn/models/numz/SeedVR2_comfyUI/resolve/5abc4d1b09abd801c20729f0e616f4376c65c4ec/ema_vae_fp16.safetensors"
+        }
       ]
     },
     {
@@ -99,8 +121,40 @@
       "name": "SeedVR2 3B Q8_0 + VAE（约4.16GB；整图建议16–24GB显存/32–64GB内存试配）",
       "kind": "download_set",
       "files": [
-        {"url":"https://huggingface.co/cmeka/SeedVR2-GGUF/resolve/de058a1261f2fc4bb41f39e9ddf313877e4ebf0d/seedvr2_ema_3b-Q8_0.gguf?download=true","target":"models/SEEDVR2/seedvr2_ema_3b-Q8_0.gguf","size":3660613984,"sha256":"be0d60083a2051a265eb4b77f28edf494e6db67ffc250216f32b72292e5cbd96"},
-        {"url":"https://huggingface.co/numz/SeedVR2_comfyUI/resolve/09ced71023636e9bc8cdf9cdecfb2625d1e691e8/ema_vae_fp16.safetensors?download=true","target":"models/SEEDVR2/ema_vae_fp16.safetensors","size":501324814,"sha256":"20678548f420d98d26f11442d3528f8b8c94e57ee046ef93dbb7633da8612ca1"}
+        {
+          "url": "https://huggingface.co/cmeka/SeedVR2-GGUF/resolve/de058a1261f2fc4bb41f39e9ddf313877e4ebf0d/seedvr2_ema_3b-Q8_0.gguf?download=true",
+          "target": "models/SEEDVR2/seedvr2_ema_3b-Q8_0.gguf",
+          "size": 3660613984,
+          "sha256": "be0d60083a2051a265eb4b77f28edf494e6db67ffc250216f32b72292e5cbd96"
+        },
+        {
+          "url": "https://huggingface.co/numz/SeedVR2_comfyUI/resolve/09ced71023636e9bc8cdf9cdecfb2625d1e691e8/ema_vae_fp16.safetensors?download=true",
+          "target": "models/SEEDVR2/ema_vae_fp16.safetensors",
+          "size": 501324814,
+          "sha256": "20678548f420d98d26f11442d3528f8b8c94e57ee046ef93dbb7633da8612ca1",
+          "modelscope_url": "https://modelscope.cn/models/numz/SeedVR2_comfyUI/resolve/5abc4d1b09abd801c20729f0e616f4376c65c4ec/ema_vae_fp16.safetensors"
+        }
+      ]
+    },
+    {
+      "id": "seedvr2_models_fp16",
+      "name": "SeedVR2 3B FP16 + VAE（约7.28GB；4090D整图验收）",
+      "kind": "download_set",
+      "files": [
+        {
+          "url": "https://huggingface.co/numz/SeedVR2_comfyUI/resolve/09ced71023636e9bc8cdf9cdecfb2625d1e691e8/seedvr2_ema_3b_fp16.safetensors?download=true",
+          "target": "models/SEEDVR2/seedvr2_ema_3b_fp16.safetensors",
+          "size": 6783018808,
+          "sha256": "2fd0e03a3dad24e07086750360727ca437de4ecd456f769856e960ae93e2b304",
+          "modelscope_url": "https://modelscope.cn/models/numz/SeedVR2_comfyUI/resolve/5abc4d1b09abd801c20729f0e616f4376c65c4ec/seedvr2_ema_3b_fp16.safetensors"
+        },
+        {
+          "url": "https://huggingface.co/numz/SeedVR2_comfyUI/resolve/09ced71023636e9bc8cdf9cdecfb2625d1e691e8/ema_vae_fp16.safetensors?download=true",
+          "target": "models/SEEDVR2/ema_vae_fp16.safetensors",
+          "size": 501324814,
+          "sha256": "20678548f420d98d26f11442d3528f8b8c94e57ee046ef93dbb7633da8612ca1",
+          "modelscope_url": "https://modelscope.cn/models/numz/SeedVR2_comfyUI/resolve/5abc4d1b09abd801c20729f0e616f4376c65c4ec/ema_vae_fp16.safetensors"
+        }
       ]
     }
   ]

@@ -1,7 +1,7 @@
 {
   "public_display_version": "0.5.2-1.44",
-  "installation_revision": "install.1",
-  "installer_selfcheck_review": "20261025-quick-doctor-helper-and-payload-consistency",
+  "installation_revision": "install.2",
+  "installer_selfcheck_review": "20261025-4090D-acceptance-install-fixes",
   "release_coordination": "video-and-public-image-together-after-acceptance",
   "publication_preparation_date": "2026-10-25",
   "public_image_rebuild_and_acceptance_required": true,
@@ -34,7 +34,7 @@
   "models_included": false,
   "external_downloads_default_enabled": false,
   "android_release_signing": "community-test-debug-key",
-  "candidate_only": true,
+  "candidate_only": false,
   "compiled_clients_rebuilt": false,
   "local_repair_review": "20261024",
   "production_deployed": false,
@@ -46,12 +46,22 @@
   "integrated_qq_official_patch": "qqofficial.2",
   "admin_recovery_fix": true,
   "deployment_patch_review": "20261024",
-  "server_install_candidate": true,
+  "server_install_candidate": false,
   "image_clone_acceptance": false,
   "builtins_require_reinstallation_on_toggle": false,
   "real_local_workstation_acceptance": false,
-  "real_messaging_acceptance": false,
+  "real_messaging_acceptance": true,
   "deployment_revision": "entryfix.1",
   "deployment_entry_order_fixed": true,
-  "client_binaries_changed_by_deployment_revision": false
+  "client_binaries_changed_by_deployment_revision": false,
+  "messaging_acceptance_by": "maintainer",
+  "gpu_acceptance": {
+    "gpu": "RTX 4090 D 24GB",
+    "basic": "1024x1536",
+    "hq": "1280x1920",
+    "refine": "1280x1920",
+    "wd_reverse_only": true,
+    "wd_category_selection": true,
+    "seedvr2": "682x1024, 3B FP16, no VAE tiling"
+  }
 }

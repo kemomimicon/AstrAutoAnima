@@ -20,6 +20,7 @@ import threading
 import time
 import tempfile
 import urllib.request
+import zipfile
 from dataclasses import asdict, dataclass
 from install_progress import StageProgress, ProgressLog, ProgressPanel, report, stream_command
 from deployment_support import (host_platform, clean_path, no_links, astrbot_root,
@@ -336,6 +337,67 @@ def quick_workflow(plan, comfy, log):
     }
 
 
+def configured_anima_workflow(workflows, quick, template_name, target_name):
+    """Bind selected base models in a new copy, bypassing only release placeholder LoRAs."""
+    template, target = workflows / template_name, workflows / target_name
+    if target.exists():
+        return target
+    if quick is None:
+        return template
+    graph = json.loads(template.read_text('utf-8-sig'))
+    for ident, field, source in (('44', 'unet_name', '1'), ('45', 'clip_name', '2'), ('15', 'vae_name', '3')):
+        if str(graph[ident]['inputs'][field]).startswith('YOUR_ANIMA_'):
+            graph[ident]['inputs'][field] = quick[source]['inputs'][field]
+    for ident in reversed(list(graph)):
+        node = graph[ident]
+        if node.get('class_type') != 'LoraLoader' or not str(node['inputs'].get('lora_name', '')).startswith('YOUR_STYLE_LORA_'):
+            continue
+        for other in graph.values():
+            for field, value in other.get('inputs', {}).items():
+                if isinstance(value, list) and len(value) == 2 and value[0] == ident:
+                    if value[1] not in (0, 1):
+                        raise ValueError('画风占位节点输出索引错误：' + ident)
+                    other['inputs'][field] = list(node['inputs']['model' if value[1] == 0 else 'clip'])
+        del graph[ident]
+    json_write(target, graph)
+    return target
+
+
+def prepare_comfy_source(comfy, root, plan, log):
+    if (comfy / 'main.py').is_file():
+        return
+    try:
+        run(['git', 'clone', '--branch', 'v0.21.1', '--depth', '1', 'https://github.com/Comfy-Org/ComfyUI.git', comfy], log)
+        return
+    except (ValueError, RuntimeError, subprocess.CalledProcessError):
+        log('Git 传输中断，改用同版本官方 ZIP。已有目录保留为备份。')
+    from easy_installer import download_file
+    from download_network import DownloadNetwork
+    archive = root / 'downloads/ComfyUI-v0.21.1.zip'
+    download_file('https://codeload.github.com/Comfy-Org/ComfyUI/zip/refs/tags/v0.21.1', archive, log,
+                  expected_sha256='85ed01bf9c737c42f5e36b6935c872fb1a1691041914ebe632c653ef5430b071',
+                  expected_size=11504590, network=DownloadNetwork.from_plan(plan))
+    with tempfile.TemporaryDirectory(prefix='aaa-comfy-', dir=root) as directory:
+        staging = Path(directory)
+        with zipfile.ZipFile(archive) as z:
+            total = 0
+            for entry in z.infolist():
+                name = entry.filename.replace('\\', '/')
+                total += entry.file_size
+                if (not name.startswith('ComfyUI-0.21.1/') or '..' in Path(name).parts or ':' in name
+                        or (entry.external_attr >> 16) & 0o170000 == 0o120000 or total > 100_000_000):
+                    raise ValueError('ComfyUI ZIP 路径或大小异常')
+            if z.testzip():
+                raise ValueError('ComfyUI ZIP 校验失败')
+            z.extractall(staging)
+        source = staging / 'ComfyUI-0.21.1'
+        if not (source / 'main.py').is_file() or not (source / 'requirements.txt').is_file():
+            raise ValueError('ComfyUI ZIP 缺少入口文件')
+        if comfy.exists():
+            comfy.rename(comfy.with_name(comfy.name + '.clone-backup-' + secrets.token_hex(4)))
+        shutil.copytree(source, comfy)
+
+
 def configure(plan, root, astro, comfy):
     data = astro / 'data'
     plugin = data / 'plugins/astrbot_plugin_comfy_bridge'
@@ -346,6 +408,18 @@ def configure(plan, root, astro, comfy):
     config.setdefault('comfyui_output_root', str(comfy / 'output'))
     config.setdefault('style_lora_node_ids', '')
     config.setdefault('hq_use_seedvr2', False)
+    workflows = comfy / 'user/default/workflows'
+    quick_path = workflows / 'AAA_Quick_Local_api.json'
+    quick = json.loads(quick_path.read_text('utf-8-sig')) if quick_path.is_file() else None
+    for key, template, target in (
+        ('hq_workflow_path', 'Anima_HQ_Txt2Img_Beta_api.json', 'AAA_Anima_HQ_Configured_api.json'),
+        ('refine_workflow_path', 'Anima_Refine_Existing_Beta_api.json', 'AAA_Anima_Refine_Configured_api.json'),
+    ):
+        if key not in config and quick is not None:
+            config[key] = str(configured_anima_workflow(workflows, quick, template, target))
+    selected = set(plan.external.split(','))
+    if 'booru_tagger_node' in selected and 'joycaption_node' not in selected:
+        config.setdefault('reverse_workflow_path', str(workflows / 'Anima_WD_Only_Reverse_api.json'))
     for key, file in {
         'workflow_path': 'AAA_Quick_Local_api.json', 'hq_workflow_path': 'Anima_HQ_Txt2Img_Beta_api.json',
         'refine_workflow_path': 'Anima_Refine_Existing_Beta_api.json',
@@ -518,11 +592,12 @@ def deploy(plan, log=print):
                 if not (astro / 'data/cmd_config.json').is_file():
                     run([executable, 'init', '--yes'], log, astro)
             if plan.install_comfyui:
-                if not (comfy / 'main.py').exists():
-                    run(['git', 'clone', '--branch', 'v0.21.1', '--depth', '1', 'https://github.com/Comfy-Org/ComfyUI.git', comfy], log)
+                prepare_comfy_source(comfy, root, plan, log)
                 cpy = make_env(comfy / '.venv', log)
                 index = 'https://download.pytorch.org/whl/cu128' if plan.gpu else 'https://download.pytorch.org/whl/cpu'
-                run([cpy, '-m', 'pip', 'install', 'torch', 'torchvision', 'torchaudio', '--index-url', index], log)
+                # Separate the large Torch wheel source from ordinary Python/CUDA dependencies.
+                variant = 'cu128' if plan.gpu else 'cpu'
+                run([cpy, '-m', 'pip', 'install', f'torch==2.11.0+{variant}', f'torchvision==0.26.0+{variant}', f'torchaudio==2.11.0+{variant}', '--extra-index-url', index], log)
                 run([cpy, '-m', 'pip', 'install', '-r', comfy / 'requirements.txt'], log)
             progress.stage('project')
             plugin = astro / 'data/plugins/astrbot_plugin_comfy_bridge' if full else None
@@ -1073,17 +1148,7 @@ def local_hq_workflow(comfy, workflows, quick):
         raise ValueError('发布包缺少本机 HQ API 工作流')
     if quick is None:
         return template
-    graph = json.loads(template.read_text('utf-8-sig'))
-    for node_id, field, source_id in (
-        ('44', 'unet_name', '1'), ('45', 'clip_name', '2'), ('15', 'vae_name', '3')
-    ):
-        graph[node_id]['inputs'][field] = quick[source_id]['inputs'][field]
-    target = workflows / 'AAA_Local_HQ_api.json'
-    if target.exists():
-        # Re-running the wizard must not overwrite a workflow edited by the user.
-        return target
-    json_write(target, graph)
-    return target
+    return configured_anima_workflow(workflows, quick, template.name, 'AAA_Local_HQ_api.json')
 
 
 if __name__ == '__main__':

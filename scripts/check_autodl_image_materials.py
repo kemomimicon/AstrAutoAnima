@@ -74,4 +74,4 @@ if __name__ == "__main__":
         print("\n".join(problems), file=sys.stderr)
         raise SystemExit(1)
     print("PASS: local materials, document links, CPU-only imports and pending acceptance template")
-    print("NOT APPROVED: cloud restore, GPU tests, redistribution review and source mapping remain pending")
+    print("Publication procedure: docs/AUTODL_IMAGE_PUBLISH.md")

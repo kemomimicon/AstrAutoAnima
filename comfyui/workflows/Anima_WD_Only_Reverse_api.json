@@ -1,0 +1,114 @@
+{
+  "1": {
+    "inputs": {
+      "image": "reverse_input.png",
+      "upload": "image"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "反推输入图片"
+    }
+  },
+  "2": {
+    "inputs": {
+      "model_name": "wd-eva02-large-tagger-v3",
+      "replace_underscore": true
+    },
+    "class_type": "Load Booru Tagger",
+    "_meta": {
+      "title": "加载 WD-EVA02"
+    }
+  },
+  "3": {
+    "inputs": {
+      "tagger_model": [
+        "2",
+        0
+      ],
+      "tagger_info": [
+        "2",
+        1
+      ],
+      "image": [
+        "1",
+        0
+      ],
+      "threshold": 0.45,
+      "character_threshold": 0.85,
+      "use_best_threshold": false,
+      "trailing_comma": false,
+      "sort_tags": false,
+      "exclude_tags": ""
+    },
+    "class_type": "Booru Tagger",
+    "_meta": {
+      "title": "WD-EVA02 反推"
+    }
+  },
+  "7": {
+    "inputs": {
+      "wd_tags": [
+        "3",
+        0
+      ],
+      "wd_general": [
+        "3",
+        1
+      ],
+      "wd_rating": [
+        "3",
+        2
+      ],
+      "wd_character": [
+        "3",
+        3
+      ],
+      "ct_tags": "",
+      "ct_general": "",
+      "ct_rating": "",
+      "ct_character": "",
+      "joy_caption": "",
+      "preset": "full",
+      "include_scene": true,
+      "include_action": true,
+      "include_character": true,
+      "include_appearance": true,
+      "include_special_features": true,
+      "include_clothing": true,
+      "include_composition": true,
+      "include_other": true,
+      "include_safety": true
+    },
+    "class_type": "AnimaReverseCompiler",
+    "_meta": {
+      "title": "Anima WD-only reverse compiler"
+    }
+  },
+  "8": {
+    "inputs": {
+      "image": [
+        "1",
+        0
+      ],
+      "structured_json": [
+        "7",
+        1
+      ],
+      "anima_prompt": [
+        "7",
+        0
+      ],
+      "storage_root": "",
+      "qq_user_id": "",
+      "session_type": "unknown",
+      "session_id": "",
+      "role_preset": "",
+      "style_preset": "",
+      "save_thumbnail": false
+    },
+    "class_type": "AnimaReverseResultSaver",
+    "_meta": {
+      "title": "保存反推记录"
+    }
+  }
+}

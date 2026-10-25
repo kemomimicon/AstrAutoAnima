@@ -1,49 +1,45 @@
 # AstrAutoAnima
 
-> **0.5.2-1.44 新版发布候选，计划与视频和 AutoDL 镜像同步发布，目前尚未上线。**
-> 内部版本为 `0.5.2-beta.1`、客户端 `+44`。本分支已整合完整 build44 候选源码与公开发布材料，
-> 保留既有兼容补丁；本地代码检查不能代替新实例恢复、真实首图和镜像隐私验收。
-> 见 [镜像使用说明](docs/AUTODL_IMAGE.md)、[公开发布检查表](docs/AUTODL_IMAGE_PUBLISH.md)
-> 和 [平台发布文案草稿](docs/AUTODL_ART_DESCRIPTION.md)。不要对镜像恢复目录重复运行安装器。
+**0.5.2-1.44 · build44 · install.2**
 
-> 历史补丁：0.5.0-beta.2-remake.2 的恢复发布与 `hostbuf_file_reader_read failed` 排查边界见
-> [原说明](docs/REMAKE_HOTFIX.md)；不宣称本项目已修复该 ComfyUI 后端错误。
+面向 AstrBot + QQ/NapCat + ComfyUI/Anima 的跑图桥接套件，支持 Windows 本地电脑和 Linux 云服务器。
+包含 QQ 生图、动态角色/画风 LoRA、随机提示词、图片反推、HQ、放大精修、Hub 和 Windows/Android/Web 客户端。
 
-> 旧 Windows 兼容补丁来源见 [历史说明](docs/WINDOWS_COMPAT_HOTFIX.md)。本候选继续保留
-> LoRA 枚举路径匹配、Windows 休眠隔离、反推路径、词典和图片清理保护，不覆盖个人数据。
+[下载最新完整包](https://github.com/kemomimicon/AstrAutoAnima/releases/tag/v0.5.2-1.44) ·
+[安装说明](docs/EASY_INSTALL.md) · [初次配置](docs/FIRST_RUN_WIZARD.md) ·
+[本次验收](docs/PUBLICATION_0.5.2-1.44.md) · [AutoDL 镜像使用](docs/AUTODL_IMAGE.md)
 
-面向 AstrBot + QQ/NapCat + ComfyUI/Anima 的完整跑图桥接套件。它把 QQ 指令、动态角色/画风
-LoRA、分级随机提示词、图片反推、HQ/放大精修、远程 Hub 和 Windows/Android 客户端组合为
-一套可在云服务器或本地计算机部署的方案。
+## 下载安装
 
-> 当前本地候选为 `0.5.2-1.44`（内部 `0.5.2-beta.1/build44`），不是正式稳定版或已发布版本。
-> 包含 AnimaLoraStudio 0.25.0 的可选接入；上游项目及连接器适用独立许可，不是 AAA 自研训练引擎。
-> HQ、Refine、Reverse 等高级工作流仍为实验性组件，
-> 请先在测试群和备份配置上验证，再迁移生产环境。
+首次安装选择 `AstrAutoAnima-0.5.2-1.44-install.2-complete.zip`，解压后打开
+`first-run-guide/部署完整指南_打开即用.html`。Windows 和 Linux 部署包二选一。
+管理端用于配置服务，个人端用于提交任务；服务端安装在运行模型的电脑或云实例。
+AutoDL 终端部署只需上传指南内 `UPLOAD_TO_AUTODL` 的 Prepare ZIP 和 SHA256 文件。
 
-## 完整发行整合包
+软件包包含插件、Hub、工作流、自定义节点、批量词库工具、令牌管理、安装及首图向导和客户端。
+模型按勾选项下载，词库可自行导入，账号及令牌由首次配置生成。
 
-新版完整包、视频与公开镜像将一起发布；候选未验收前不提供虚假的新版本下载链接。
-已有 [0.5.0-beta.2 发布页](https://github.com/kemomimicon/AstrAutoAnima/releases/tag/v0.5.0-beta.2)
-属于历史版本，不能用作本候选镜像的完整对应源码或新版下载入口。
-软件发行包保持模型、私人词库和配置不入包；云镜像预装的第三方环境/公共资源另按授权核对，
-两者内容不同。阅读 [完整包导航](docs/COMPLETE_SUITE.md) 和 [候选镜像说明](docs/AUTODL_IMAGE.md)。
+## 本次更新
+
+- 整合 build44：角色造型、提示词分类、预设保存、断线重连、QQ 官方消息关联和重跑修复。
+- ComfyUI Git 克隆失败时转用同版本官方 ZIP；固定 CUDA 12.8 PyTorch 组合。
+- HQ/精修副本自动绑定所选基础模型，自动接通空画风链。
+- 新增 WD 单独反推模板和 SeedVR2 3B FP16 固定下载清单，提供同 SHA256 的 ModelScope 来源。
+- Windows/Linux 独立入口、阶段进度、恢复填写、搬家修复、密码/令牌查询与 SSH 指引。
+
+RTX 4090 D 验收通过：基础 1024×1536、HQ/精修 1280×1920、WD 反推和分类选择、
+SeedVR2 3B FP16 整图 682×1024。QQ 投递由维护者验证通过。
 
 ## 组件版本
 
-**安装后不会配置？** 使用独立的 [首张图启动向导 1.1](https://github.com/kemomimicon/AstrAutoAnima/releases/tag/first-run-wizard-v1.1)：
-Windows 双击运行，九步完成 Key 验证、投递目标、用户令牌、词库、可选角色词典装配，以及通过现有 Hub 提交/查询/预览第一张图。
-含离线中文工具说明；不含密钥、私人词库、模型或训练接口。先阅读 [新手操作说明](docs/FIRST_RUN_WIZARD.md)。
-该链接为历史 0.5.0-beta.2 的补充工具，不是本次新版向导下载；无桌面 Linux 使用终端/浏览器流程。
-
-| 组件 | 本地候选版本 | 作用 |
-| --- | --- | --- |
-| AstrBot 插件 | `0.5.2-beta.1` | QQ 指令、工作流调度、预设、提示词池、任务记录 |
-| Hub 服务 | `0.5.2b1` | 令牌鉴权、远程任务、预设/提示词/图片记录 API |
-| Flutter 客户端 | `0.5.2-beta.1+44` | Web/Windows/Android 管理和远程生图 |
-| 工作流包 | `0.8.0-beta.1-public` | 模板脱敏导出；模型和独立 Studio 按需配置 |
-| 自定义节点 | Workflow Tools | 训练数据质检、反推编译与记录保存 |
-| 工作流 | HQ / Refine / Reverse / Training Beta | 多工作流模板；安装前必须填写模型占位符 |
+| 组件 | 版本 |
+| --- | --- |
+| AstrBot 插件 | 0.5.2-beta.1 |
+| Hub | 0.5.2b1 |
+| Windows / Android / Web | 0.5.2-beta.1+44 |
+| 工作流包 | 0.8.0-beta.1-public |
+| 安装修订 | install.2 |
+| Anima Master 兼容基线 | 0.7.1 |
 
 ## 兼容性特别说明
 

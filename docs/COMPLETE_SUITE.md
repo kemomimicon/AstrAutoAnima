@@ -1,10 +1,10 @@
-# AstrAutoAnima 0.5.0 Beta 完整发行整合包
+# AstrAutoAnima 0.5.2-1.44 完整发行整合包
 
-本整合包统一收录已发布并校验的 **0.5.0-beta.2** 组件。它是完整的 Beta 发行套件，**不是取消 Beta 标识的稳定版**，也不是包含显卡驱动和模型的全离线系统镜像。
+本整合包提供 **0.5.2-1.44 / build44 / install.2** 完整软件和中文安装向导。
 
 ## 从这里开始
 
-先完整解压外层 `AstrAutoAnima-0.5.0-beta.2-complete.zip`，再按以下用途选择内部 ZIP。**不要全部安装，也不要直接在压缩包里启动程序。**
+先完整解压外层 `AstrAutoAnima-0.5.2-1.44-install.2-complete.zip`，再按以下用途选择内部 ZIP。**不要全部安装，也不要直接在压缩包里启动程序。**
 
 | 用途 | 目录与操作 |
 | --- | --- |
@@ -30,16 +30,16 @@ Windows 客户端 ZIP 必须整目录解压。Android APK 使用社区测试签�
 
 ## 校验和排错
 
-- 外层 ZIP：可与 GitHub 附件 `AstrAutoAnima-0.5.0-beta.2-complete.sha256.txt` 比较 SHA256。
+- 外层 ZIP：可与 GitHub 附件 `AstrAutoAnima-0.5.2-1.44-install.2-complete.sha256.txt` 比较 SHA256。
 - 解压后：在整合包根目录运行 `python verify_complete_suite.py`（Linux 可用 `python3`），逐项验证内部分包和文档，不安装依赖、不联网、不改文件。
-- `suite-manifest.json` 记录完整目录、文件大小、哈希和组件来源；`original-release/` 保存原始分包清单及发布说明。
+- `suite-manifest.json` 记录完整目录、文件大小、哈希和组件来源。
 - 哈希用于完整性核对，不代替可信下载来源。校验失败请重新下载，不要忽略错误继续安装。
 - 路径、PowerShell 编码、目标目录、端口占用、授权和节点问题详见 `docs/TROUBLESHOOTING.md`、`docs/EASY_INSTALL.md`。
 
-## 内容和验证边界
+## 内容与验收
 
-整合包保留原分包字节，不重新混入私人开发目录。**不包含密钥、API 凭据、服务器配置、QQ 登录数据、真实提示词库、模型权重或炼丹炉连接器**。工作流包版本独立于主项目，为 `0.8.0-beta.1-public`；这不是 Anima Master 的版本。
-
-基线发布提交：`3709c1da57b4808f663c907795fd5fe107b2a173`。Windows、Python 3.11／3.12 CI 已通过；Hub 隔离启动与配置保留测试通过。详细结果见 `docs/VERIFY_RELEASE.md`。仍未完成全部全新系统及实际 GPU 生图组合验收，不承诺所有机器无人值守成功。
+包含插件、Hub、Windows/Android/Web 客户端、工作流、自定义节点、安装及首图向导、词库工具和可选 Studio 连接器。
+使用空词库和通用工作流模板；模型按需下载，个人账号及密钥在首次配置时填写。
+本轮 4090 D 生图与扩展验收、维护者 QQ 投递验收见 [发行记录](PUBLICATION_0.5.2-1.44.md)。
 
 官方项目入口：[AstrAutoAnima](https://github.com/kemomimicon/AstrAutoAnima)、[AstrBot](https://docs.astrbot.app/)、[ComfyUI](https://docs.comfy.org/)、[NapCat](https://napneko.github.io/)。
