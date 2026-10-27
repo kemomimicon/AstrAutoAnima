@@ -6,8 +6,10 @@ import re
 from pathlib import Path
 
 
-DEFAULTS = {"aiocqhttp": True, "telegram": False, "discord": False, "webchat": True}
-KEYS = {"aiocqhttp": "qq", "telegram": "telegram", "discord": "discord"}
+# Both QQ adapters already have generation/reply handlers. Keep their admission
+# under the existing QQ switch without reinterpreting official IDs as QQ numbers.
+DEFAULTS = {"aiocqhttp": True, "qq_official": True, "telegram": False, "discord": False, "webchat": True}
+KEYS = {"aiocqhttp": "qq", "qq_official": "qq", "telegram": "telegram", "discord": "discord"}
 
 
 def admission_denial(data_root: Path, platform_name: str) -> str | None:
