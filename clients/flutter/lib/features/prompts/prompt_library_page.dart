@@ -496,6 +496,8 @@ class _PromptCard extends StatelessWidget {
       padding: const EdgeInsets.only(bottom: 10),
       child: Card(
         child: ExpansionTile(
+          // Expansion state must not share the list's stored scroll offset.
+          key: PageStorageKey<String>('prompt-card-${item.id}'),
           leading: CircleAvatar(
               child: Text('${item.sourceCode}/${item.safetyCode}')),
           title: Text(item.id),

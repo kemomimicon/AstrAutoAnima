@@ -5,6 +5,7 @@ import argparse
 import csv
 import io
 import json
+import os
 from pathlib import Path
 import queue
 import re
@@ -18,6 +19,8 @@ from first_run_config import validate_url
 
 MAX_FILE = 16 * 1024 * 1024
 MAX_PROMPTS = 10000
+MAX_BATCH_PROMPTS = 100000
+MAX_BATCH_BYTES = 64 * 1024 * 1024
 
 
 class ImportFailure(ValueError):
@@ -32,7 +35,7 @@ def checked_token(value):
     return token
 
 
-def parse_file(path):
+def parse_file(path, *, max_prompts=MAX_PROMPTS):
     path = Path(path)
     if not path.is_file() or path.stat().st_size > MAX_FILE: raise ValueError('请选择不超过16MiB的JSON/CSV/TXT文件。')
     with path.open('rb') as stream: raw = stream.read(MAX_FILE + 1)
@@ -64,9 +67,45 @@ def parse_file(path):
         if len(value) > 20000 or '\0' in value: raise ValueError('单条提示词过长或包含NUL字符。')
         marker = ' '.join(value.casefold().split())
         if marker not in seen: seen.add(marker); prompts.append(value)
-        if len(prompts) > MAX_PROMPTS: raise ValueError('去重后超过10000条，请分文件导入。')
+        if len(prompts) > max_prompts: raise ValueError(f'去重后超过{max_prompts}条，请分文件导入。')
     if not prompts: raise ValueError('未找到可导入的非空文本。')
     return prompts
+
+
+def parse_files(paths):
+    """Validate the entire selection before exposing any submit-ready preview."""
+    paths = [Path(p) for p in paths]
+    if not 1 <= len(paths) <= 64:
+        raise ValueError('请选择1至64个JSON/CSV/TXT文件。')
+    if sum(p.stat().st_size for p in paths) > MAX_BATCH_BYTES:
+        raise ValueError('本批文件合计超过64MiB，请拆分导入。')
+    prompts, seen, files = [], set(), []
+    for path in paths:
+        try:
+            values = parse_file(path, max_prompts=MAX_BATCH_PROMPTS)
+        except (ValueError, OSError) as exc:
+            raise ValueError(f'文件 {path.name} 读取失败：{exc}') from None
+        added = 0
+        for value in values:
+            marker = ' '.join(value.casefold().split())
+            if marker not in seen:
+                seen.add(marker); prompts.append(value); added += 1
+            if len(prompts) > MAX_BATCH_PROMPTS:
+                raise ValueError('本批去重后超过100000条，请拆分导入。')
+        files.append({'name': path.name, 'unique_in_file': len(values),
+                      'added_to_batch': added, 'duplicates_in_batch': len(values) - added})
+    return prompts, files
+
+
+def dropped_files(environ):
+    """CMD transports each dropped path as data, not expanded shell code."""
+    count = environ.get('AAA_IMPORT_COUNT', '0')
+    if not count.isdecimal() or not 0 <= int(count) <= 64:
+        raise ValueError('拖入文件数量无效，最多64个。')
+    paths = [environ.get(f'AAA_IMPORT_FILE_{i}', '') for i in range(1, int(count) + 1)]
+    if any(not p or '\0' in p for p in paths):
+        raise ValueError('拖入文件路径无效。')
+    return paths
 
 
 def hub_url(value):
@@ -112,15 +151,21 @@ def sync(base, token, group_id, name, allow_private, source, safety, prompts, *,
     if not re.fullmatch('[a-z0-9][a-z0-9_-]{0,63}', group_id): raise ValueError('组ID应为小写字母、数字、下划线或短横线，最长64位。')
     if not name.strip() or len(name) > 100 or type(allow_private) is not bool: raise ValueError('请核对显示名和私聊权限。')
     if source not in {'B', 'G', 'D', 'C', 'R'} or safety not in {'N', 'H', 'S'}: raise ValueError('来源或安全分级不合法。')
-    if not isinstance(prompts, list) or not 1 <= len(prompts) <= MAX_PROMPTS or any(not isinstance(p, str) or not p.strip() or len(p) > 20000 or '\0' in p for p in prompts):
+    if not isinstance(prompts, list) or not 1 <= len(prompts) <= MAX_BATCH_PROMPTS or any(not isinstance(p, str) or not p.strip() or len(p) > 20000 or '\0' in p for p in prompts):
         raise ValueError('提示词数量或文本不合法。')
     registry = request(base, token, 'GET', '/api/v1/prompts/groups')
     groups = registry.get('groups')
     if not isinstance(groups, list) or any(not isinstance(g, dict) or not isinstance(g.get('id'), str) for g in groups):
         raise ValueError('分组接口格式不兼容，未写入。')
     if len({g['id'] for g in groups}) != len(groups): raise ValueError('服务器分组ID重复，停止写入。')
-    if any(set(g) - {'id', 'name', 'allow_private'} for g in groups):
+    if any(set(g) - {'id', 'name', 'allow_private', 'allow_group', 'enabled', 'safety_codes'} for g in groups):
         raise ValueError('服务器分组含本工具未知字段，不能安全重写分组清单；请使用对应新版管理端。')
+    for group in groups:
+        if any(k in group and type(group[k]) is not bool for k in ('allow_private', 'allow_group', 'enabled')):
+            raise ValueError('服务器分组权限格式无效，未写入。')
+        if 'safety_codes' in group and (not isinstance(group['safety_codes'], list)
+                or not group['safety_codes'] or any(v not in {'N', 'H', 'S'} for v in group['safety_codes'])):
+            raise ValueError('服务器分组内容级别无效，未写入。')
     existing = next((g for g in groups if g['id'] == group_id), None)
     desired = {'id': group_id, 'name': name.strip(), 'allow_private': allow_private}
     if existing and any(existing.get(k) != v for k, v in desired.items()):
@@ -148,10 +193,10 @@ def sync(base, token, group_id, name, allow_private, source, safety, prompts, *,
     return imported, len(prompts) - imported
 
 
-def launch_gui(smoke=False):
+def launch_gui(smoke=False, paths=()):
     import tkinter as tk
     from tkinter import ttk, filedialog, messagebox
-    window = tk.Tk(); window.title('AAA · 新版在线词库导入（需分组API）')
+    window = tk.Tk(); window.title('AAA · 多文件词库批量导入')
     window.geometry(f'880x{min(770, max(520, window.winfo_screenheight() - 100))}'); window.minsize(850, 520)
     if smoke: window.withdraw()
     canvas = tk.Canvas(window, highlightthickness=0)
@@ -162,8 +207,8 @@ def launch_gui(smoke=False):
     canvas_window = canvas.create_window((0, 0), window=frame, anchor='nw')
     frame.bind('<Configure>', lambda e: canvas.configure(scrollregion=canvas.bbox('all')))
     canvas.bind('<Configure>', lambda e: canvas.itemconfigure(canvas_window, width=e.width))
-    ttk.Label(frame, text='读取预览完全离线；只有确认同步才连接Hub。旧Hub缺少分组API时不会写入。\n不改既有分组权限、不清空词库、不保存令牌、不自动判断安全分级。', wraplength=790).grid(row=0, column=0, columnspan=2, sticky='w', pady=10)
-    defaults = {'url':'http://127.0.0.1:6278', 'token':'', 'id':'', 'name':''}
+    ttk.Label(frame, text='可将多个文件拖到启动CMD，或点下方按钮多选文件。先预览，确认后每500条导入；Hub自动备份。\n本工具提取提示词正文，统一采用下方来源/分级/自定义组；JSON原有分类、ID、分级不沿用。原库记录保留，令牌不保存。', wraplength=790).grid(row=0, column=0, columnspan=2, sticky='w', pady=10)
+    defaults = {'url':'http://127.0.0.1:6278', 'token':'', 'id':'batch_import', 'name':'批量导入'}
     fields = {k: tk.StringVar(value=v) for k, v in defaults.items()}
     for row, (key, label) in enumerate([('url','Hub根地址'), ('token','Hub管理员令牌'), ('id','自定义组ID'), ('name','组显示名')], 1):
         ttk.Label(frame, text=label).grid(row=row, column=0, sticky='w', pady=6)
@@ -175,17 +220,22 @@ def launch_gui(smoke=False):
     ttk.Label(options, text='人工安全分级').pack(side='left', padx=8); ttk.Combobox(options, textvariable=safety, values=['N','H','S'], state='readonly', width=8).pack(side='left')
     preview = tk.Text(frame, height=12, wrap='word', state='disabled'); preview.grid(row=7, column=0, columnspan=2, sticky='nsew', pady=8); frame.rowconfigure(7, weight=1)
     status = tk.StringVar(value='尚未读取文件。'); state = {'prompts': [], 'busy': False}; messages = queue.Queue()
+    def load_selection(paths):
+        try:
+            prompts, files = parse_files(paths)
+            state['prompts'] = prompts; reviewed.set(False)
+            summary = '\n'.join(f'{r["name"]}：文件内去重后{r["unique_in_file"]}条，加入本批{r["added_to_batch"]}条，跨文件重复{r["duplicates_in_batch"]}条' for r in files)
+            preview.configure(state='normal'); preview.delete('1.0', 'end'); preview.insert('1.0', summary + '\n\n=== 提示词预览（最多20条） ===\n\n' + '\n\n'.join(prompts[:20])); preview.configure(state='disabled')
+            status.set(f'已读取{len(files)}个文件，本批去重后{len(prompts)}条；尚未写入服务器。')
+        except Exception as exc:
+            state['prompts'] = []; reviewed.set(False)
+            preview.configure(state='normal'); preview.delete('1.0', 'end'); preview.configure(state='disabled')
+            status.set('读取失败，本批文件均未提交；请修正后重新选择。'); messagebox.showerror('读取失败', str(exc), parent=window)
     def choose():
         if state['busy']: return
-        path = filedialog.askopenfilename(parent=window, filetypes=[('词库文本', '*.json *.csv *.txt')])
-        if not path: return
-        try:
-            state['prompts'] = parse_file(path); reviewed.set(False)
-            preview.configure(state='normal'); preview.delete('1.0', 'end'); preview.insert('1.0', '\n\n'.join(state['prompts'][:20])); preview.configure(state='disabled')
-            status.set(f'本地去重后 {len(state["prompts"])} 条；预览最多20条。还未连接服务器，请审核完整源文件。')
-        except Exception as exc:
-            state['prompts'] = []; reviewed.set(False); status.set('读取失败，旧预览不再可提交。'); messagebox.showerror('读取失败', str(exc), parent=window)
-    ttk.Button(frame, text='选择 JSON / CSV / TXT 并预览', command=choose).grid(row=8, column=0, columnspan=2, sticky='w')
+        chosen = filedialog.askopenfilenames(parent=window, filetypes=[('词库文本', '*.json *.csv *.txt')])
+        if chosen: load_selection(chosen)
+    ttk.Button(frame, text='多选 JSON / CSV / TXT 并预览', command=choose).grid(row=8, column=0, columnspan=2, sticky='w')
     ttk.Checkbutton(frame, text='我已审核完整源文件，并确认本次统一来源与N/H/S分级（不是只看前20条）', variable=reviewed).grid(row=9, column=0, columnspan=2, sticky='w', pady=8)
     def submit():
         if state['busy']: return
@@ -215,9 +265,12 @@ def launch_gui(smoke=False):
     if smoke:
         window.update_idletasks(); assert not reviewed.get() and not state['prompts'] and not fields['token'].get()
         window.destroy(); print('PASS: online importer offline UI smoke'); return 0
+    if paths: window.after_idle(lambda: load_selection(paths))
     window.mainloop(); return 0
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__); parser.add_argument('--smoke-test', action='store_true')
-    raise SystemExit(launch_gui(parser.parse_args().smoke_test))
+    parser.add_argument('--files-from-env', action='store_true'); parser.add_argument('files', nargs='*')
+    args = parser.parse_args()
+    raise SystemExit(launch_gui(args.smoke_test, dropped_files(os.environ) if args.files_from_env else args.files))
