@@ -9,6 +9,20 @@
 [安装说明](docs/EASY_INSTALL.md) · [初次配置](docs/FIRST_RUN_WIZARD.md) ·
 [本次验收](docs/PUBLICATION_0.5.2-1.44.md) · [AutoDL 镜像使用](docs/AUTODL_IMAGE.md)
 
+## 0.5.2-1.44 热修 · 2026-10-27
+
+[下载综合热修包](https://github.com/kemomimicon/AstrAutoAnima/releases/download/v0.5.2-1.44/AAA_0.5.2-1.44_Hotfix_20261027.zip)
+包含 QQ 官方机器人接单入口修复、Windows 管理端 `libraryfix.1` 和多文件拖入词库导入工具。
+已有环境按包内 `00_先看这里.txt` 选择对应修复；使用本版完整安装包的新用户，安装后同样应用这份热修。
+QQ 入口修复先退出 AstrBot，自动备份并只替换一个程序文件；管理端完整解压到新目录运行。
+词库查询灰框修复不转换旧库，模型、密钥和原配置继续使用。
+
+仅需要其中一项时，可下载
+[Windows 管理端修复版](https://github.com/kemomimicon/AstrAutoAnima/releases/download/v0.5.2-1.44/AstrAutoAnima-Windows-Admin-0.5.2-1.44-libraryfix.1.zip)、
+[多文件词库导入工具](https://github.com/kemomimicon/AstrAutoAnima/releases/download/v0.5.2-1.44/AAA_Prompt_Batch_Importer_0.5.2-1.44.zip) 或
+[QQ 官方入口最小补丁（Windows/Linux）](https://github.com/kemomimicon/AstrAutoAnima/releases/download/v0.5.2-1.44/AAA_QQOfficial_Admission_Hotfix_0.5.2-1.44.zip)。
+导入工具使用方法见 [工具说明](docs/TOOLS.md#多文件拖入词库导入)。
+
 ## 下载安装
 
 首次安装选择 `AstrAutoAnima-0.5.2-1.44-install.2-complete.zip`，解压后打开

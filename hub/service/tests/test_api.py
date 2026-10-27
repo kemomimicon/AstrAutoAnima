@@ -21,6 +21,26 @@ from astr_auto_anima_hub.schemas import (
 
 
 class ApiTests(unittest.TestCase):
+    def test_drag_batch_import_uses_real_api_backups_and_keeps_existing_records(self):
+        import online_prompt_importer as importer
+        before = json.loads(self.settings.prompt_pool_path.read_text('utf-8'))['prompts']
+        def call(base, token, method, route, payload=None, revision=None):
+            headers = dict(self.headers)
+            if revision is not None: headers['If-Match'] = revision
+            response = self.client.request(method, route, headers=headers, json=payload)
+            if response.status_code >= 400:
+                raise importer.ImportFailure(f'HTTP {response.status_code}')
+            return response.json()
+        prompts = [f'fixture garden {i}' for i in range(501)]
+        args = ('http://127.0.0.1:6278', 'fixture-token', 'batch_import', '批量导入', False, 'B', 'N', prompts)
+        with patch.object(importer, 'request', side_effect=call):
+            self.assertEqual(importer.sync(*args, consent=True), (501, 0))
+            self.assertEqual(importer.sync(*args, consent=True), (0, 501))
+        after = json.loads(self.settings.prompt_pool_path.read_text('utf-8'))['prompts']
+        self.assertEqual(after[:len(before)], before)
+        self.assertEqual(len(after), len(before) + 501)
+        self.assertTrue(list(self.settings.backup_dir.rglob('*.json')))
+
     def test_platform_switchboard_is_admin_only_and_preserves_other_switches(self):
         endpoint = '/api/v1/admin/platform-switchboard'
         self.assertIn(self.client.get(endpoint).status_code, (401, 403))
