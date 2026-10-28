@@ -12,8 +12,7 @@ import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT / 'plugin'), str(ROOT / 'scripts')]
-from astrbot_plugin_comfy_bridge.workflow_registry import load_workflow_registry
-from astrbot_plugin_comfy_bridge.workflow_runtime import validate_workflow_nodes
+from astrbot_plugin_comfy_bridge.workflow_registry import load_workflow_registry, validate_workflow_nodes
 from verify_release_archives import check
 
 
