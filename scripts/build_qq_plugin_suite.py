@@ -73,8 +73,13 @@ def build(out):
     entries['QQ指令操作说明.txt'] = b'\xef\xbb\xbf' + guide
     entries['LICENSE'] = (ROOT / 'LICENSE').read_bytes()
     entries['THIRD_PARTY_NOTICES.md'] = (ROOT / 'THIRD_PARTY_NOTICES.md').read_bytes()
-    metadata = entries['metadata.yaml'].decode().replace('version: 0.5.2-beta.1', 'version: 0.5.2-beta.1+qq.1')
-    metadata = metadata.replace('repo: ""', 'repo: "https://github.com/kemomimicon/AstrAutoAnima"')
+    metadata = ('name: astrbot_plugin_comfy_bridge\ndisplay_name: AAA QQ 生图工作流桥接\n'
+                'short_desc: QQ指令生图、预设、词库、五连、HQ、精修和反推。\n'
+                'desc: 基于0.5.2-1.44的QQ独立分包；自带API工作流与操作说明，不需要Hub或客户端。\n'
+                'version: 0.5.2-beta.1+qq.1\nauthor: RelN\n'
+                'repo: "https://github.com/kemomimicon/AstrAutoAnima"\n'
+                'astrbot_version: ">=4.17,<5"\nsupport_platforms:\n  - aiocqhttp\n'
+                'tags:\n  - comfyui\n  - image-generation\n')
     entries['metadata.yaml'] = metadata.encode()
     tree = ast.parse((ROOT / 'tools/deploy_project.py').read_text('utf-8-sig'))
     functions = [n for n in tree.body if isinstance(n, ast.FunctionDef)
@@ -153,6 +158,7 @@ def build(out):
        'gpu_job_started':False, 'files':{n:hashlib.sha256(d).hexdigest() for n,d in suite.items()}})
     total = out/'AAA_QQ_Plugin_Suite_0.5.2-1.44-qq.1.zip'
     archive(total, suite)
+    (out/'00_安装与QQ指令说明.txt').write_bytes(b'\xef\xbb\xbf'+guide)
     for p in [plugin, total]:
         digest = hashlib.sha256(p.read_bytes()).hexdigest()
         p.with_suffix('.sha256.txt').write_text(digest+'  '+p.name+'\n', encoding='ascii')

@@ -226,7 +226,7 @@ WD-only模板不依赖JoyCaption。外部节点固定来源和模型落点见“
 默认数据在AstrBot实际工作目录的 `data/plugin_data/astrbot_plugin_comfy_bridge/`：
 anima_random_prompt_pool.json为主库，kp_prompt_pool.json为独立K库，presets.json为预设，job_store为任务与图片关联，outputs为返图缓存。
 配置中填写了自定义路径时以该路径为准。插件代码目录data是公共模板目录，不能替代持久数据目录。
-清理图片可用管理员 `/aimg_cleanup` 查看实际指令提示；保留重要图片和任务后再清理。
+管理员 `/aimg_cleanup` 会立即按配置保留期清理插件返图缓存；执行前先保存重要图片，任务记录不会让已删图片重新出现。
 反馈请给插件版本qq.1、命令、时间和错误片段，不发送密钥或完整私人库。
 
 反馈入口：bilibili——ケモミミロリコン。
