@@ -1,0 +1,18 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "astr-auto-anima",
+  "version": "0.1.0",
+  "description": "通过 AstrAutoAnima Hub 提交生图、取回图片和诊断工作站连接。",
+  "author": {"name": "RelN"},
+  "license": "MIT",
+  "repository": "https://github.com/kemomimicon/AstrAutoAnima",
+  "extensions": {
+    "com.openai": {
+      "requires_local_executor": true,
+      "interface": {
+        "displayName": "AstrAutoAnima",
+        "shortDescription": "使用自己的 AstrAutoAnima 工作站生图"
+      }
+    }
+  }
+}
