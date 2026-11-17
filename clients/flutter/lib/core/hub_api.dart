@@ -191,6 +191,9 @@ class HubApi {
           String action, Map<String, dynamic> value) =>
       _post('/api/v1/admin/storage/$action', body: value);
   Future<Map<String, dynamic>> gallery() => _get('/api/v1/gallery');
+  Future<Map<String, dynamic>> characterGallery() => _get('/api/v1/character-gallery');
+  Future<Map<String, dynamic>> saveCharacterCard(Map<String, dynamic> value) =>
+      _post('/api/v1/character-gallery', body: value);
   Future<Map<String, dynamic>> saveGallery(Map<String, dynamic> value) =>
       _post('/api/v1/admin/gallery/config', body: value);
   Future<Map<String, dynamic>> generateGallery(

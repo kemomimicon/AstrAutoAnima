@@ -43,7 +43,9 @@ class _LiteJobHistoryPageState extends State<LiteJobHistoryPage> {
     'hq': 'HQ 高清',
     'refine': '放大精修',
     'remake': '重跑一张',
-    'multi': '裸模多人图',
+    'multi': '多人图',
+    'turbo': 'Anima Turbo',
+    'reference': 'SnapRef 参考生图',
   };
 
   static const _statusLabels = <String, String>{

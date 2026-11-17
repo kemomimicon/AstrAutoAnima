@@ -159,7 +159,7 @@ void main() {
     expect(payload.containsKey('sampler'), false);
     expect(payload.containsKey('steps'), false);
     expect(payload.containsKey('detail_upscale'), false);
-    await choose(tester, '跑图方式', '裸模多人图 /amulti');
+    await choose(tester, '跑图方式', '多人图 /amulti（可用角色预设）');
     await submit(tester);
     payload = api.submissions.last;
     expect(payload['lighting_key'], '');

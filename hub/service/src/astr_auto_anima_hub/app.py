@@ -66,6 +66,7 @@ from .remote_jobs import RemoteJobError, RemoteJobManager
 from .local_jobs import LocalJobManager
 from .prompt_reports import PromptReports
 from .style_gallery import StyleGallery, GalleryUpdate, GalleryGenerate
+from .character_gallery import router as character_gallery_router
 from .image_storage import ImageStorage, router as image_storage_router
 from .idle_guard import admission
 from .extensions import router as extensions_router
@@ -179,6 +180,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.style_gallery = StyleGallery(resolved, app.state.remote_jobs)
     app.state.image_storage = ImageStorage(resolved, app.state.remote_jobs)
     app.include_router(image_storage_router)
+    app.include_router(character_gallery_router)
 
     @app.post('/api/v1/admin/preset-submissions', status_code=202, tags=['presets'])
     def preset_submission(payload: PresetSubmission,

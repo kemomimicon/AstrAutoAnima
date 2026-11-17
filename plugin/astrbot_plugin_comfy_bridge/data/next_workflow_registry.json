@@ -1,0 +1,82 @@
+{
+  "schema_version": "1.0",
+  "registry_revision": 1,
+  "workflows": [
+    {
+      "id": "turbo_txt2img_anima_v1",
+      "version": "0.1.0-dev.1",
+      "category": "generate",
+      "workflow_file": "data/workflows/Anima_Turbo_api.json",
+      "config_path_key": "turbo_txt2img_anima_path",
+      "profiles": {},
+      "node_mapping": {
+        "positive": "11",
+        "negative": "12",
+        "sampler": "19",
+        "latent": "28"
+      },
+      "required_nodes": [
+        "11",
+        "12",
+        "19",
+        "28"
+      ],
+      "capability": {
+        "txt2img": true,
+        "reference": false
+      }
+    },
+    {
+      "id": "snapref_anima_v1",
+      "version": "0.1.0-dev.1",
+      "category": "generate",
+      "workflow_file": "data/workflows/Anima_SnapRef_api.json",
+      "config_path_key": "snapref_anima_path",
+      "profiles": {},
+      "node_mapping": {
+        "positive": "11",
+        "negative": "12",
+        "sampler": "19",
+        "latent": "28",
+        "image": "1",
+        "reference": "60"
+      },
+      "required_nodes": [
+        "11",
+        "12",
+        "19",
+        "28",
+        "1",
+        "60"
+      ],
+      "capability": {
+        "txt2img": true,
+        "reference": true
+      }
+    },
+    {
+      "id": "preset_multi_anima_v1",
+      "version": "0.1.0-dev.1",
+      "category": "generate",
+      "workflow_file": "data/workflows/Anima_Preset_Multi_api.json",
+      "config_path_key": "preset_multi_anima_path",
+      "profiles": {},
+      "node_mapping": {
+        "positive": "11",
+        "negative": "12",
+        "sampler": "19",
+        "latent": "28"
+      },
+      "required_nodes": [
+        "11",
+        "12",
+        "19",
+        "28"
+      ],
+      "capability": {
+        "txt2img": true,
+        "reference": false
+      }
+    }
+  ]
+}

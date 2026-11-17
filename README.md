@@ -9,6 +9,8 @@
 [安装说明](docs/EASY_INSTALL.md) · [初次配置](docs/FIRST_RUN_WIZARD.md) ·
 [本次验收](docs/PUBLICATION_0.5.2-1.44.md) · [AutoDL 镜像使用](docs/AUTODL_IMAGE.md)
 
+下一版开发内容：[Anima Turbo、角色画廊、预设多人图与 SnapRef `/aref`](docs/NEXT_ANIMA_FEATURES.md)。
+
 ## 0.5.2-1.44 热修 · 2026-10-27
 
 [下载综合热修包](https://github.com/kemomimicon/AstrAutoAnima/releases/download/v0.5.2-1.44/AAA_0.5.2-1.44_Hotfix_20261027.zip)

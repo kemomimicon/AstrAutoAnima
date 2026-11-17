@@ -117,6 +117,7 @@ from .llm_runtime import reverse_image_prompt, translate_chinese_prompt
 from .cleanup_runtime import CleanupReport, cleanup_old_output_images, require_idle_job_records, checked_output_path
 from .lora_name_runtime import prepare_lora_workflow
 from .character_dictionary_runtime import resolve_character
+from .next_generation_runtime import TURBO, SNAPREF, ref_mode, set_reference, replay_reference, render_preset_scene, validate_mode_options, apply_explicit_loras
 from .multi_person_runtime import parse_scene, plan_scene, render_scene, strip_standard_loras
 from .llm_runtime import current_text_provider_id
 from .prompt_compiler_runtime import compile_prompt
@@ -258,6 +259,8 @@ class ComfyWorkflowBridge(GroupBridge, SafetyBridge, Star):
         self, workflow_type: str
     ) -> tuple[WorkflowDefinition, Path]:
         registry = load_workflow_registry(self._registry_path())
+        if workflow_type not in registry.ids() and workflow_type in {TURBO, SNAPREF, "preset_multi_anima_v1"}:
+            registry = load_workflow_registry(Path(__file__).resolve().parent / "data/next_workflow_registry.json")
         definition = registry.resolve(workflow_type)
         path = resolve_workflow_path(
             definition,
@@ -1577,6 +1580,7 @@ class ComfyWorkflowBridge(GroupBridge, SafetyBridge, Star):
             if any(not item for item in clean_batch_prompts):
                 raise WorkflowError("批量提示词中不能包含空内容。")
             prompt = clean_batch_prompts[0]
+        validate_mode_options(workflow_type, options)
         definition, workflow_path = self._workflow_definition(workflow_type)
         selected_profile, profile_data = definition.profile(profile)
         template = load_api_workflow(workflow_path)
@@ -1637,7 +1641,7 @@ class ComfyWorkflowBridge(GroupBridge, SafetyBridge, Star):
                     "strength_clip": float(item.get("strength_clip", 1.0)),
                 }
                 for item in restored_loras
-                if isinstance(item, dict) and item.get("kind") == "style"
+                if isinstance(item, dict) and item.get("kind") in {"style", "person"}
             ]
             character_entry = next(
                 (
@@ -1727,12 +1731,17 @@ class ComfyWorkflowBridge(GroupBridge, SafetyBridge, Star):
         positive_node_id = mapping.get("positive", "11")
         negative_node_id = mapping.get("negative", "12")
         sampler_node_id = mapping.get("sampler", "19")
-        sampler_preset, user_sampler_overrides = self._sampler_overrides(options)
+        sampler_options = dict(options)
+        if workflow_type in {TURBO, SNAPREF, "preset_multi_anima_v1"}:
+            sampler_options.setdefault("sampler_preset", "original")
+        sampler_preset, user_sampler_overrides = self._sampler_overrides(sampler_options)
         profile_sampling = profile_data.get("sampling", {})
         if profile_sampling and not isinstance(profile_sampling, dict):
             raise WorkflowError("Profile sampling 必须是对象。")
         sampler_overrides = dict(profile_sampling or {})
         sampler_overrides.update(user_sampler_overrides)
+        if workflow_type == TURBO:
+            sampler_overrides["cfg"] = 1.0
         width: int | None = None
         height: int | None = None
         if definition.category == "generate":
@@ -1785,7 +1794,17 @@ class ComfyWorkflowBridge(GroupBridge, SafetyBridge, Star):
             latent_inputs = workflow.get(mapping.get('latent', ''), {}).get('inputs', {})
             if 'batch_size' in latent_inputs:
                 latent_inputs['batch_size'] = 1
-        if workflow_type == "seedvr2_refine_v1" or options.get("_base_multi"):
+        if workflow_type == "preset_multi_anima_v1":
+            entries = list(options.get("_multi_loras", []))
+            plan = apply_explicit_loras(workflow, mapping, entries)
+            plan["person_loras"] = plan.pop("style_loras")
+            plan["style_loras"] = []
+        elif workflow_type == TURBO:
+            plan = apply_lora_plan(workflow, style=style or {"loras": []}, character=character,
+                style_slot_ids=[], positive_node_id=positive_node_id, negative_node_id=negative_node_id,
+                sampler_node_id=sampler_node_id, character_node_id="910100", options=options,
+                style_mode="dynamic", dynamic_style_node_id_start=910000)
+        elif workflow_type == "seedvr2_refine_v1" or workflow_type == SNAPREF or options.get("_base_multi"):
             plan = {"style_loras": [], "character_lora": None}
         else:
             plan = apply_lora_plan(
@@ -1808,6 +1827,13 @@ class ComfyWorkflowBridge(GroupBridge, SafetyBridge, Star):
                     self.config.get("max_dynamic_style_loras", 16)
                 ),
             )
+        if isinstance(restored_loras, list) and any(item.get("kind") == "person" for item in restored_loras if isinstance(item, dict)):
+            restored_types = [item["kind"] for item in restored_loras if isinstance(item, dict) and item.get("kind") in {"style", "person"}]
+            entries = plan.get("style_loras", [])
+            if len(entries) != len(restored_types):
+                raise WorkflowError("多人任务 LoRA 恢复数量与快照不一致")
+            plan["person_loras"] = [entry for entry, kind in zip(entries, restored_types) if kind == "person"]
+            plan["style_loras"] = [entry for entry, kind in zip(entries, restored_types) if kind == "style"]
         plan["style_name"] = style_name
         plan["character_name"] = character_name
         plan["character_source"] = (
@@ -1947,6 +1973,8 @@ class ComfyWorkflowBridge(GroupBridge, SafetyBridge, Star):
                 "draw_positions": list(options.get('_draw_positions', [])),
                 "raw_batch_prompts": list(clean_batch_prompts),
                 "generation_options": {k: copy.deepcopy(v) for k, v in options.items() if not k.startswith("_")},
+                "multi_snapshot": copy.deepcopy(options.get("_multi_snapshot", [])),
+                "reference_mode": options.get("_ref_mode", ""),
                 "preset_snapshot": {"style": style_preset_snapshot, "character": copy.deepcopy(character),
                                     # A restored compiled stack may already contain the adapter.
                                     "camera_auxiliary_embedded": None if isinstance(restored_loras, list) else False},
@@ -1971,6 +1999,7 @@ class ComfyWorkflowBridge(GroupBridge, SafetyBridge, Star):
                     "refine_existing_v1",
                     "detail_repair_anima_v1",
                     "seedvr2_refine_v1",
+                    SNAPREF,
                 }:
                     if not source_image_path:
                         raise WorkflowError("INVALID_INPUT：精修任务缺少输入图片。")
@@ -1984,7 +2013,9 @@ class ComfyWorkflowBridge(GroupBridge, SafetyBridge, Star):
                     uploaded_name = await self._upload_reverse_image(
                         session, source_image_path
                     )
-                    if workflow_type == "seedvr2_refine_v1":
+                    if workflow_type == SNAPREF:
+                        set_reference(workflow, mapping, uploaded_name, options.get("_ref_mode", "char"))
+                    elif workflow_type == "seedvr2_refine_v1":
                         refine_plan = configure_seedvr2_workflow(
                             workflow,
                             image_name=uploaded_name,
@@ -2116,6 +2147,7 @@ class ComfyWorkflowBridge(GroupBridge, SafetyBridge, Star):
             ]
             if isinstance(plan.get("character_lora"), dict):
                 lora_stack.append({**plan["character_lora"], "kind": "character"})
+            lora_stack.extend({**entry, "kind": "person"} for entry in plan.get("person_loras", []))
             job["status"] = "completed"
             job["workflow_snapshot"] = copy.deepcopy(workflow)
             job["comfyui_prompt_id"] = prompt_id
@@ -3201,7 +3233,7 @@ class ComfyWorkflowBridge(GroupBridge, SafetyBridge, Star):
             if not self._group_request_matches(message):
                 return
             decision = self._group_policy(event)
-            generation = bool(re.match(r"^(?:/?(?:aimg(?:_random5?|_chaos5?)?|ahq|arefine|aremake|aip|aicn|acopy|amulti|apalette)(?:\s|$)|来张好图|混沌时刻|混沌五连|五连抽|抽一抽|重跑一张|抄一抄|多人图|随机画风)", message))
+            generation = bool(re.match(r"^(?:/?(?:aimg(?:_random5?|_chaos5?)?|ahq|aturbo|aref|arefine|aremake|aip|aicn|acopy|amulti|apalette)(?:\s|$)|来张好图|混沌时刻|混沌五连|五连抽|抽一抽|重跑一张|抄一抄|多人图|随机画风)", message))
             if not decision.get("allowed", True) and (generation or decision.get("silent")):
                 event.should_call_llm(False)
                 event.stop_event()
@@ -3256,7 +3288,7 @@ class ComfyWorkflowBridge(GroupBridge, SafetyBridge, Star):
     async def idle_command_guard(self, event: AstrMessageEvent):
         """Record accepted generation commands before LLM/reverse preparation begins."""
         message = str(event.message_str or '').strip()
-        if not re.match(r'^(?:/?(?:aimg(?:_random5?|_chaos5?)?|ahq|arefine|aremake|aip|aicn|acopy|amulti|apalette)(?:\s|$)|来张好图|混沌时刻|混沌五连|五连抽|抽一抽|重跑一张|抄一抄|多人图|随机画风)', message):
+        if not re.match(r'^(?:/?(?:aimg(?:_random5?|_chaos5?)?|ahq|aturbo|aref|arefine|aremake|aip|aicn|acopy|amulti|apalette)(?:\s|$)|来张好图|混沌时刻|混沌五连|五连抽|抽一抽|重跑一张|抄一抄|多人图|随机画风)', message):
             return
         from .idle_guard_runtime import admission
         lease = None
@@ -3286,7 +3318,7 @@ class ComfyWorkflowBridge(GroupBridge, SafetyBridge, Star):
         if not self._safety_policy(event).enabled:
             return
         message = str(event.message_str or "").strip()
-        if not re.match(r"^(?:/(?:aimg(?:_random5?|_chaos5?)?|ahq|arefine|aremake|aip|aicn|acopy|amulti)(?:\s|$)|来张好图|混沌时刻|混沌五连|五连抽|抽一抽|重跑一张|抄一抄|多人图)", message):
+        if not re.match(r"^(?:/(?:aimg(?:_random5?|_chaos5?)?|ahq|aturbo|aref|arefine|aremake|aip|aicn|acopy|amulti)(?:\s|$)|来张好图|混沌时刻|混沌五连|五连抽|抽一抽|重跑一张|抄一抄|多人图)", message):
             return
         try:
             self._safety_guard(event)
@@ -3649,6 +3681,10 @@ class ComfyWorkflowBridge(GroupBridge, SafetyBridge, Star):
             await event.send(event.plain_result("已读取原任务快照，" + ("沿用原种子" if fixed_seed else "使用新种子") + "重跑；模型文件内容以服务器当前文件为准。"))
             async with self._generation_slot(event):
                 async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=self._timeout_seconds()+30)) as session:
+                    if parent["workflow"]["type"] == SNAPREF:
+                        reference_path, reference_mapping, reference_mode = replay_reference(store, parent, workflow)
+                        reference_name = await self._upload_reverse_image(session, reference_path)
+                        set_reference(workflow, reference_mapping, reference_name, reference_mode)
                     prompt_id = await self._submit_workflow(session, workflow)
                     record = await self._wait_for_history(session, prompt_id)
                     refs = extract_output_images(record)
@@ -3935,6 +3971,36 @@ class ComfyWorkflowBridge(GroupBridge, SafetyBridge, Star):
         except (WorkflowError, ValueError, TypeError, AttributeError) as exc:
             await event.send(event.plain_result(f"抄一抄失败：{exc}"))
 
+    @filter.command("aturbo")
+    async def aturbo(self, event: AstrMessageEvent, content: str = ""):
+        event.should_call_llm(False)
+        event.stop_event()
+        try:
+            prompt, options = parse_generation_directives(extract_command_body(event.message_str, content, "aturbo"))
+            if not prompt:
+                raise WorkflowError("用法：/aturbo [角色=名称] [画风=名称] <提示词>")
+            await self._deliver_generation(event, prompt=prompt, options=options, workflow_type=TURBO, completion_prefix="Turbo 生成完成")
+        except WorkflowError as exc:
+            await event.send(event.plain_result(str(exc)))
+
+    @filter.command("aref")
+    async def aref(self, event: AstrMessageEvent, content: str = ""):
+        event.should_call_llm(False)
+        event.stop_event()
+        try:
+            body, mode = ref_mode(extract_command_body(event.message_str, content, "aref"))
+            prompt, options = parse_generation_directives(body)
+            validate_mode_options(SNAPREF, options)
+            if not prompt:
+                raise WorkflowError("引用或附带参考图发送 /aref [char|cs] <场景、动作描述>")
+            path = await self._image_resolver.resolve(event)
+            if not path:
+                raise WorkflowError("请引用参考图片，或把图片与 /aref 命令一起发送")
+            await self._deliver_generation(event, prompt=prompt, options={**options, "_ref_mode":mode},
+                workflow_type=SNAPREF, source_image_path=path, strict_no_style=True, completion_prefix="参考生图完成")
+        except WorkflowError as exc:
+            await event.send(event.plain_result(str(exc)))
+
     @filter.command("amulti", alias={"多人图"})
     async def amulti(self, event: AstrMessageEvent, content: str = ""):
         """裸模2–4人物分段生图；自动模式复用AstrBot文本Provider。"""
@@ -3946,6 +4012,19 @@ class ComfyWorkflowBridge(GroupBridge, SafetyBridge, Star):
             await self._safety_input(event, body)
             if multi_options.get("character") or multi_options.get("style"):
                 raise WorkflowError("裸模多人图不使用全局角色/画风预设，请把每个人物写入人物分段。")
+            preset_mode = body.startswith("预设 ") or body.startswith("预设\n")
+            preview_only = body.startswith("预览 ") or body.startswith("预览\n")
+            if preset_mode or preview_only:
+                scene = parse_scene(body[3:].strip())
+                prompt, snapshots, loras = render_preset_scene(scene, load_presets(self._preset_path()), self._preset_path().parent / "character_gallery")
+                await self._safety_input(event, prompt)
+                if preview_only:
+                    await event.send(event.plain_result(prompt))
+                else:
+                    await self._deliver_generation(event, prompt=prompt,
+                        options={"ratio":"3:2", **multi_options, "_compiled_prompt":True, "_multi_snapshot":snapshots, "_multi_loras":loras},
+                        workflow_type="preset_multi_anima_v1", strict_no_style=True, completion_prefix="预设多人图完成")
+                return
             if body.startswith("自动 ") or body.startswith("自动\n"):
                 provider = await current_text_provider_id(self.context, event, str(self.config.get("text_provider_id", "")))
                 scene = await plan_scene(self.context, event, body[3:].strip(), provider)
@@ -4355,6 +4434,9 @@ class ComfyWorkflowBridge(GroupBridge, SafetyBridge, Star):
             "/aip 角色=名称（同条附图或60秒内发送图片）\n"
             "/acopy 角色=名称（引用任务图时仅替换预设，无需LLM；可追加自然语言修改要求，修改正文才需要LLM）\n"
             "/arefine seedvr2（附图或引用原图）\n"
+            "/aturbo 快速生图提示词\n"
+            "/aref char 场景描述（引用或附带参考图）\n"
+            "/amulti 预设/预览 + 分行人物（读取角色预设与特征档案）\n"
             "/ahq 英文提示词\n"
             "/amulti 多人结构化描述（人物1/人物2/场景/互动）\n"
             "引用本机器人结果图：重跑一张 / 看看串 / 查看画风\n"

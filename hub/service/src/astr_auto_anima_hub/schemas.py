@@ -218,7 +218,7 @@ class RemoteJobCreateRequest(BaseModel):
     detail_face: bool = False
     deliver_to_im: bool = True
     target_id: str = Field(min_length=1, max_length=80)
-    kind: Literal["direct", "chinese", "reverse", "random", "chaos", "hq", "refine", "remake", "multi"]
+    kind: Literal["direct", "chinese", "reverse", "random", "chaos", "hq", "refine", "remake", "multi", "turbo", "reference"]
     five_draw: bool = False
     random_subject_tag: Literal["", "1girl", "1boy", "1woman", "1man", "none"] = ""
     pool_filter: str = Field(default="", max_length=32)
@@ -274,6 +274,7 @@ class RemoteJobCreateRequest(BaseModel):
     parent_job_id: str = Field(default="", max_length=120)
     scale: float | None = Field(default=None, ge=1.0, le=2.0)
     denoise: float | None = Field(default=None, ge=0.0, le=1.0)
+    reference_mode: Literal["char", "cs"] = "char"
     source_image_name: str = Field(default="", max_length=255)
     source_image_data: str = Field(default="", max_length=30_000_000)
 
@@ -307,7 +308,7 @@ class RemoteJobResponse(BaseModel):
     deliver_to_im: bool = True
     id: str
     status: Literal["queued", "running", "succeeded", "failed"]
-    kind: Literal["direct", "chinese", "reverse", "random", "chaos", "hq", "refine", "remake", "multi"] = "direct"
+    kind: Literal["direct", "chinese", "reverse", "random", "chaos", "hq", "refine", "remake", "multi", "turbo", "reference"] = "direct"
     bridge_job_ids: list[str] = Field(default_factory=list, max_length=20)
     safety_code: Literal["N", "H", "S"] = "N"
     profile: str = Field(default="", max_length=40)

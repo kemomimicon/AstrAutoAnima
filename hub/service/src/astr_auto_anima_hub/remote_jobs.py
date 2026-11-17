@@ -225,6 +225,8 @@ def build_remote_command(
         raise RemoteJobError("reverse generation can only be delivered to a private target")
     if payload.five_draw and not random_kind:
         raise RemoteJobError("five draw is only valid for random or chaos jobs")
+    if payload.kind == "turbo" and payload.cfg is not None and payload.cfg != 1:
+        raise RemoteJobError("Anima Turbo 使用 CFG=1")
 
     prefix = {
         ("direct", False): "/aimg",
@@ -243,8 +245,14 @@ def build_remote_command(
         ("refine", True): "/arefine",
         ("remake", False): "/aremake",
         ("multi", False): "/amulti",
+        ("turbo", False): "/aturbo",
+        ("reference", False): "/aref",
     }[(payload.kind, payload.five_draw)]
     parts = [prefix]
+    if payload.kind == "reference":
+        if payload.character or payload.style or payload.personal_style_slot or payload.trial_style:
+            raise RemoteJobError("参考生图请通过参考图提供身份，使用 char 或 cs 模式")
+        parts.append(payload.reference_mode)
     visual = (("主光", payload.lighting_key), ("效果光", payload.lighting_effect),
               ("主材质", payload.material_primary), ("细节材质", ','.join(payload.material_details)),
               ("表面效果", payload.material_surface),
@@ -360,17 +368,17 @@ def build_remote_command(
     parts.extend(f"{name}={value}" for name, value in visual if value)
     if payload.prompt.strip():
         parts.append(payload.prompt.strip())
-    if payload.kind in {"direct", "chinese", "hq"} and not payload.prompt.strip():
+    if payload.kind in {"direct", "chinese", "hq", "turbo", "reference"} and not payload.prompt.strip():
         raise RemoteJobError(f"{payload.kind} generation requires a prompt")
     return " ".join(parts), effective_safety
 
 
 def _decode_source_image(payload: RemoteJobCreateRequest) -> tuple[bytes, str, str] | None:
     encoded = payload.source_image_data.strip()
-    image_kinds = {"reverse", "refine"}
+    image_kinds = {"reverse", "refine", "reference"}
     if payload.kind not in image_kinds:
         if encoded or payload.source_image_name.strip():
-            raise RemoteJobError("source images are only valid for reverse/refine jobs")
+            raise RemoteJobError("source images are only valid for reverse/refine/reference jobs")
         return None
     if not encoded:
         if payload.kind == "refine" and payload.parent_job_id.strip():
@@ -918,7 +926,7 @@ class RemoteJobManager:
         normalized_kind = str(kind or "").strip().casefold()
         normalized_status = str(status or "").strip().casefold()
         allowed_kinds = {
-            "direct", "chinese", "reverse", "random", "chaos", "hq", "refine", "remake", "multi"
+            "direct", "chinese", "reverse", "random", "chaos", "hq", "refine", "remake", "multi", "turbo", "reference"
         }
         allowed_statuses = {"queued", "running", "succeeded", "failed"}
         if normalized_kind and normalized_kind not in allowed_kinds:
