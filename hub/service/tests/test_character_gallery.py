@@ -4,6 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -81,7 +82,31 @@ class CharacterGalleryTests(unittest.TestCase):
         with self.assertRaisesRegex(RepositoryError, '已更新'):
             self.gallery.write(CardWrite(revision='initial', character='Alice'), SYSTEM_ADMIN)
         self.assertEqual((self.gallery.root / 'catalog.json').read_bytes(), before)
-        self.assertFalse((self.gallery.root / '.write.lock').exists())
+        # The kernel lock is released on errors; the stable lock file can remain.
+        self.write(published=True)
+
+    def test_abandoned_lock_file_does_not_prevent_saving(self):
+        self.gallery.root.mkdir()
+        (self.gallery.root / 'catalog.json.write.lock').write_bytes(b'0')
+        self.assertEqual(len(self.write()['items']), 1)
+
+    def test_oversized_catalog_and_failed_replace_preserve_previous_and_remove_new_cover(self):
+        self.write()
+        catalog = self.gallery.root / 'catalog.json'
+        before = catalog.read_bytes()
+        # A limit just above the existing catalog lets the old record be read.
+        with patch.object(self.gallery.core(), 'MAX_JSON_BYTES', len(before) + 10):
+            with self.assertRaisesRegex(RepositoryError, '16 MiB'):
+                self.write(cover_job='j1', cover_image='i1')
+        self.assertEqual(catalog.read_bytes(), before)
+        self.assertEqual(list(self.gallery.root.glob('*.image')), [])
+        with patch.object(Path, 'replace', side_effect=OSError('disk write failure')):
+            with self.assertRaises(OSError):
+                self.write(cover_job='j1', cover_image='i1')
+        self.assertEqual(catalog.read_bytes(), before)
+        self.assertEqual(list(self.gallery.root.glob('*.image')), [])
+        self.assertEqual(list(self.gallery.root.glob('*.tmp')), [])
+        self.write(published=True)
 
     def test_cover_draft_visibility_ownership_and_audit(self):
         row = self.write(cover_job='j1', cover_image='i1')['items'][0]

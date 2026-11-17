@@ -1,6 +1,6 @@
 # AstrAutoAnima
 
-**0.5.2-1.44 · build44 · install.2**
+**0.5.3-beta.1 · build45 · 本地更新候选**
 
 面向 AstrBot + QQ/NapCat + ComfyUI/Anima 的跑图桥接套件，支持 Windows 本地电脑和 Linux 云服务器。
 包含 QQ 生图、动态角色/画风 LoRA、随机提示词、图片反推、HQ、放大精修、Hub 和 Windows/Android/Web 客户端。

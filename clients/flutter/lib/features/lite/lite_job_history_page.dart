@@ -360,12 +360,14 @@ class _LiteJobHistoryPageState extends State<LiteJobHistoryPage> {
                       width: 190,
                       child: DropdownButtonFormField<String>(
                         initialValue: _kind,
+                        isExpanded: true,
                         decoration: const InputDecoration(labelText: '任务分类'),
                         items: _kindLabels.entries
                             .map(
                               (entry) => DropdownMenuItem(
                                 value: entry.key,
-                                child: Text(entry.value),
+                                child: Text(entry.value,
+                                    overflow: TextOverflow.ellipsis),
                               ),
                             )
                             .toList(),
@@ -379,12 +381,14 @@ class _LiteJobHistoryPageState extends State<LiteJobHistoryPage> {
                       width: 170,
                       child: DropdownButtonFormField<String>(
                         initialValue: _status,
+                        isExpanded: true,
                         decoration: const InputDecoration(labelText: '任务状态'),
                         items: _statusLabels.entries
                             .map(
                               (entry) => DropdownMenuItem(
                                 value: entry.key,
-                                child: Text(entry.value),
+                                child: Text(entry.value,
+                                    overflow: TextOverflow.ellipsis),
                               ),
                             )
                             .toList(),

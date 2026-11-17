@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field
 from .auth import require_admin, require_reader
 from .repositories import RepositoryError
 from .remote_jobs import RemoteJobError
+from .preset_lock import preset_file_lock
 
 router = APIRouter(prefix="/api/v1/character-gallery", tags=["character-gallery"])
 _IMPORT_LOCK = threading.RLock()
@@ -91,13 +92,14 @@ class CharacterGallery:
     def write(self, payload, principal):
         self.path("catalog.json")
         self.root.mkdir(parents=True, exist_ok=True)
-        lock = self.path(".write.lock")
+        self.path("catalog.json.write.lock")
+        with preset_file_lock(self.path("catalog.json")):
+            return self._write(payload, principal)
+
+    def _write(self, payload, principal):
+        new_cover = None
+        committed = False
         try:
-            stream = lock.open("x")
-        except FileExistsError as exc:
-            raise RepositoryError("画廊正在保存，请稍后刷新") from exc
-        try:
-            stream.close()
             data = self.read()
             if payload.revision != data["revision"]:
                 raise RepositoryError("画廊已更新，请刷新；当前草稿可保留后重试")
@@ -129,25 +131,31 @@ class CharacterGallery:
                     raise RepositoryError("封面需要不超过 25MB 的 PNG/JPEG/WebP")
                 self.jobs._require_approved(content)
                 name = uuid.uuid4().hex + ".image"
-                with self.path(name).open("xb") as stream:
+                new_cover = self.path(name)
+                with new_cover.open("xb") as stream:
                     stream.write(content)
                 item["cover"] = {"file": name, "content_type": image.content_type, "job_id": payload.cover_job}
             data["items"] = [i for i in data["items"] if i["id"] != item["id"]] + [item]
+            data["revision"] = uuid.uuid4().hex
+            serialized = core.json_bytes(data)
+            if len(serialized) > core.MAX_JSON_BYTES:
+                raise RepositoryError("角色画廊目录已达 16 MiB，请精简特征档案后再保存")
             previous = self.path("catalog.json")
             if previous.exists():
                 with self.path(uuid.uuid4().hex + ".backup.json").open("xb") as stream:
                     stream.write(previous.read_bytes())
-            data["revision"] = uuid.uuid4().hex
             temporary = self.path(uuid.uuid4().hex + ".tmp")
             try:
                 with temporary.open("xb") as stream:
-                    stream.write(core.json_bytes(data))
+                    stream.write(serialized)
                 temporary.replace(previous)
+                committed = True
             finally:
                 temporary.unlink(missing_ok=True)
             return self.view(True)
         finally:
-            lock.unlink(missing_ok=True)
+            if new_cover is not None and not committed:
+                new_cover.unlink(missing_ok=True)
 
     def image(self, ident, admin):
         item = next((i for i in self.read()["items"] if i["id"] == ident and (admin or i.get("published"))), None)

@@ -6,6 +6,8 @@ import os
 import socket
 import sys
 import tempfile
+import subprocess
+import shutil
 import unittest
 from unittest.mock import patch
 
@@ -80,7 +82,7 @@ class UpgradeTests(unittest.TestCase):
         self.assertEqual((self.plugin/'main.py').read_bytes(),b'user-change-after-upgrade')
 
     def test_tampered_rollback_target_refused(self):
-        backup=self.apply();path=backup/'update-state.json';state=json.loads(path.read_text());state['operations'][0]['target']=str(self.install/'runtime-env.json');path.write_text(json.dumps(state))
+        backup=self.apply();path=backup/'update-state.json';state=json.loads(path.read_text(encoding='utf-8'));state['operations'][0]['target']=str(self.install/'runtime-env.json');path.write_text(json.dumps(state),encoding='utf-8')
         before=(self.install/'runtime-env.json').read_bytes()
         with self.assertRaises(ValueError):updater.rollback(backup,log=lambda _:None,payload=self.payload)
         self.assertEqual((self.install/'runtime-env.json').read_bytes(),before)
@@ -145,6 +147,58 @@ class UpgradeTests(unittest.TestCase):
         p=self.install/'runtime-env.json';env=json.loads(p.read_text());env['AAH_ADMIN_TOKEN']='short';p.write_text(json.dumps(env));before=p.read_bytes()
         with self.assertRaises(ValueError):self.apply()
         self.assertEqual(p.read_bytes(),before);self.assertFalse((self.install/'aaa_update_backups').exists())
+
+    def test_backup_recovers_without_original_patch(self):
+        backup=self.apply()
+        # Renaming the fixture patch proves recovery is independent of it.
+        self.payload.parent.rename(self.base/'patch-unavailable')
+        result=subprocess.run([sys.executable,'-X','utf8',str(backup/'update.py'),
+            '--rollback',str(backup),'--confirm-stopped'],capture_output=True,text=True,encoding='utf-8')
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertEqual((self.plugin/'main.py').read_bytes(),b'OLD_PLUGIN=True\n')
+        self.assertTrue((backup/'Rollback-Windows.cmd').is_file())
+        self.assertTrue((backup/'Rollback-Linux.sh').is_file())
+
+    def test_interrupt_rolls_back_and_releases_kernel_lock(self):
+        real=updater.write_atomic;failed=False
+        def interrupted(path,data,mode=0o644):
+            nonlocal failed
+            if Path(path)==self.plugin/'main.py' and data==b'NEW_PLUGIN=True\n' and not failed:
+                failed=True;raise KeyboardInterrupt()
+            return real(path,data,mode)
+        with patch.object(updater,'write_atomic',side_effect=interrupted),self.assertRaises(KeyboardInterrupt):self.apply()
+        self.assertEqual((self.plugin/'main.py').read_bytes(),b'OLD_PLUGIN=True\n')
+        self.apply()
+        self.assertEqual((self.plugin/'main.py').read_bytes(),b'NEW_PLUGIN=True\n')
+
+    def test_concurrent_update_is_blocked(self):
+        with updater.install_lock(self.plan):
+            with self.assertRaisesRegex(ValueError,'已有更新'):
+                with updater.install_lock(self.plan):pass
+
+    def test_insufficient_space_never_overwrites(self):
+        usage=shutil.disk_usage(self.base)
+        with patch.object(updater.shutil,'disk_usage',return_value=usage._replace(free=1)),self.assertRaisesRegex(ValueError,'空间不足'):
+            self.apply()
+        self.assertEqual((self.plugin/'main.py').read_bytes(),b'OLD_PLUGIN=True\n')
+
+    def test_private_payload_and_duplicate_manifest_rejected(self):
+        self.put(self.payload/'plugin/.env',b'bad')
+        self.freeze_payload()
+        with self.assertRaisesRegex(ValueError,'非程序数据'):self.apply()
+        (self.payload/'plugin/.env').unlink();self.freeze_payload()
+        path=self.payload.parent/'payload-manifest.json';manifest=updater.read_json(path)
+        manifest['files'].append(manifest['files'][0]);path.write_text(json.dumps(manifest),encoding='utf-8')
+        with self.assertRaisesRegex(ValueError,'重复路径'):self.apply()
+
+    def test_next_version_ceiling_and_newer_stable_refused(self):
+        with patch.object(updater,'TARGET_CORE',(0,5,3)),patch.object(updater,'TARGET_BETA',1):
+            for value in ('0.5.2-beta.2','0.5.2','0.5.3-beta.1'):
+                (self.plugin/'metadata.yaml').write_text('version: '+value,encoding='utf-8')
+                self.assertEqual(updater.version(self.plugin/'metadata.yaml'),value)
+            for value in ('0.5.3','0.5.3-beta.2','0.6.0'):
+                (self.plugin/'metadata.yaml').write_text('version: '+value,encoding='utf-8')
+                with self.assertRaises(ValueError):updater.version(self.plugin/'metadata.yaml')
 
 
 if __name__=='__main__':unittest.main()
