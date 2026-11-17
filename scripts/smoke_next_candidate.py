@@ -69,6 +69,8 @@ def run(patch_zip, work):
                 target = plugin / name.removeprefix('plugin/astrbot_plugin_comfy_bridge/')
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(z.read(name))
+    (hub / 'web').mkdir(exist_ok=True)
+    (hub / 'web/index.html').write_text('<html><body>build44 fixture web</body></html>', encoding='utf-8')
     old_files = {p: p.read_bytes() for folder in (hub, plugin) for p in folder.rglob('*') if p.is_file()}
     (comfy / 'models').mkdir(parents=True)
     (comfy / 'main.py').write_text('# fixture only\n', encoding='utf-8')
