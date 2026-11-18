@@ -33,7 +33,7 @@
   "bundled_prompt_count": 0,
   "models_included": false,
   "external_downloads_default_enabled": false,
-  "android_release_signing": "not-built-in-this-candidate",
+  "android_release_signing": "community-test-debug-key; verified same certificate as build44",
   "candidate_only": true,
   "compiled_clients_rebuilt": true,
   "local_repair_review": "20261024",
@@ -71,6 +71,8 @@
     "windows-unified",
     "windows-admin",
     "windows-service",
-    "web"
+    "web",
+    "android-admin",
+    "android-service"
   ]
 }
