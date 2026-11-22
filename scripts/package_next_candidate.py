@@ -90,6 +90,8 @@ def build(build_dir, output):
             raise ValueError('Client source changed after compilation: ' + name)
     docs = {'00_更新与回退说明.txt': b'\xef\xbb\xbf' + tracked['docs/NEXT_CANDIDATE_UPDATE.md'],
             'docs/NEXT_ANIMA_FEATURES.md': tracked['docs/NEXT_ANIMA_FEATURES.md'],
+            'docs/NAPCAT_ARCHIVE.md': tracked['docs/NAPCAT_ARCHIVE.md'],
+            'docs/NAPCAT_SETUP.md': tracked['docs/NAPCAT_SETUP.md'],
             'LICENSE': tracked['LICENSE'], 'THIRD_PARTY_NOTICES.md': tracked['THIRD_PARTY_NOTICES.md']}
     assets = []
     for edition in ('unified', 'admin', 'service'):

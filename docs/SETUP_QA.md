@@ -1,5 +1,9 @@
 # 安装、扩展与二次恢复 Q&A
 
+## [napcat_archive] Q：NapCat 原仓库内容或下载链接失效，到哪里找留档？
+
+A：使用第三方公开留档 [XingYunStar/NapCatQQ](https://github.com/XingYunStar/NapCatQQ)，在 [Releases](https://github.com/XingYunStar/NapCatQQ/releases) 选择历史版本的 Windows、Shell 或 Docker 发布文件。Code → Download ZIP 下载的是源码。旧 AAA 向导固定校验 v4.18.38，其他版本按留档发布页安装；现有 NapCat 继续用于 QQ / OneBot 对接。详见 [NapCat 留档说明](NAPCAT_ARCHIVE.md)。
+
 ## [prompt_search_gray] Q：提示词查询有条数和页码，但卡片变成灰框？
 
 A：0.5.2-1.44 的 Windows 管理端曾出现列表滚动状态与词条展开状态共用标识的问题，滚动后查询可触发界面异常。安装 libraryfix.1 管理端修复包，完整解压到新目录运行，原连接继续使用。此修复不转换词库；已有条数和页码说明当前查询已取得数据。

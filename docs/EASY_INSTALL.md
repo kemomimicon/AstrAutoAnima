@@ -1,5 +1,7 @@
 # 0.5.0 Beta 一键部署与首次使用
 
+> NapCat 上游变动后的社区公开入口：[XingYunStar 留档仓库](https://github.com/XingYunStar/NapCatQQ) · [历史版本下载](https://github.com/XingYunStar/NapCatQQ/releases)。程序下载及旧向导版本说明见 [NapCat 留档说明](NAPCAT_ARCHIVE.md)。
+
 > 2026-10-23 进度候选修订 `progress-candidate.1`：固定显示阶段状态灯、已处理阶段数、下载／校验进度与等待时间；结束时区分完成、待配置和失败，可保存窗口日志。复用环境与未选组件标明跳过。Windows 前置 Python／Git 准备也显示步骤。见[进度与结果说明](INSTALL_PROGRESS.md)。本地候选，尚未替换 GitHub 附件。
 
 > 2026-10-22 搬家候选修订 `relocate-candidate.7`：默认安装在用户目录的 `AstrAutoAnima-install`，不跟随下载包位置。**安装后不能直接改名/移动**。Windows 安装中心⑥新增[搬家与路径修复](RELOCATION_WINDOWS.md)：完整复制后修复或已改名就地修复，自动备份，原目录保留，不改模型/词库内容与密钥值。旧用户请用独立工具，不要为修路径重跑完整部署。尚未上传 GitHub。

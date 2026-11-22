@@ -1,5 +1,7 @@
 # AstrAutoAnima 0.5.3-beta.1 · build45 更新与回退
 
+NapCat 社区公开留档：[XingYunStar/NapCatQQ](https://github.com/XingYunStar/NapCatQQ)；[历史版本下载](https://github.com/XingYunStar/NapCatQQ/releases)。用途与安装说明见 `docs/NAPCAT_ARCHIVE.md`。
+
 本地候选版，包含 Anima Turbo、角色画廊、预设多人图和 SnapRef `/aref`。先更新服务端，再使用本目录中的新版客户端。功能与模型放置说明见 `docs/NEXT_ANIMA_FEATURES.md`。
 
 ## 选哪个包

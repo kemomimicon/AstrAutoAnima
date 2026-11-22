@@ -65,11 +65,11 @@ SeedVR2 3B FP16 整图 682×1024。QQ 投递由维护者验证通过。
   并在独立实例测试命令冲突、Provider、图片返回和工作流覆盖行为。
 - AstrAutoAnima 的 `/aimg` 等指令可能与其他绘图插件重名；同一命令只保留一个处理插件。
 
-基础环境只列官方入口，本仓库不重复提供其安装教程：
+基础环境与留档入口：
 
 - AstrBot：<https://github.com/AstrBotDevs/AstrBot> / <https://docs.astrbot.app/>
 - ComfyUI：<https://github.com/Comfy-Org/ComfyUI> / <https://docs.comfy.org/>
-- NapCatQQ：<https://github.com/NapNeko/NapCatQQ> / <https://napneko.github.io/>
+- NapCatQQ：[社区公开留档](https://github.com/XingYunStar/NapCatQQ) · [历史版本下载](https://github.com/XingYunStar/NapCatQQ/releases) · [留档与安装说明](docs/NAPCAT_ARCHIVE.md)；原项目为 [NapNeko/NapCatQQ](https://github.com/NapNeko/NapCatQQ)。
 - Anima Master：<https://github.com/YayiMiko/anima-master>
 - Anima 模型：<https://huggingface.co/circlestone-labs/Anima>
 
