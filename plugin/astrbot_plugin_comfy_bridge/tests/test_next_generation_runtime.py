@@ -103,7 +103,7 @@ class NextGenerationTests(unittest.TestCase):
 
     def test_ref_modes_and_graph_input(self):
         self.assertEqual(ref_mode('角色画风 a garden'), ('a garden', 'cs'))
-        self.assertEqual(ref_mode('a garden'), ('a garden', 'char'))
+        self.assertEqual(ref_mode('a garden'), ('a garden', 'auto'))
         graph = json.loads((ROOT / 'data/workflows/Anima_SnapRef_api.json').read_text())
         set_reference(graph, {}, 'uploaded/ref.png', 'char')
         self.assertEqual(graph['1']['inputs']['image'], 'uploaded/ref.png')

@@ -124,7 +124,7 @@
         0
       ],
       "adapter": "snapref_v2a.safetensors",
-      "mode": "char",
+      "mode": "cs",
       "ref_in_uncond": false,
       "ref_megapixels": 1.0,
       "strength": 0.0,

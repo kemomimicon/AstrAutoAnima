@@ -1,5 +1,7 @@
 # Android · 0.5.3-beta.1 / build45
 
+2026-11-24 修订 `candidate.2-snapref-style` 已加入 `/aref` 自动模式和画风预设选择。已安装上一份 build45 候选 APK 的用户可用本目录同用途 APK 覆盖安装，服务端同时应用本次更新包。
+
 本目录提供两个完整通用 APK，均包含 ARM64、ARMv7 与 x86_64 架构，适用 Android 7.0 及以上。按用途安装即可，也可以同时安装两款。
 
 - Android-Admin：管理端，使用 Hub 管理员令牌管理词库、预设、角色画廊等。

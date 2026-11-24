@@ -4,7 +4,7 @@ import copy
 from pathlib import Path
 
 from .workflow_runtime import WorkflowError
-from .preset_runtime import select_character_variant
+from .preset_runtime import select_character_variant, apply_lora_plan
 
 TURBO = "turbo_txt2img_anima_v1"
 SNAPREF = "snapref_anima_v1"
@@ -12,10 +12,20 @@ SNAPREF = "snapref_anima_v1"
 
 def ref_mode(body):
     fields = body.split(maxsplit=1)
-    modes = {"角色": "char", "char": "char", "角色画风": "cs", "cs": "cs"}
+    if fields and fields[0] in {"style", "画风"}:
+        raise WorkflowError("本版暂不提供纯画风参考 style；可用 /aref 全部参考，或 /aref char 画风=名称")
+    modes = {"角色": "char", "char": "char", "角色画风": "cs", "cs": "cs", "all": "cs", "全部": "cs"}
     if fields and fields[0] in modes:
         return (fields[1] if len(fields) == 2 else ""), modes[fields[0]]
-    return body, "char"
+    return body, "auto"
+
+
+def resolve_reference_mode(mode, options):
+    if mode == "auto":
+        return "char" if options.get("style") else "cs"
+    if mode not in {"char", "cs"}:
+        raise WorkflowError("参考模式应为 char 或 cs（全部参考）")
+    return mode
 
 
 def set_reference(workflow, mapping, image_name, mode):
@@ -113,10 +123,33 @@ def render_preset_scene(scene, presets, feature_root):
 
 
 def validate_mode_options(kind, options):
-    if kind == SNAPREF and (options.get("character") or options.get("style")):
-        raise WorkflowError("/aref 由参考图提供角色；画风用 char 模式配合文字描述，不叠全局角色/画风预设")
+    if kind == SNAPREF:
+        if options.get("character"):
+            raise WorkflowError("/aref 由参考图提供角色，不叠加角色预设；char 模式可选择画风预设")
+        if resolve_reference_mode(options.get("_ref_mode", "auto"), options) != "char" and options.get("style"):
+            raise WorkflowError("cs 沿用参考图画风；调用画风预设请使用 /aref char 画风=名称")
     if kind == TURBO and options.get("sampler_cfg") is not None and float(options["sampler_cfg"]) != 1:
         raise WorkflowError("Anima Turbo 请使用 CFG=1；普通 Anima 可继续使用 /aimg")
+
+
+def apply_reference_style(workflow, mapping, style, options):
+    """Patch MODEL/CLIP before SnapRef; keep its output connected to sampling."""
+    if not style or not style.get("loras"):
+        return {"style_loras": [], "character_lora": None}
+    reference_id = mapping.get("reference", "60")
+    node = workflow.get(reference_id, {})
+    positive = mapping.get("positive", "11")
+    negative = mapping.get("negative", "12")
+    sampler = workflow.get(mapping.get("sampler", "19"), {}).get("inputs", {})
+    if (node.get("class_type") != "SnapRef" or sampler.get("model") != [reference_id, 0]
+            or node.get("inputs", {}).get("clip") != workflow.get(positive, {}).get("inputs", {}).get("clip")):
+        raise WorkflowError("SnapRef 画风接线需由参考节点输出 MODEL 至采样器，并与提示词共用 CLIP")
+    plan = apply_lora_plan(workflow, style=style, character=None, style_slot_ids=[],
+        positive_node_id=positive, negative_node_id=negative, sampler_node_id=reference_id,
+        character_node_id="910100", options=options, style_mode="dynamic",
+        dynamic_style_node_id_start=910000)
+    node["inputs"]["clip"] = list(workflow[positive]["inputs"]["clip"])
+    return plan
 
 
 def apply_explicit_loras(workflow, mapping, entries):

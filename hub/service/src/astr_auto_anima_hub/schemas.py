@@ -274,7 +274,7 @@ class RemoteJobCreateRequest(BaseModel):
     parent_job_id: str = Field(default="", max_length=120)
     scale: float | None = Field(default=None, ge=1.0, le=2.0)
     denoise: float | None = Field(default=None, ge=0.0, le=1.0)
-    reference_mode: Literal["char", "cs"] = "char"
+    reference_mode: Literal["auto", "char", "cs"] = "auto"
     source_image_name: str = Field(default="", max_length=255)
     source_image_data: str = Field(default="", max_length=30_000_000)
 

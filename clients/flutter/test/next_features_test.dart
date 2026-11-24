@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:astr_auto_anima_hub_client/core/command_builder.dart';
 import 'package:astr_auto_anima_hub_client/core/hub_api.dart';
+import 'package:astr_auto_anima_hub_client/core/models.dart';
 import 'package:astr_auto_anima_hub_client/features/gallery/character_gallery_page.dart';
 import 'package:astr_auto_anima_hub_client/features/lite/lite_generate_page.dart';
 import 'generation_combinations_test.dart' show CombinationApi, choose;
@@ -27,9 +28,19 @@ class CardApi extends HubApi {
   }
 }
 
+class ReferenceApi extends CombinationApi {
+  @override
+  Future<PresetListResult> getLitePresets() async => PresetListResult.fromJson({
+    'styles':[{'name':'Ink style','prompt':'ink painting','loras':[]}],
+    'characters':[], 'revision':'r1',
+  });
+}
+
 void main() {
   test('new commands retain mode and exact multi lines', () {
     expect(buildImageCommand(kind: ImageCommandKind.turbo, prompt:'a garden'), '/aturbo a garden');
+    expect(buildImageCommand(kind: ImageCommandKind.reference, prompt:'a garden'), '/aref cs a garden');
+    expect(buildImageCommand(kind: ImageCommandKind.reference, prompt:'a garden', style:'Ink style'), '/aref char 画风="Ink style" a garden');
     expect(buildImageCommand(kind: ImageCommandKind.reference, referenceMode:'cs', prompt:'a garden', character:'ignored', style:'ignored', ratio:'3:2'), '/aref cs 比例=3:2 a garden');
     const text = '预设\n人物1：Alice | | left\n人物2：Bob | | right';
     expect(buildImageCommand(kind: ImageCommandKind.multi, prompt:text, ratio:'3:2'), '/amulti 比例=3:2 $text');
@@ -82,7 +93,7 @@ void main() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
     SharedPreferences.setMockInitialValues({});
-    await tester.pumpWidget(MaterialApp(home: LiteGeneratePage(api: CombinationApi(),
+    await tester.pumpWidget(MaterialApp(home: LiteGeneratePage(api: ReferenceApi(),
       serverOnlineReminderEnabled: false, onServerOnlineReminderChanged: (_) {})));
     await tester.pumpAndSettle();
     await choose(tester, '跑图方式', 'Anima Turbo /aturbo');
@@ -90,6 +101,16 @@ void main() {
     await choose(tester, '跑图方式', '参考生图 SnapRef /aref');
     expect(find.text('选择参考图片'), findsOneWidget);
     expect(find.text('预设角色'), findsNothing);
+    expect(find.text('画风'), findsOneWidget);
+    expect(find.text('我的画风预设'), findsOneWidget);
+    await choose(tester, '画风', 'Ink style');
+    expect(find.byKey(const ValueKey('global-style-Ink style')), findsOneWidget);
+    await choose(tester, '参考模式', '角色与画风 cs');
+    expect(find.text('画风'), findsNothing);
+    expect(find.text('我的画风预设'), findsNothing);
+    await choose(tester, '参考模式', '角色 char');
+    expect(find.text('画风'), findsOneWidget);
+    expect(find.byKey(const ValueKey('global-style-')), findsOneWidget);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox());
   });

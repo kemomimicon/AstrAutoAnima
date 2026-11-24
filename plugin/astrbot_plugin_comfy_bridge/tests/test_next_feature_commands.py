@@ -58,6 +58,72 @@ class NextCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(kw['options']['_multi_snapshot']), 2)
         self.assertEqual(self.presets.read_bytes(), original)
 
+    async def test_reference_default_all_and_style_auto_dispatch(self):
+        for command, expected in [('/aref a garden', 'cs'), ('/aref all a garden', 'cs'),
+                                  ('/aref 画风=Ink a garden', 'char'), ('/aref char 画风=Ink a garden', 'char')]:
+            self.event.message_str = command
+            self.plugin._deliver_generation.reset_mock()
+            await self.plugin.aref(self.event)
+            self.assertEqual(self.plugin._deliver_generation.call_args.kwargs['options']['_ref_mode'], expected)
+        for command in ('/aref cs 画风=Ink a garden', '/aref style a garden', '/aref 角色=Alice a garden'):
+            self.event.message_str = command
+            self.plugin._deliver_generation.reset_mock()
+            await self.plugin.aref(self.event)
+            self.plugin._deliver_generation.assert_not_called()
+
+    async def test_reference_style_graph_text_weights_and_replay(self):
+        import copy
+        from astrbot_plugin_comfy_bridge.replay_runtime import replay_workflow
+        from astrbot_plugin_comfy_bridge.next_generation_runtime import set_reference
+        class Captured(Exception): pass
+        class Session:
+            async def __aenter__(self): return self
+            async def __aexit__(self, *args): return False
+        presets = json.loads(self.presets.read_text())
+        presets['styles']['Ink'] = {'prompt':'ink painting', 'loras':[
+            {'name':r'画风\ink.safetensors','strength_model':0.8,'strength_clip':0.4},
+            {'name':'paper.safetensors','strength_model':0.6,'strength_clip':0.2}], 'match':[]}
+        presets['styles']['Text'] = {'prompt':'watercolor', 'loras':[], 'match':[]}
+        self.presets.write_text(json.dumps(presets), encoding='utf-8')
+        before = self.presets.read_bytes()
+        self.plugin.config['default_style_preset'] = 'Ink'
+        path = Path(self.temp.name) / 'ref.png'
+        path.write_bytes(b'reference fixture')
+        self.plugin._upload_reverse_image = AsyncMock(return_value='remote/ref.png')
+        self.plugin._submit_workflow = AsyncMock(side_effect=Captured)
+        for style, mode in [('Ink','char'), ('Text','char'), ('','cs')]:
+            with patch('astrbot_plugin_comfy_bridge.main.aiohttp.ClientTimeout', return_value=None), \
+                 patch('astrbot_plugin_comfy_bridge.main.aiohttp.ClientSession', return_value=Session()):
+                with self.assertRaises(Captured):
+                    await self.plugin._generate('a garden', {'style':style,'style_scale':0.5,'_fixed_seed':123},
+                        workflow_type=SNAPREF, event=self.event, source_image_path=str(path))
+            graph = self.plugin._submit_workflow.call_args.args[1]
+            self.assertEqual(graph['19']['inputs']['model'], ['60',0])
+            self.assertEqual(graph['60']['inputs']['mode'], mode)
+            self.assertEqual(graph['19']['inputs']['steps'], 34)
+            self.assertEqual(graph['19']['inputs']['cfg'], 4.5)
+            if style == 'Ink':
+                self.assertIn('ink painting', graph['11']['inputs']['text'])
+                self.assertEqual(graph['910000']['inputs']['model'], ['44',0])
+                self.assertEqual(graph['910000']['inputs']['lora_name'], r'画风\ink.safetensors')
+                self.assertEqual(graph['910000']['inputs']['strength_model'], 0.4)
+                self.assertEqual(graph['910000']['inputs']['strength_clip'], 0.2)
+                self.assertEqual(graph['910001']['inputs']['model'], ['910000',0])
+                self.assertEqual(graph['60']['inputs']['model'], ['910001',0])
+                for node in ('11','12','60'):
+                    self.assertEqual(graph[node]['inputs']['clip'], ['910001',1])
+                parent = {'workflow_snapshot':copy.deepcopy(graph),'sampling':{'seed':123}}
+                replay, seed, _ = replay_workflow(parent,0,fixed_seed=True)
+                set_reference(replay,{},'fresh/ref.png','char')
+                self.assertEqual(seed,123)
+                replay['1']['inputs']['image'] = graph['1']['inputs']['image']
+                self.assertEqual(replay,graph)
+            else:
+                self.assertFalse(any(n.get('class_type') == 'LoraLoader' for n in graph.values()))
+                self.assertNotIn('ink painting',graph['11']['inputs']['text'])
+                if style: self.assertIn('watercolor',graph['11']['inputs']['text'])
+        self.assertEqual(self.presets.read_bytes(),before)
+
     async def test_generation_keeps_template_sampling_without_global_overrides(self):
         class Captured(Exception): pass
         for kind in (TURBO, SNAPREF, 'preset_multi_anima_v1'):

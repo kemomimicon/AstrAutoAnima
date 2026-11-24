@@ -40,3 +40,14 @@ class NextJobTests(unittest.TestCase):
     def test_multi_preset_lines_preserved(self):
         p = RemoteJobCreateRequest(target_id='private', kind='multi', prompt='预设\n人物1：Alice | | left\n人物2：Bob | | right', ratio='3:2')
         self.assertEqual(build_remote_command(p,self.target)[0], '/amulti 比例=3:2 ' + p.prompt)
+
+    def test_reference_auto_style_and_explicit_all_conflict(self):
+        p = RemoteJobCreateRequest(target_id='private',kind='reference',prompt='a park')
+        self.assertEqual(build_remote_command(p,self.target)[0], '/aref cs a park')
+        p.style = 'Ink style'
+        self.assertEqual(build_remote_command(p,self.target)[0], '/aref char 画风="Ink style" a park')
+        p.style = '__personal_saved_style'
+        p.personal_style_slot = 1
+        self.assertIn('/aref char 画风=__personal_saved_style',build_remote_command(p,self.target)[0])
+        p.reference_mode = 'cs'
+        with self.assertRaises(RemoteJobError): build_remote_command(p,self.target)

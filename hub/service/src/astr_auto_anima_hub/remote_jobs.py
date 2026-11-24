@@ -250,9 +250,15 @@ def build_remote_command(
     }[(payload.kind, payload.five_draw)]
     parts = [prefix]
     if payload.kind == "reference":
-        if payload.character or payload.style or payload.personal_style_slot or payload.trial_style:
-            raise RemoteJobError("参考生图请通过参考图提供身份，使用 char 或 cs 模式")
-        parts.append(payload.reference_mode)
+        reference_mode = payload.reference_mode
+        has_style = bool(payload.style or payload.personal_style_slot or payload.trial_style)
+        if reference_mode == "auto":
+            reference_mode = "char" if has_style else "cs"
+        if payload.character:
+            raise RemoteJobError("参考生图由参考图提供角色；char 模式可选择画风预设")
+        if reference_mode != "char" and has_style:
+            raise RemoteJobError("cs 沿用参考图画风；调用画风预设请选择 char 模式")
+        parts.append(reference_mode)
     visual = (("主光", payload.lighting_key), ("效果光", payload.lighting_effect),
               ("主材质", payload.material_primary), ("细节材质", ','.join(payload.material_details)),
               ("表面效果", payload.material_surface),

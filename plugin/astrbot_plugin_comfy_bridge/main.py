@@ -117,7 +117,7 @@ from .llm_runtime import reverse_image_prompt, translate_chinese_prompt
 from .cleanup_runtime import CleanupReport, cleanup_old_output_images, require_idle_job_records, checked_output_path
 from .lora_name_runtime import prepare_lora_workflow
 from .character_dictionary_runtime import resolve_character
-from .next_generation_runtime import TURBO, SNAPREF, ref_mode, set_reference, replay_reference, render_preset_scene, validate_mode_options, apply_explicit_loras
+from .next_generation_runtime import TURBO, SNAPREF, ref_mode, resolve_reference_mode, set_reference, replay_reference, render_preset_scene, validate_mode_options, apply_explicit_loras, apply_reference_style
 from .multi_person_runtime import parse_scene, plan_scene, render_scene, strip_standard_loras
 from .llm_runtime import current_text_provider_id
 from .prompt_compiler_runtime import compile_prompt
@@ -1580,6 +1580,9 @@ class ComfyWorkflowBridge(GroupBridge, SafetyBridge, Star):
             if any(not item for item in clean_batch_prompts):
                 raise WorkflowError("批量提示词中不能包含空内容。")
             prompt = clean_batch_prompts[0]
+        if workflow_type == SNAPREF:
+            options = dict(options, _ref_mode=resolve_reference_mode(options.get("_ref_mode", "auto"), options))
+            strict_no_style = True
         validate_mode_options(workflow_type, options)
         definition, workflow_path = self._workflow_definition(workflow_type)
         selected_profile, profile_data = definition.profile(profile)
@@ -1804,7 +1807,9 @@ class ComfyWorkflowBridge(GroupBridge, SafetyBridge, Star):
                 style_slot_ids=[], positive_node_id=positive_node_id, negative_node_id=negative_node_id,
                 sampler_node_id=sampler_node_id, character_node_id="910100", options=options,
                 style_mode="dynamic", dynamic_style_node_id_start=910000)
-        elif workflow_type == "seedvr2_refine_v1" or workflow_type == SNAPREF or options.get("_base_multi"):
+        elif workflow_type == SNAPREF:
+            plan = apply_reference_style(workflow, mapping, style, options)
+        elif workflow_type == "seedvr2_refine_v1" or options.get("_base_multi"):
             plan = {"style_loras": [], "character_lora": None}
         else:
             plan = apply_lora_plan(
@@ -3990,6 +3995,7 @@ class ComfyWorkflowBridge(GroupBridge, SafetyBridge, Star):
         try:
             body, mode = ref_mode(extract_command_body(event.message_str, content, "aref"))
             prompt, options = parse_generation_directives(body)
+            options["_ref_mode"] = mode = resolve_reference_mode(mode, options)
             validate_mode_options(SNAPREF, options)
             if not prompt:
                 raise WorkflowError("引用或附带参考图发送 /aref [char|cs] <场景、动作描述>")

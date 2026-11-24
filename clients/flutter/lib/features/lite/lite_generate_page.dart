@@ -86,7 +86,7 @@ class _LiteGeneratePageState extends State<LiteGeneratePage> {
   String _ratio = '';
   String _sampler = '';
   String _scheduler = '';
-  String _referenceMode = 'char';
+  String _referenceMode = 'auto';
   String _reversePreset = 'full';
   bool _customReverseCategories = false;
   final Set<String> _reverseCategories = {'scene', 'action'};
@@ -109,6 +109,7 @@ class _LiteGeneratePageState extends State<LiteGeneratePage> {
   bool _detailFace = false;
   bool _detailUpscale = false;
   bool get _reference => _kind == ImageCommandKind.reference;
+  bool get _referenceStyle => _reference && _referenceMode != 'cs';
   bool get _randomKind =>
       _kind == ImageCommandKind.random || _kind == ImageCommandKind.chaos;
   bool get _localRandom => widget.localMode && _kind == ImageCommandKind.random;
@@ -589,7 +590,7 @@ class _LiteGeneratePageState extends State<LiteGeneratePage> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
-          _kind == ImageCommandKind.reverse || _kind == ImageCommandKind.refine
+          _kind == ImageCommandKind.reverse || _kind == ImageCommandKind.refine || _reference
               ? '指令已复制；在 QQ 使用时仍需同时附图或填写历史任务 ID。'
               : '指令已复制，可作为直投失败时的备用方式。',
         ),
@@ -776,11 +777,11 @@ class _LiteGeneratePageState extends State<LiteGeneratePage> {
                       _kind == ImageCommandKind.multi || _reference
                   ? ''
                   : _characterVariant,
-              'style': _kind == ImageCommandKind.multi || _reference
+              'style': _kind == ImageCommandKind.multi || (_reference && !_referenceStyle)
                   ? ''
                   : (_randomStyle ? '随机模式' : _style),
               if (_kind != ImageCommandKind.chaos &&
-                  _kind != ImageCommandKind.multi && !_reference &&
+                  _kind != ImageCommandKind.multi && (!_reference || _referenceStyle) &&
                   !_randomStyle &&
                   _personalStyleSlot > 0)
                 'personal_style_slot': _personalStyleSlot,
@@ -1302,9 +1303,15 @@ class _LiteGeneratePageState extends State<LiteGeneratePage> {
                       const Text('SnapRef：选择单张角色参考图，再填写新场景或动作。'),
                       DropdownButtonFormField<String>(initialValue: _referenceMode,
                         decoration: const InputDecoration(labelText: '参考模式'),
-                        items: const [DropdownMenuItem(value: 'char', child: Text('角色 char')),
+                        items: const [DropdownMenuItem(value: 'auto', child: Text('自动：默认全部，指定画风时参考角色')),
+                          DropdownMenuItem(value: 'char', child: Text('角色 char')),
                           DropdownMenuItem(value: 'cs', child: Text('角色与画风 cs'))],
-                        onChanged: (value) => setState(() => _referenceMode = value ?? 'char')),
+                        onChanged: (value) => setState(() {
+                          _referenceMode = value ?? 'auto';
+                          if (!_referenceStyle) { _style = ''; _randomStyle = false; _personalStyleSlot = 0; }
+                        })),
+                      Text(_referenceMode == 'auto' ? '默认参考角色与画风；选择画风预设后自动转为 char。'
+                          : _referenceStyle ? '参考图提供角色；可在下方选择公共或个人画风预设。' : '角色与画风均来自参考图。'),
                       OutlinedButton.icon(onPressed: _submitting ? null : _pickSourceImage,
                         icon: const Icon(Icons.add_photo_alternate_outlined), label: const Text('选择参考图片')),
                       if (_sourceImage != null) ...[
@@ -1739,6 +1746,8 @@ class _LiteGeneratePageState extends State<LiteGeneratePage> {
                               () => _characterTagMode = value ?? 'weak'),
                         ),
                       ],
+                    ],
+                    if (!_suiteActive && _kind != ImageCommandKind.multi && (!_reference || _referenceStyle)) ...[
                       const SizedBox(height: 12),
                       DropdownButtonFormField<String>(
                         key: ValueKey('global-style-$_style'),

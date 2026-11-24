@@ -36,7 +36,7 @@ String buildImageCommand({
   int? steps,
   double? cfg,
   String prompt = '',
-  String referenceMode = 'char',
+  String referenceMode = 'auto',
   String reversePreset = 'full',
   List<String> reverseCategories = const [],
   bool reverseOnly = false,
@@ -63,7 +63,9 @@ String buildImageCommand({
     ImageCommandKind.reference => '/aref',
   };
   final parts = <String>[prefix];
-  if (kind == ImageCommandKind.reference) parts.add(referenceMode);
+  final effectiveReferenceMode = referenceMode == 'auto'
+      ? (style.trim().isNotEmpty ? 'char' : 'cs') : referenceMode;
+  if (kind == ImageCommandKind.reference) parts.add(effectiveReferenceMode);
   if (kind == ImageCommandKind.hq) {
     parts.add(profile.isEmpty ? 'stable' : profile);
     parts.add('修手=${detailHands ? '开启' : '关闭'}');
@@ -125,6 +127,9 @@ String buildImageCommand({
       parts.add('画风=${_directiveText(style.trim())}');
     }
     if (ratio.trim().isNotEmpty) parts.add('比例=${ratio.trim()}');
+  }
+  if (kind == ImageCommandKind.reference && effectiveReferenceMode == 'char' && style.trim().isNotEmpty) {
+    parts.add('画风=${_directiveText(style.trim())}');
   }
   if (sampler.trim().isNotEmpty) parts.add('采样器=${sampler.trim()}');
   if ((kind == ImageCommandKind.multi || kind == ImageCommandKind.reference) && ratio.isNotEmpty) {

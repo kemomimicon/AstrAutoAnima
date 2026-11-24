@@ -1,5 +1,9 @@
 # AstrAutoAnima 0.5.3-beta.1 · build45 更新与回退
 
+2026-11-24 修订 `candidate.2-snapref-style`：`/aref` 默认全部参考；带 `画风=名称` 自动转 `char`，支持画风提示词和 LoRA。服务端、Windows / Web / Android 客户端使用本次同目录的新版包。旧候选包保留在原目录。
+
+已装上一份 build45 候选的用户也使用本次更新包。更新器沿用自动备份与独立回退；退回时使用本次更新生成的备份恢复服务，并打开旧客户端。模型、词库、密钥和用户预设沿用现有数据。
+
 NapCat 社区公开留档：[XingYunStar/NapCatQQ](https://github.com/XingYunStar/NapCatQQ)；[历史版本下载](https://github.com/XingYunStar/NapCatQQ/releases)。用途与安装说明见 `docs/NAPCAT_ARCHIVE.md`。
 
 本地候选版，包含 Anima Turbo、角色画廊、预设多人图和 SnapRef `/aref`。先更新服务端，再使用本目录中的新版客户端。功能与模型放置说明见 `docs/NEXT_ANIMA_FEATURES.md`。

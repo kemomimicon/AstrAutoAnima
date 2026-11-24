@@ -9,7 +9,7 @@ import tomllib
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
-STAMP = (2026, 11, 18, 0, 0, 0)
+STAMP = (2026, 11, 24, 0, 0, 0)
 RUNTIME = ('deploy_project.py', 'deployment_support.py', 'download_network.py',
            'install_progress.py', 'project_components.py', 'gufeng_resource.py')
 
@@ -74,6 +74,7 @@ def build(build_dir, output):
     release = json.loads((ROOT / 'release-manifest.json').read_text('utf-8'))
     label = release['release'] + '-build' + str(release['public_build'])
     identity = {'version': release['public_display_version'], 'source_commit': commit,
+                'installation_revision': release['installation_revision'],
                 'candidate_only': True, 'published': False}
     output.mkdir(parents=True, exist_ok=True)
     names = filter(None, subprocess.check_output(['git', 'ls-files', '-z'], cwd=ROOT).decode().split('\0'))
