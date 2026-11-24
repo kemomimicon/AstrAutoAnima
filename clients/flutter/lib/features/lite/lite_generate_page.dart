@@ -701,7 +701,7 @@ class _LiteGeneratePageState extends State<LiteGeneratePage> {
               ),
             if (imageMode && _sourceImage != null)
               Text(
-                  '${_kind == ImageCommandKind.refine ? '精修' : '反推'}图片：$_sourceImageName'),
+                  '${_reference ? '参考' : _kind == ImageCommandKind.refine ? '精修' : '反推'}图片：$_sourceImageName'),
             const SizedBox(height: 12),
             Text(widget.localMode
                 ? '生成完成后可在本机记录查看或保存，不经过 AstrBot。'
