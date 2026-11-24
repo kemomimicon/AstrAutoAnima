@@ -2,6 +2,19 @@
 
 分支：`codex/next-turbo-gallery-multi-snapref-20261117`；基础提交 `28b1f7f`。
 
+## 管理入口修复复验（2026-11-24）
+
+程序提交 `1ff96ce`，打包提交 `ca623fc`；修订标识 `candidate.3-admin-entries`，版本仍为 `0.5.3-beta.1+45`。
+
+- 概览页接入已有 NapCat QQ 状态卡，并显示带文字的登录助手按钮；工作站探测失败时入口仍可用。
+- 实例页接入现有 GetBalance 查询接口。只需公钥和私钥，不依赖实例 ID 或 Hub 在线；查询不写密钥，不调用开关机接口。失败时显示错误，缺失金额不补零，换密钥后丢弃旧请求结果。
+- 8 项定向测试通过，其中新增 5 项实际页面测试。两轮完整 Flutter 测试各 152 项通过；Flutter analyze 无问题。此次未修改 Python 服务，服务端回归沿用下方同日记录。
+- Windows unified/admin/service、Web、Android admin/service 均重新编译；六个 ZIP 的 CRC 与逐文件 SHA256 验证通过。两款 APK 的包名、签名匹配 build44，三种架构与 16KB 对齐检查通过。
+- Windows/Linux 两个实际更新包在 Windows 隔离环境分别完成升级、新 Hub/Web/画廊读取、移走补丁后的独立备份回退；测试模型、词库、预设与密钥字节保持一致。
+- 公开源码载荷的隐私与发布结构检查通过；交付目录为 `AAA_0.5.3-beta.1_build45_候选包_20261124_管理入口修复`，旧包保留，未发布。
+
+本轮使用模拟 NapCat/优云响应验证页面行为，未登录实际 QQ 账号、查询真实账户余额或操作云实例。已有 candidate.2 服务端的桌面和安卓用户只需更换客户端。
+
 ## SnapRef 画风预设修订复验（2026-11-24）
 
 程序源码冻结提交：`9375b9b9b75c64544aaf38fa84c499f84ebe280b`；版本仍为 `0.5.3-beta.1+45`，修订标识 `candidate.2-snapref-style`。
