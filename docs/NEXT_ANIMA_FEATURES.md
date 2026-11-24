@@ -13,6 +13,12 @@
 
 新增管理端生成方式使用 AstrBot 执行。Start-Local 的独立执行器继续提供其原有跑图方式。
 
+## 管理端常用入口
+
+- **概览 → NapCat · QQ 登录状态 → NapCat 登录助手**：查看 QQ 状态、扫码登录或选择已有账户快捷登录。沿用 Hub 的管理员权限和已有 NapCat 配置。
+- **实例 → 优云账户余额 → 查询账户余额**：使用该连接下保存在本机的优云 API 密钥；也可在 API 配置中填写 Public Key / Private Key 后直接查询，无需填写实例 ID 或启动实例。查询不会保存或改写密钥。开关机仍使用原有完整实例配置。
+- 余额字段按 [GetBalance 接口定义](https://docs.ucloud.cn/api/ubill-api/get_balance) 显示；缺失字段不补零，查询失败显示错误，修改密钥会清除旧账户的查询结果。
+
 ## 工作流安装与配置
 
 插件已内置以下 API 工作流，完整源码中的 `comfyui/workflows/` 也包含相同副本：

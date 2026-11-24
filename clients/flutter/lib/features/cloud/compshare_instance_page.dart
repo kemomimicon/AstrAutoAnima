@@ -6,15 +6,19 @@ import '../../core/compshare_api.dart';
 import '../../core/hub_api.dart';
 
 class CompShareInstancePage extends StatefulWidget {
-  const CompShareInstancePage({this.api, super.key});
+  const CompShareInstancePage({this.api, this.cloudApiFactory, super.key});
   final HubApi? api;
+  final CompShareApi Function(CompShareConfig)? cloudApiFactory;
 
   @override
   State<CompShareInstancePage> createState() => _CompShareInstancePageState();
 }
 
 class _CompShareInstancePageState extends State<CompShareInstancePage> {
-  late final _store = CompShareConfigStore(scope: widget.api == null ? '' : '${widget.api!.baseUrl}|${widget.api!.token}');
+  late final _store = CompShareConfigStore(
+      scope: widget.api == null
+          ? ''
+          : '${widget.api!.baseUrl}|${widget.api!.token}');
   final _publicKey = TextEditingController();
   final _privateKey = TextEditingController();
   final _region = TextEditingController();
@@ -28,6 +32,58 @@ class _CompShareInstancePageState extends State<CompShareInstancePage> {
   bool _showPrivateKey = false;
   String _startMode = '';
   String _error = '';
+  Map<String, String>? _balance;
+  String _balanceError = '';
+  bool _balanceLoading = false;
+  int _balanceRevision = 0;
+  DateTime? _balanceChecked;
+
+  CompShareApi _cloudApi(CompShareConfig config) =>
+      widget.cloudApiFactory?.call(config) ?? CompShareApi(config: config);
+
+  void _clearBalance() {
+    setState(() {
+      _balanceRevision++;
+      _balance = null;
+      _balanceError = '';
+      _balanceChecked = null;
+      _balanceLoading = false;
+    });
+  }
+
+  Future<void> _queryBalance() async {
+    if (_balanceLoading) return;
+    final config = _fromFields();
+    if (config.publicKey.isEmpty || config.privateKey.isEmpty) {
+      setState(() => _balanceError = '请在 API 配置中填写 Public Key 和 Private Key。');
+      return;
+    }
+    final revision = ++_balanceRevision;
+    setState(() {
+      _balanceLoading = true;
+      _balanceError = '';
+    });
+    try {
+      final value = await _cloudApi(config).balance();
+      if (!mounted || revision != _balanceRevision) return;
+      setState(() {
+        _balance = value;
+        _balanceChecked = DateTime.now();
+      });
+    } catch (error) {
+      if (!mounted || revision != _balanceRevision) return;
+      setState(() {
+        _balance = null;
+        _balanceChecked = null;
+        _balanceError =
+            error is CompShareApiException ? error.message : '余额查询失败，请稍后重试。';
+      });
+    } finally {
+      if (mounted && revision == _balanceRevision) {
+        setState(() => _balanceLoading = false);
+      }
+    }
+  }
 
   @override
   void initState() {
@@ -97,7 +153,7 @@ class _CompShareInstancePageState extends State<CompShareInstancePage> {
       _error = '';
     });
     try {
-      final instance = await CompShareApi(config: _config).describe();
+      final instance = await _cloudApi(_config).describe();
       if (mounted) setState(() => _instance = instance);
     } on CompShareApiException catch (error) {
       if (mounted) setState(() => _error = error.message);
@@ -139,7 +195,7 @@ class _CompShareInstancePageState extends State<CompShareInstancePage> {
     )) {
       return;
     }
-    await _operate(() => CompShareApi(config: _config).start(
+    await _operate(() => _cloudApi(_config).start(
           withoutGpuSpec: _startMode,
         ));
   }
@@ -153,7 +209,7 @@ class _CompShareInstancePageState extends State<CompShareInstancePage> {
     )) {
       return;
     }
-    await _operate(() => CompShareApi(config: _config).stop());
+    await _operate(() => _cloudApi(_config).stop());
   }
 
   Future<void> _operate(Future<void> Function() action) async {
@@ -213,6 +269,45 @@ class _CompShareInstancePageState extends State<CompShareInstancePage> {
             ],
           ),
           const SizedBox(height: 16),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(18),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('优云账户余额',
+                      style: Theme.of(context).textTheme.titleMedium),
+                  const SizedBox(height: 8),
+                  const Text('使用本机配置的优云 API 密钥查询，实例关机或 Hub 离线时仍可使用。'),
+                  if (_balance == null && _balanceError.isEmpty)
+                    const Text('尚未查询；只需填写 Public Key 和 Private Key。'),
+                  if (_balanceError.isNotEmpty)
+                    Text(_balanceError,
+                        style: TextStyle(
+                            color: Theme.of(context).colorScheme.error)),
+                  for (final entry in const {
+                    'AmountAvailable': '可用余额',
+                    'Amount': '账户余额',
+                    'AmountFree': '赠送余额',
+                    'AmountFreeze': '冻结金额',
+                    'AmountCredit': '信用余额',
+                  }.entries)
+                    if (_balance?.containsKey(entry.key) == true)
+                      Text('${entry.value}：${_balance![entry.key]}'),
+                  if (_balanceChecked != null)
+                    Text(
+                        '查询时间：${_balanceChecked!.toLocal().toString().split('.').first}'),
+                  const SizedBox(height: 8),
+                  FilledButton.tonalIcon(
+                    onPressed: _balanceLoading ? null : _queryBalance,
+                    icon: const Icon(Icons.account_balance_wallet_outlined),
+                    label: Text(_balanceLoading ? '正在查询…' : '查询账户余额'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 14),
           if (_error.isNotEmpty)
             Card(
               color: Theme.of(context).colorScheme.errorContainer,
@@ -316,12 +411,14 @@ class _CompShareInstancePageState extends State<CompShareInstancePage> {
                   if (_editing) ...[
                     TextField(
                       controller: _publicKey,
+                      onChanged: (_) => _clearBalance(),
                       decoration:
                           const InputDecoration(labelText: 'Public Key'),
                     ),
                     const SizedBox(height: 10),
                     TextField(
                       controller: _privateKey,
+                      onChanged: (_) => _clearBalance(),
                       obscureText: !_showPrivateKey,
                       decoration: InputDecoration(
                         labelText: 'Private Key',
