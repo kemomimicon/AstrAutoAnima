@@ -2,6 +2,20 @@
 
 分支：`codex/next-turbo-gallery-multi-snapref-20261117`；基础提交 `28b1f7f`。
 
+## SnapRef 画风预设修订复验（2026-11-24）
+
+程序源码冻结提交：`9375b9b9b75c64544aaf38fa84c499f84ebe280b`；版本仍为 `0.5.3-beta.1+45`，修订标识 `candidate.2-snapref-style`。
+
+- `/aref` 默认全部参考（`cs`）；显式指定 `画风=名称` 自动选择 `char`；`/aref char` 支持画风提示词、多 LoRA 及权重缩放。纯画风 `style` 留待后续专门方案。
+- 画风 LoRA 串接在 SnapRef 的 MODEL/CLIP 输入之前，采样器继续使用 SnapRef 输出；测试覆盖中文 Windows LoRA 路径、仅提示词画风、默认画风不自动混入及固定种子快照重跑。
+- 两轮完整回归，每轮 1185 项通过、6 项环境条件跳过：插件 353+4、Hub 331、工具 354+2、Flutter 147。服务端两轮完成后仅修改客户端选项长度和参考图片标签；最终客户端源码再跑两轮完整测试。
+- Flutter analyze 无问题；Windows unified/admin/service、Web、Android admin/service 均从本次冻结的客户端源码编译。Windows 三端版本回读一致。
+- 六个 ZIP 完成 CRC、清单与逐文件 SHA256 回读；两款 APK 完成签名、CRC、三种架构及 16KB 对齐验证，包名和签名匹配 build44。
+- Windows 与 Linux 两个实际更新包分别在 Windows 隔离目录完成 build44 升级、Hub/Web/角色画廊读写、移走补丁后的独立备份回退及旧 Hub 启动。模型、词库、预设、密钥测试数据逐字节保留，回退后保留新建的角色卡。
+- 公开源码载荷通过隐私与发布结构检查。新修订放在独立交付目录，上一份候选包保留；未推送或发布。
+
+本轮为自动回归、编译和更新回退验收；GPU 实图、Android 实机及 Linux 原生运行按下方清单继续验收。
+
 ## build45 候选包复验（2026-11-18）
 
 程序源码冻结提交：`66b5cfdd1d9a360bc2bfb6a2651ff1b70a15f5e0`；包版本：`0.5.3-beta.1+45`。
