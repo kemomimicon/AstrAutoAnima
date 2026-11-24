@@ -1302,8 +1302,9 @@ class _LiteGeneratePageState extends State<LiteGeneratePage> {
                     if (_reference) ...[
                       const Text('SnapRef：选择单张角色参考图，再填写新场景或动作。'),
                       DropdownButtonFormField<String>(initialValue: _referenceMode,
+                        isExpanded: true,
                         decoration: const InputDecoration(labelText: '参考模式'),
-                        items: const [DropdownMenuItem(value: 'auto', child: Text('自动：默认全部，指定画风时参考角色')),
+                        items: const [DropdownMenuItem(value: 'auto', child: Text('自动（默认全部参考）')),
                           DropdownMenuItem(value: 'char', child: Text('角色 char')),
                           DropdownMenuItem(value: 'cs', child: Text('角色与画风 cs'))],
                         onChanged: (value) => setState(() {
