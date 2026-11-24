@@ -2,7 +2,9 @@
 
 2026-11-24 修订 `candidate.3-admin-entries`：概览恢复显眼的 NapCat 登录助手与 QQ 状态卡；实例页恢复优云账户余额查询。同时保留上一修订的 `/aref` 自动参考模式与画风预设功能。服务端、Windows / Web / Android 客户端使用本次同目录的新版包。旧候选包保留在原目录。
 
-已装上一份 build45 候选的用户也使用本次更新包。更新器沿用自动备份与独立回退；退回时使用本次更新生成的备份恢复服务，并打开旧客户端。模型、词库、密钥和用户预设沿用现有数据。
+已装 2026-11-24 `candidate.2-snapref-style` 服务端的用户，本次管理入口修复只需更换 Windows / Android 客户端；使用浏览器的用户可用本次服务更新包同步 Web。更早的版本按下方步骤一起更新服务与客户端。
+
+更新器沿用自动备份与独立回退；退回时使用本次更新生成的备份恢复服务，并打开旧客户端。模型、词库、密钥和用户预设沿用现有数据。
 
 NapCat 社区公开留档：[XingYunStar/NapCatQQ](https://github.com/XingYunStar/NapCatQQ)；[历史版本下载](https://github.com/XingYunStar/NapCatQQ/releases)。用途与安装说明见 `docs/NAPCAT_ARCHIVE.md`。
 
