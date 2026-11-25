@@ -14,8 +14,9 @@ def run(output):
     output.mkdir(parents=True,exist_ok=False)
     env=dict(os.environ,PYTHONUTF8='1',PYTHONDONTWRITEBYTECODE='1')
     env['PYTHONPATH']=os.pathsep.join(str(ROOT/p) for p in ('.','plugin','hub/service/src','hub/service/tests','tools'))
-    commands=[('plugin',[sys.executable,'-X','utf8','-m','unittest','discover','-s',str(ROOT/'plugin/astrbot_plugin_comfy_bridge/tests'),'-q']),
-              ('hub',[sys.executable,'-X','utf8','-m','unittest','discover','-s',str(ROOT/'hub/service/tests'),'-t',str(ROOT/'hub/service'),'-q']),
+    # Pytest collects both unittest classes and function-style regression cases.
+    commands=[('plugin',[sys.executable,'-X','utf8',str(ROOT/'scripts/run_public_tests.py'),'plugin','--pytest']),
+              ('hub',[sys.executable,'-X','utf8',str(ROOT/'scripts/run_public_tests.py'),'hub','--pytest']),
               ('tools',[sys.executable,'-X','utf8','-m','unittest','discover','-s',str(ROOT/'tools/tests'),'-q'])]
     rows=[]
     for name,command in commands:

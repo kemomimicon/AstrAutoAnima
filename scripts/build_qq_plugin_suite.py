@@ -56,7 +56,7 @@ def build(out):
         if relative == 'README.md':
             continue
         data = (ROOT / name).read_bytes()
-        if Path(name).suffix in {'.py', '.json', '.yaml', '.md'}:
+        if Path(name).suffix in {'.py', '.json', '.yaml', '.md', '.txt'}:
             data = data.replace(b'\r\n', b'\n')
         entries[relative] = data
     schema = json.loads(entries['_conf_schema.json'])
