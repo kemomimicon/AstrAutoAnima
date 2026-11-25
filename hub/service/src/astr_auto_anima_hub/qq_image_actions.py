@@ -13,6 +13,7 @@ from .prompt_favorites import favorite_id, full_prompt
 from .repositories import RepositoryError
 from .image_prompts import read_store_record, save_image_prompt
 from .prompt_snapshots import image_prompt_snapshot
+from .favorite_text import favorite_task_snapshot
 
 
 def handle_qq_action(settings, reports, jobs, token):
@@ -54,13 +55,13 @@ def handle_qq_action(settings, reports, jobs, token):
     source = entries[0] if len(entries) == 1 else (entries[index] if len(entries) == len(outputs) else {})
     prompt_id = str(source.get('id', ''))
     try:
-        snapshot = image_prompt_snapshot(job, index, lambda value: read_store_record(store, 'jobs', value)) if action != 'report' else {}
+        snapshot = favorite_task_snapshot(settings, job, index, lambda value: read_store_record(store, 'jobs', value)) if action != 'report' else {}
     except (ValueError, TypeError) as exc:
         raise RepositoryError(str(exc)) from exc
     if action == 'favorite':
         result = save_image_prompt(settings, principal, snapshot, f'{job_id}-{index + 1}')
         jobs.refresh_likes(principal)
-        label = '当次提示词' if snapshot['kind'] == 'compiled' else '旧任务原串与附加内容（非完整参数）'
+        label = '可复用提示词（已排除角色身份、外貌与角色预设）'
         return {'message': ('已经收藏' if result.action == 'already_liked' else '已收藏') + label + '；仅保存文本，不保存图片，可在客户端个人收藏中查看'}
     if action == 'unfavorite':
         if not snapshot.get('available'):

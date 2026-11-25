@@ -321,7 +321,7 @@ class LocalVGroupTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(before, sorted(str(p) for p in self.settings.plugin_data_dir.rglob("*.png")))
         page = list_favorites(self.settings.prompt_favorites_path, principal)
         self.assertEqual(page.total, 1)
-        self.assertEqual(page.items[0].prompt, job.final_prompt)
+        self.assertEqual(page.items[0].prompt, full_prompt(DEFAULT_PROMPT, 'sunrise'))
         self.assertIn('sunrise', page.items[0].prompt)
         self.assertEqual(page.items[0].safety_code, "N")
         self.assertFalse(self.settings.prompt_pool_path.exists())

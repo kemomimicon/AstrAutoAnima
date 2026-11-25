@@ -28,7 +28,7 @@ class ActualImagePrompts(FavoriteAPIRegressions):
         rows = list_favorites(self.settings.prompt_favorites_path,
                               AuthPrincipal(role='user', subject='legacy-owner', qq='123456789'))
         self.assertEqual(rows.total, 1)
-        self.assertEqual(rows.items[0].prompt, 'two, moon, character')
+        self.assertEqual(rows.items[0].prompt, 'two, moon')
         self.assertIn('已经收藏', actions[1]['message'])
 
     def remote(self):
@@ -45,6 +45,7 @@ class ActualImagePrompts(FavoriteAPIRegressions):
             (store / folder).mkdir(parents=True, exist_ok=True)
         source = {'job_id': 'job_bridge', 'input': {
             'compiled_prompt': 'compiled fallback', 'batch_prompts': ['one, rain, style', 'two, moon, character'],
+            'raw_batch_prompts': ['one, rain', 'two, moon'],
             'negative': 'bad hands'}, 'result': {'assets': ['first', 'second']}}
         (store / 'jobs/job_bridge.json').write_text(json.dumps(source), encoding='utf-8')
         for i, asset in enumerate(['first', 'second']):
@@ -67,7 +68,7 @@ class ActualImagePrompts(FavoriteAPIRegressions):
         self.assertEqual(saved.status_code, 200, saved.text)
         self.assertEqual((await self.favorite(job, 'second')).json()['action'], 'already_liked')
         rows = list_favorites(self.settings.prompt_favorites_path, self.principal)
-        self.assertEqual(rows.items[0].prompt, 'two, moon, character')
+        self.assertEqual(rows.items[0].prompt, 'two, moon')
         self.assertEqual(rows.items[0].safety_code, 'S')
         self.assertFalse(list(self.settings.plugin_data_dir.rglob('*.png')))
 
@@ -78,14 +79,16 @@ class ActualImagePrompts(FavoriteAPIRegressions):
         result = await self.call('GET', f'/api/v1/lite/jobs/{job.id}/images/image/prompt')
         self.assertEqual(result.status_code, 404)
 
-    async def test_new_compiled_prompt_overrides_old_source_and_does_not_repeat_addition(self):
+    async def test_compiled_view_is_separate_from_source_favorite(self):
         image = self.image('image', prompt='old source', addition='rain')
         image.final_prompt = 'edited character, rain, watercolor'
         job = self.job(image)
         saved = await self.favorite(job, 'image')
         self.assertEqual(saved.status_code, 200, saved.text)
         rows = list_favorites(self.settings.prompt_favorites_path, self.principal)
-        self.assertEqual(rows.items[0].prompt, image.final_prompt)
+        self.assertEqual(rows.items[0].prompt, 'rain, old source')
+        shown = await self.call('GET', f'/api/v1/lite/jobs/{job.id}/images/image/prompt')
+        self.assertEqual(shown.json()['positive'], image.final_prompt)
 
     async def test_legacy_is_explicitly_not_actual(self):
         job = self.job(self.image('image'))

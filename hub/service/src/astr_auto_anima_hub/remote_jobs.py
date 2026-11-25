@@ -872,23 +872,17 @@ class RemoteJobManager:
             return set()
 
     def _liked_view(self, job, principal, saved):
-        from .prompt_favorites import favorite_id, full_prompt
-        if saved and job.bridge_job_ids:
-            from .image_prompts import resolve_image_prompt
+        from .prompt_favorites import favorite_id
+        from .image_prompts import resolve_favorite_prompt
+        images = []
+        if saved:
             for image in job.images:
-                if image.final_prompt:
-                    continue
                 try:
-                    snapshot = resolve_image_prompt(self.settings, job, image)
-                    if snapshot.get('kind') == 'compiled':
-                        image.final_prompt = snapshot['positive']
-                        image.negative_prompt = snapshot.get('negative', '')
-                        image.prompt_stage = snapshot['stage']
+                    snapshot = resolve_favorite_prompt(self.settings, job, image)
+                    if snapshot.get('available') and favorite_id(principal.subject, snapshot['positive']) in saved:
+                        images.append(image)
                 except (OSError, ValueError, RepositoryError):
                     pass
-        images = [image for image in job.images if (image.final_prompt or image.source_prompt) and
-                  favorite_id(principal.subject, image.final_prompt or full_prompt(
-                      image.source_prompt, image.user_addition)) in saved]
         return job.model_copy(update={
             "liked_image_ids": [image.id for image in images],
             "liked_prompt_ids": list(dict.fromkeys(image.prompt_id for image in images if image.prompt_id)),

@@ -52,7 +52,7 @@ class QQActionsTests(unittest.IsolatedAsyncioTestCase):
     async def test_without_authorized_quote_no_action_is_submitted(self):
         tree = ast.parse((Path(__file__).resolve().parents[1] / 'main.py').read_text(encoding='utf-8'))
         method = next(n for n in ast.walk(tree) if isinstance(n, ast.AsyncFunctionDef) and n.name == '_qq_image_action')
-        ns = {'logger': Mock()}
+        ns = {'logger': Mock(), '__package__': 'astrbot_plugin_comfy_bridge'}
         exec(compile(ast.Module(body=[method], type_ignores=[]), 'action', 'exec'), ns)
         event = SimpleNamespace(should_call_llm=Mock(), stop_event=Mock(), send=AsyncMock(), plain_result=lambda text: text)
         bridge = SimpleNamespace(_quoted_job=AsyncMock(side_effect=WorkflowError('必须引用图片')))
@@ -60,6 +60,87 @@ class QQActionsTests(unittest.IsolatedAsyncioTestCase):
             await ns['_qq_image_action'](bridge, event, 'favorite')
             send.assert_not_awaited()
         self.assertIn('必须引用图片', event.send.await_args.args[0])
+
+    def action_fixture(self, send_effect=None):
+        tree = ast.parse((Path(__file__).resolve().parents[1] / 'main.py').read_text(encoding='utf-8'))
+        methods = [n for n in ast.walk(tree) if isinstance(n, ast.AsyncFunctionDef)
+                   and n.name in {'_qq_image_action', '_handle_quoted_selection'}]
+        ns = {'logger': Mock(), '__package__': 'astrbot_plugin_comfy_bridge',
+              'WorkflowError': WorkflowError, 'delivery_scope': lambda event: 'scope'}
+        exec(compile(ast.Module(body=methods, type_ignores=[]), 'action', 'exec'), ns)
+        event = SimpleNamespace(should_call_llm=Mock(), stop_event=Mock(),
+            send=AsyncMock(side_effect=send_effect), plain_result=lambda text: text,
+            message_str='收藏1,3')
+        job = {'job_id': 'job1', 'result': {'assets': ['first', 'second']}}
+        bridge = SimpleNamespace(_quoted_job=AsyncMock(return_value=(job, 0)),
+            _character_dictionary_path=lambda: Path('/unused/characters.json'), config={})
+        return ns, event, bridge, job
+
+    async def test_saved_but_ack_timeout_does_not_resubmit_or_claim_failure(self):
+        ns, event, bridge, _ = self.action_fixture([RuntimeError('sendMsg Timeout'), None])
+        with patch('astrbot_plugin_comfy_bridge.qq_image_actions_runtime.submit_action',
+                   new_callable=AsyncMock, return_value='已收藏可复用提示词') as submit:
+            await ns['_qq_image_action'](bridge, event, 'favorite')
+        submit.assert_awaited_once()
+        messages = [call.args[0] for call in event.send.await_args_list]
+        self.assertEqual(len(messages), 2)
+        self.assertIn('收藏已保存', messages[-1])
+        self.assertIn('无需重复提交', messages[-1])
+        self.assertFalse(any('操作未完成' in text or 'sendMsg Timeout' in text for text in messages))
+
+    async def test_both_notices_fail_without_escaping_or_retrying_mutation(self):
+        ns, event, bridge, _ = self.action_fixture(RuntimeError('transport unavailable'))
+        with patch('astrbot_plugin_comfy_bridge.qq_image_actions_runtime.submit_action',
+                   new_callable=AsyncMock, return_value='已收藏') as submit:
+            await ns['_qq_image_action'](bridge, event, 'favorite')
+        submit.assert_awaited_once()
+        self.assertEqual(event.send.await_count, 2)
+
+    async def test_real_save_error_is_not_reported_as_success_even_if_notice_fails(self):
+        ns, event, bridge, _ = self.action_fixture(RuntimeError('transport unavailable'))
+        with patch('astrbot_plugin_comfy_bridge.qq_image_actions_runtime.submit_action',
+                   new_callable=AsyncMock, side_effect=WorkflowError('旧任务缺少可靠快照')) as submit:
+            await ns['_qq_image_action'](bridge, event, 'favorite')
+        submit.assert_awaited_once()
+        event.send.assert_awaited_once()
+        self.assertIn('操作未完成：旧任务缺少可靠快照', event.send.await_args.args[0])
+        self.assertNotIn('已保存', event.send.await_args.args[0])
+
+    async def test_success_sends_only_original_confirmation(self):
+        ns, event, bridge, _ = self.action_fixture()
+        with patch('astrbot_plugin_comfy_bridge.qq_image_actions_runtime.submit_action',
+                   new_callable=AsyncMock, return_value='已经收藏') as submit:
+            await ns['_qq_image_action'](bridge, event, 'favorite')
+        submit.assert_awaited_once()
+        event.send.assert_awaited_once_with('已经收藏')
+
+    async def test_unfavorite_and_report_notices_reflect_completed_action(self):
+        for action, label in [('unfavorite', '已取消收藏'), ('report', '举报已提交')]:
+            with self.subTest(action=action):
+                ns, event, bridge, _ = self.action_fixture([RuntimeError('timeout'), None])
+                with patch('astrbot_plugin_comfy_bridge.qq_image_actions_runtime.submit_action',
+                           new_callable=AsyncMock, return_value='完成') as submit:
+                    await ns['_qq_image_action'](bridge, event, action)
+                submit.assert_awaited_once()
+                self.assertTrue(event.send.await_args.args[0].startswith(label))
+
+    async def test_multiselect_continues_after_failed_ack_without_resubmission(self):
+        ns, event, bridge, job = self.action_fixture(RuntimeError('send timeout'))
+        bridge._job_store = lambda: SimpleNamespace(selected_draws=Mock(
+            return_value=[(1, job, 0), (3, job, 1)]))
+        async def quoted(event):
+            return getattr(event, '_aaa_selected_quote', (job, 0))
+        bridge._quoted_job = quoted
+        async def favorite(event, reason):
+            await ns['_qq_image_action'](bridge, event, 'favorite', reason)
+        bridge.afavorite = favorite
+        with patch('astrbot_plugin_comfy_bridge.qq_image_actions_runtime.submit_action',
+                   new_callable=AsyncMock, return_value='已收藏') as submit:
+            await ns['_handle_quoted_selection'](bridge, event, 'afavorite', '1,3')
+        self.assertEqual([c.args[4] for c in submit.await_args_list], [0, 1])
+        self.assertEqual(event.send.await_count, 4)
+        self.assertEqual(event.message_str, '收藏1,3')
+        self.assertFalse(hasattr(event, '_aaa_selected_quote'))
 
     def test_report_reason_body(self):
         for prefix in ['举报', '举报图片', '/areport', '/举报']:

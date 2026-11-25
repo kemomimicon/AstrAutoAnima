@@ -11,6 +11,28 @@ import aiohttp
 from .workflow_runtime import WorkflowError
 
 
+async def send_action_reply(event, message, logger, *, completed_action=None):
+    """A failed acknowledgement never retries or reverses a completed mutation."""
+    try:
+        await event.send(event.plain_result(message))
+        return True
+    except Exception as exc:
+        logger.warning('QQ image action reply failed (completed=%s, error=%s)',
+                       completed_action or 'no', type(exc).__name__)
+    completed = {'favorite': '收藏已保存', 'unfavorite': '已取消收藏',
+                 'report': '举报已提交'}.get(completed_action)
+    if completed:
+        # One short status notice only. Never resubmit the operation, and do not
+        # propagate a second delivery failure into the multi-selection handler.
+        try:
+            await event.send(event.plain_result(
+                completed + '；QQ确认消息发送异常，请在客户端查看，无需重复提交。'))
+        except Exception as exc:
+            logger.warning('QQ completed-action status notice failed (action=%s, error=%s)',
+                           completed_action, type(exc).__name__)
+    return False
+
+
 async def submit_action(root, hub_url, event, job, index, action, reason=''):
     if event.get_platform_name() != 'aiocqhttp':
         raise WorkflowError('此指令仅用于 QQ 引用图片；客户端请使用图片旁的按钮')

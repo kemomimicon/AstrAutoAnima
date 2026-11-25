@@ -829,8 +829,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 detail="无法唯一对应图片或旧任务缺少原串快照，请在具体图片下收藏；旧任务不能猜测附加内容",
             )
         try:
-            from .image_prompts import resolve_image_prompt, save_image_prompt
-            snapshot = resolve_image_prompt(resolved, job, images[0])
+            from .image_prompts import resolve_favorite_prompt, save_image_prompt
+            snapshot = resolve_favorite_prompt(resolved, job, images[0])
             result = save_image_prompt(resolved, principal, snapshot, f'{job_id}-{images[0].id}')
         except RepositoryError as exc:
             _raise_management_error(exc)
@@ -854,13 +854,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if image is None:
             raise HTTPException(status_code=404, detail="image prompt not found")
         try:
-            from .image_prompts import resolve_image_prompt, save_image_prompt
-            snapshot = resolve_image_prompt(resolved, job, image)
+            from .image_prompts import resolve_favorite_prompt, save_image_prompt
+            snapshot = resolve_favorite_prompt(resolved, job, image)
             result = save_image_prompt(resolved, principal, snapshot, f'{job_id}-{image_id}')
-            if snapshot.get('kind') == 'compiled':
-                image.final_prompt = snapshot['positive']
-                image.negative_prompt = snapshot.get('negative', '')
-                image.prompt_stage = snapshot['stage']
         except RepositoryError as exc:
             _raise_management_error(exc)
         app.state.remote_jobs.mark_liked(job_id, image.prompt_id, principal)

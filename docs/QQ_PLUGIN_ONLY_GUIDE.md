@@ -1,4 +1,4 @@
-# AstrAutoAnima QQ 指令版 · 0.5.2-1.44 / qq.1
+# AstrAutoAnima QQ 指令版 · 0.5.3-beta.1 / build45 / qq.1
 
 ## 1. 包怎么用
 
@@ -6,7 +6,7 @@
 不需要安装 Hub、Admin/Service 客户端，不需要 Hub 令牌或 AstrBot OpenAPI Key。
 普通英文生图不需要 LLM API；中文翻译和重跑的自然语言修改使用 AstrBot 自己配置的文本 Provider。
 
-配套包中的 `astrbot_plugin_comfy_bridge-0.5.2-1.44-qq.1.zip` 是 AstrBot 安装文件。
+配套包中的 `astrbot_plugin_comfy_bridge-0.5.3-beta.1-build45-qq.1.zip` 是 AstrBot 安装文件。
 在 AstrBot 插件管理中选择从本地 ZIP 安装这个文件，**不要把外层说明总包当插件上传**。
 插件 ZIP 根目录直接包含 main.py、metadata.yaml、_conf_schema.json，另附 data/workflows 工作流。
 若当前 AstrBot 界面没有本地 ZIP 入口，正常退出 AstrBot，将内层插件 ZIP 解压到实际
@@ -187,7 +187,7 @@ SeedVR2模板单独放在可选扩展目录；下载其DiT/VAE并安装对应节
 不写固定种子时更换种子；固定种子且不改条件，重复同图是正常结果。
 重跑的自然语言内容修改使用AstrBot已有文本Provider；缺少Provider时使用参数调整或普通/aimg。
 保留QQ原图消息及插件job_store。转发、旧版未关联图片或删掉任务记录后，引用可能无法定位。
-/aecho只显示有抽取快照的随机任务，不从普通图片反猜抽取串。
+/aecho 查看已保存的当次实际提示词；收藏使用独立的可复用文本，二者分别读取快照。
 
 ## 9. 图片反推（可选）与中文生图
 
@@ -230,3 +230,17 @@ anima_random_prompt_pool.json为主库，kp_prompt_pool.json为独立K库，pres
 反馈请给插件版本qq.1、命令、时间和错误片段，不发送密钥或完整私人库。
 
 反馈入口：bilibili——ケモミミロリコン。
+
+## 11. build45 新功能
+
+- `/aturbo 场景描述`：Anima Turbo 独立模型，默认 10 步、CFG 1。
+- 引用一张图片发送 `/aref 场景描述`：默认参考角色和画风。
+- `/aref 画风=预设名称 场景描述` 或 `/aref char 画风=预设名称 场景描述`：参考角色，并应用画风预设。
+- `/aref cs 场景描述`：显式全部参考；纯画风 style 留待后续方案。
+- `/amulti 预览` 与 `/amulti 预设`：按角色预设分段生成多人图。
+
+配置与完整指令见套件内《新功能与模型配置.md》。Turbo、SnapRef、预设多人工作流也已放入插件 data/workflows。SnapRef 节点与模型需按说明安装，适配器由专用节点加载。
+
+引用收藏、取消收藏和举报需配套 AAA Hub，独立插件的基础生图无需 Hub。
+本版修正了收藏成功后 QQ 确认消息超时的误报，失败回执不会重新提交收藏，也不会中断后续多选收藏。
+配套新版 Hub 后，收藏保存基础场景、动作和用户补充，排除叠加预设和可识别的人物特征；已有收藏不自动改写。

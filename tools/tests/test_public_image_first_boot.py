@@ -14,6 +14,17 @@ boot=importlib.util.module_from_spec(spec);spec.loader.exec_module(boot)
 
 
 class FirstBootTests(unittest.TestCase):
+    def test_image_identity_follows_sanitized_payload_defaults(self):
+        with tempfile.TemporaryDirectory() as temp,contextlib.redirect_stdout(io.StringIO()):
+            base=Path(temp);root,nap=self.create(base)
+            path=root/'.image-defaults/templates.json'
+            defaults=json.loads(path.read_text());defaults['image_version']='0.5.3-beta.1-build45-image.1'
+            path.write_text(json.dumps(defaults))
+            boot.initialize(root,base,nap)
+            marker=json.loads((root/'.image-initialized.json').read_text())
+            self.assertEqual(marker['image'],defaults['image_version'])
+            self.assertTrue(marker['credentials_independent'])
+
     def test_launch_rejects_missing_astrbot_even_when_launcher_returns_zero(self):
         with tempfile.TemporaryDirectory() as temp,contextlib.redirect_stdout(io.StringIO()):
             base=Path(temp);root,nap=self.create(base);boot.initialize(root,base,nap)

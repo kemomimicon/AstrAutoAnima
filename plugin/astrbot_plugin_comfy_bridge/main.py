@@ -3546,7 +3546,8 @@ class ComfyWorkflowBridge(GroupBridge, SafetyBridge, Star):
             parent, _ = await self._quoted_job(event)
             selected = self._job_store().selected_draws(parent, positions, delivery_scope(event))
             for position, job, index in selected:
-                await event.send(event.plain_result(f'正在处理五连抽第 {position} 张'))
+                if method not in {'afavorite', 'aunfavorite', 'areport'}:
+                    await event.send(event.plain_result(f'正在处理五连抽第 {position} 张'))
                 # Local, short-lived cache of an already scope-authorized selection.
                 event._aaa_selected_quote = (job, index)
                 original_message = event.message_str
@@ -3896,16 +3897,17 @@ class ComfyWorkflowBridge(GroupBridge, SafetyBridge, Star):
     async def _qq_image_action(self, event, action, reason=''):
         event.should_call_llm(False)
         event.stop_event()
+        from .qq_image_actions_runtime import submit_action, send_action_reply
         try:
             parent, index = await self._quoted_job(event)
-            from .qq_image_actions_runtime import submit_action
             message = await submit_action(self._character_dictionary_path().parent,
                 self.config.get('qq_actions_hub_url', 'http://127.0.0.1:6278'),
                 event, parent, index, action, reason)
-            await event.send(event.plain_result(message))
         except Exception as exc:
             logger.warning('QQ image action failed: %s', exc)
-            await event.send(event.plain_result(f'操作未完成：{exc}'))
+            await send_action_reply(event, f'操作未完成：{exc}', logger)
+            return
+        await send_action_reply(event, message, logger, completed_action=action)
 
     @filter.command('afavorite', alias={'收藏', '收藏提示词'})
     async def afavorite(self, event: AstrMessageEvent, content: str = ''):

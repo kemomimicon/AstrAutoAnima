@@ -1,9 +1,9 @@
 {
   "public_display_version": "0.5.3-beta.1+45",
-  "installation_revision": "candidate.3-admin-entries",
+  "installation_revision": "candidate.4-favorites",
   "installer_selfcheck_review": "20261025-4090D-acceptance-install-fixes",
   "release_coordination": "local-candidate-no-publication",
-  "publication_preparation_date": "2026-11-24",
+  "publication_preparation_date": "2026-11-25",
   "public_image_rebuild_and_acceptance_required": true,
   "retained_public_windows_compatibility_patch": "windows.2",
   "release": "0.5.3-beta.1",

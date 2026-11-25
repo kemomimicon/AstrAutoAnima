@@ -42,6 +42,9 @@ def build(out):
     if subprocess.check_output(['git', 'status', '--porcelain'], cwd=ROOT).strip():
         raise ValueError('Commit and freeze source first')
     commit = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip()
+    release = json.loads((ROOT / 'release-manifest.json').read_text('utf-8'))
+    version = release['release'] + '+qq.1'
+    label = release['release'] + '-build' + str(release['public_build']) + '-qq.1'
     out.mkdir(parents=True, exist_ok=True)
     names = subprocess.check_output(['git', 'ls-files', '-z'], cwd=ROOT).decode().split('\0')
     plugin_prefix = 'plugin/astrbot_plugin_comfy_bridge/'
@@ -74,10 +77,10 @@ def build(out):
     entries['LICENSE'] = (ROOT / 'LICENSE').read_bytes()
     entries['THIRD_PARTY_NOTICES.md'] = (ROOT / 'THIRD_PARTY_NOTICES.md').read_bytes()
     metadata = ('name: astrbot_plugin_comfy_bridge\ndisplay_name: AAA QQ 生图工作流桥接\n'
-                'short_desc: QQ指令生图、预设、词库、五连、HQ、精修和反推。\n'
-                'desc: 基于0.5.2-1.44的QQ独立分包；自带API工作流与操作说明，不需要Hub或客户端。\n'
-                'version: 0.5.2-beta.1+qq.1\nauthor: RelN\n'
-                'repo: "https://github.com/kemomimicon/AstrAutoAnima"\n'
+                'short_desc: QQ生图、Turbo、SnapRef参考、多人预设、HQ与反推。\n'
+                f'desc: 基于{release["release"]} build{release["public_build"]}的QQ独立分包；自带API工作流与操作说明。\n'
+                f'version: {version}\nauthor: RelN\n'
+                'repo: "https://github.com/kemomimicon/astrbot_plugin_comfy_bridge"\n'
                 'astrbot_version: ">=4.17,<5"\nsupport_platforms:\n  - aiocqhttp\n'
                 'tags:\n  - comfyui\n  - image-generation\n')
     entries['metadata.yaml'] = metadata.encode()
@@ -127,11 +130,11 @@ def build(out):
             compile(data.decode('utf-8-sig'), name, 'exec')
     assert json.loads(entries['data/anima_random_prompt_pool.json'])['prompts'] == []
     assert b'"qq_official": True' in entries['platform_switchboard.py']
-    manifest = {'display_version': '0.5.2-1.44 / qq.1', 'source_commit': commit,
+    manifest = {'display_version': label, 'source_commit': commit,
                 'standalone_qq_chain': True, 'requires_hub': False, 'defaults': defaults,
                 'files': {n: hashlib.sha256(d).hexdigest() for n, d in entries.items()}}
     entries['qq-package-manifest.json'] = serialized(manifest)
-    plugin = out/'astrbot_plugin_comfy_bridge-0.5.2-1.44-qq.1.zip'
+    plugin = out/f'astrbot_plugin_comfy_bridge-{label}.zip'
     archive(plugin, entries)
     suite = {plugin.name: plugin.read_bytes(), '00_安装与QQ指令说明.txt': b'\xef\xbb\xbf'+guide,
              'LICENSE': entries['LICENSE'], 'THIRD_PARTY_NOTICES.md': entries['THIRD_PARTY_NOTICES.md'],
@@ -142,7 +145,8 @@ def build(out):
                 'source_code':'B', 'safety_code':'N', 'safety_level':'normal', 'enabled':True}]})}
     for name, graph in workflows.items():
         suite['工作流API/'+name] = serialized(graph)
-    for name in ['Anima_SeedVR2_Refine_Beta_api.json', 'Anima_Base_Multi_Person_Beta_api.json']:
+    for name in ['Anima_SeedVR2_Refine_Beta_api.json', 'Anima_Base_Multi_Person_Beta_api.json',
+                 'Anima_Turbo_api.json', 'Anima_SnapRef_api.json', 'Anima_Preset_Multi_api.json']:
         suite['可选扩展工作流/'+name] = (ROOT/'comfyui/workflows'/name).read_bytes()
     prefix = 'comfyui/custom_nodes/ComfyUI-AstrAutoAnima-Workflow-Tools/'
     for name in names:
@@ -156,7 +160,8 @@ def build(out):
     suite['QQ插件包验收.json'] = serialized({'source_commit':commit, 'python_syntax':True, 'workflow_registry_and_links':True,
        'quick_nodes':len(quick), 'lora_placeholders_removed':True, 'persistent_user_data_included':False,
        'gpu_job_started':False, 'files':{n:hashlib.sha256(d).hexdigest() for n,d in suite.items()}})
-    total = out/'AAA_QQ_Plugin_Suite_0.5.2-1.44-qq.1.zip'
+    suite['新功能与模型配置.md'] = (ROOT/'docs/NEXT_ANIMA_FEATURES.md').read_bytes()
+    total = out/f'AAA_QQ_Plugin_Suite_{label}.zip'
     archive(total, suite)
     (out/'00_安装与QQ指令说明.txt').write_bytes(b'\xef\xbb\xbf'+guide)
     for p in [plugin, total]:

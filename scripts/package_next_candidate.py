@@ -9,7 +9,7 @@ import tomllib
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
-STAMP = (2026, 11, 24, 0, 0, 0)
+STAMP = (2026, 11, 25, 0, 0, 0)
 RUNTIME = ('deploy_project.py', 'deployment_support.py', 'download_network.py',
            'install_progress.py', 'project_components.py', 'gufeng_resource.py')
 

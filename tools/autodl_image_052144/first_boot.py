@@ -88,7 +88,7 @@ def initialize(root, image, napcat):
              'autoLoginAccount': '', 'disableWebUI': False, 'enable2FA': False,
              'totpSecret': '', 'ipWhitelist': [], 'ipBlacklist': [], 'enableXForwardedFor': False}
     private_json(napcat, webui)
-    private_json(root / '.image-initialized.json', {'schema': 1, 'image': '0.5.2-1.44-image.1', 'credentials_independent': True})
+    private_json(root / '.image-initialized.json', {'schema': 1, 'image': defaults.get('image_version', '0.5.2-1.44-image.1'), 'credentials_independent': True})
     print('首次配置已生成，凭据文件：', root / 'INITIAL_CREDENTIALS.json')
     print('查看账号密码：bash /root/AAA-Credentials.sh --show initial')
     print('查看管理令牌：bash /root/AAA-Credentials.sh --show hub --profile full')
