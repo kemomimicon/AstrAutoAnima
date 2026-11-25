@@ -1,0 +1,11 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
+  "mcpServers": {
+    "astr_auto_anima": {
+      "type": "stdio",
+      "command": "python",
+      "args": ["${PLUGIN_ROOT}/agent.py"],
+      "cwd": "${PLUGIN_ROOT}"
+    }
+  }
+}
