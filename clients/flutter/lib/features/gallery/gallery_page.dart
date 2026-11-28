@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import '../../core/hub_api.dart';
 import '../../core/models.dart';
+import 'character_gallery_page.dart';
 
 class GalleryPage extends StatefulWidget {
   const GalleryPage({super.key, required this.api, this.admin = false});
@@ -139,6 +140,9 @@ class _GalleryPageState extends State<GalleryPage> {
         !_busy && _data?['ready'] == true && _data?['active'] != true;
     return Scaffold(
         appBar: AppBar(title: const Text('画风画廊'), actions: [
+          TextButton.icon(onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(
+            builder: (_) => CharacterGalleryPage(api: widget.api, admin: widget.admin))),
+            icon: const Icon(Icons.people_alt_outlined), label: const Text('角色画廊')),
           IconButton(
               tooltip: '刷新画廊',
               onPressed: _busy ? null : _refresh,

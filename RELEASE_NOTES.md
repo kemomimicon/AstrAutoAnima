@@ -1,3 +1,15 @@
+# 0.5.3-beta.1 · build45（2026-11-25）
+
+加入 Anima Turbo、SnapRef 参考生图、角色画廊与预设多人图，恢复 NapCat 登录助手、QQ 状态与优云账户余额入口。
+
+收藏现在保存可复用的基础场景、动作和有效补充，排除叠加预设及可识别的人物身份、外貌标签；完整实际提示词仍可单独查看，已有收藏保留原样。QQ 确认消息超时不再误报保存失败，多选收藏继续处理后续图片。
+
+Windows / Linux 完整安装与更新包、Windows / Web / Android 客户端同步准备，独立 AstrBot 插件版本为 `0.5.3-beta.1+qq.1`。本次合并保留主仓库已有的 Codex / DeepSeek Harness Agent 接入组件。
+
+详情见 [更新内容](docs/RELEASE_BUILD45_20261125.md)、[更新与回退](docs/NEXT_CANDIDATE_UPDATE.md)、[AutoDL 母版准备](docs/AUTODL_BUILD45.md)。
+
+## 历史版本记录
+
 > 2026-10-25：对外版本 `0.5.2-1.44`，内部 `0.5.2-beta.1/build44`，计划随视频和公开镜像联合发布。
 > 本地已整合完整候选源码、公开发布材料与旧 Windows 兼容补丁；未推送/发布，不修改原实例或保存镜像。
 > 详见 [联合发布准备](docs/PUBLICATION_0.5.2-1.44.md)。GPU、独立克隆和最终母版验收仍待进行。

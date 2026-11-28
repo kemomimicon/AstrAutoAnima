@@ -1,3 +1,3 @@
 """AstrAutoAnima Hub workstation service."""
 
-__version__ = "0.5.2-beta.1"
+__version__ = "0.5.3-beta.1"

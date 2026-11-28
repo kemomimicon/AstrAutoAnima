@@ -19,6 +19,7 @@ from astrbot_plugin_comfy_bridge.workflow_runtime import (
     WorkflowError, prepare_workflow, extract_command_body,
 )
 from astrbot_plugin_comfy_bridge.safety_runtime import positive_texts
+from astrbot_plugin_comfy_bridge.next_generation_runtime import SNAPREF, replay_reference, set_reference
 from astrbot_plugin_comfy_bridge.delivery_runtime import qq_official_reply_ids, qq_official_quote_markers, log_qq_official_quote_diagnostic
 
 

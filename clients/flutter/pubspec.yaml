@@ -1,7 +1,7 @@
 name: astr_auto_anima_hub_client
 description: AstrAutoAnima Hub client for Web, Windows and Android
 publish_to: "none"
-version: 0.5.2-beta.1+44
+version: 0.5.3-beta.1+45
 environment:
   sdk: ">=3.3.0 <4.0.0"
 

@@ -11,6 +11,7 @@ from PIL import Image
 from test_delivery_tracking import DeliveryTests
 from astrbot_plugin_comfy_bridge.workflow_runtime import WorkflowError, extract_command_body
 from astrbot_plugin_comfy_bridge.replay_runtime import replay_workflow
+from astrbot_plugin_comfy_bridge.next_generation_runtime import SNAPREF
 from astrbot_plugin_comfy_bridge.delivery_runtime import send_tracked_image, delivery_scope, qq_official_reply_ids, qq_official_quote_markers, log_qq_official_quote_diagnostic
 from astrbot_plugin_comfy_bridge.safety_runtime import positive_texts
 

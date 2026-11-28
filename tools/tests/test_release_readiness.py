@@ -1,5 +1,6 @@
 """Regression coverage for non-destructive extension updates and packaged entrypoints."""
 from pathlib import Path
+import re
 import tempfile
 from types import SimpleNamespace
 import unittest
@@ -68,7 +69,9 @@ class ReleaseReadinessTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp); astro = root / 'astro'; hub = root / 'hub'
             file = astro / 'data/plugins/astrbot_plugin_comfy_bridge/metadata.yaml'; file.parent.mkdir(parents=True)
-            for version in ('0.9.0-beta.1', '0.5.2-beta.9', '0.5.2-beta.1-other', 'unknown'):
+            incoming = re.search(r'^version:\s*(\S+)', (deploy.ROOT / 'plugin/astrbot_plugin_comfy_bridge/metadata.yaml').read_text('utf-8'), re.M)[1]
+            core = incoming.split('-')[0]
+            for version in ('99.0.0-beta.1', core + '-beta.99', incoming + '-other', 'unknown'):
                 file.write_text('version: ' + version)
                 with self.assertRaises(ValueError): deploy.guard_runtime_versions(deploy.Plan(str(root), astrbot=str(astro)), root)
                 self.assertEqual(file.read_text(), 'version: ' + version)

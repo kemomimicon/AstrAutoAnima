@@ -853,7 +853,7 @@ class _HubShellState extends State<HubShell> {
   @override
   Widget build(BuildContext context) {
     final pages = [
-      CompShareInstancePage(api: _api),
+      CompShareInstancePage(key: ValueKey(_api), api: _api),
       DashboardPage(
         api: _api,
         serverOnlineReminderEnabled: _serverOnlineReminderEnabled,

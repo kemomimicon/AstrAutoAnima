@@ -43,7 +43,9 @@ class _LiteJobHistoryPageState extends State<LiteJobHistoryPage> {
     'hq': 'HQ 高清',
     'refine': '放大精修',
     'remake': '重跑一张',
-    'multi': '裸模多人图',
+    'multi': '多人图',
+    'turbo': 'Anima Turbo',
+    'reference': 'SnapRef 参考生图',
   };
 
   static const _statusLabels = <String, String>{
@@ -358,12 +360,14 @@ class _LiteJobHistoryPageState extends State<LiteJobHistoryPage> {
                       width: 190,
                       child: DropdownButtonFormField<String>(
                         initialValue: _kind,
+                        isExpanded: true,
                         decoration: const InputDecoration(labelText: '任务分类'),
                         items: _kindLabels.entries
                             .map(
                               (entry) => DropdownMenuItem(
                                 value: entry.key,
-                                child: Text(entry.value),
+                                child: Text(entry.value,
+                                    overflow: TextOverflow.ellipsis),
                               ),
                             )
                             .toList(),
@@ -377,12 +381,14 @@ class _LiteJobHistoryPageState extends State<LiteJobHistoryPage> {
                       width: 170,
                       child: DropdownButtonFormField<String>(
                         initialValue: _status,
+                        isExpanded: true,
                         decoration: const InputDecoration(labelText: '任务状态'),
                         items: _statusLabels.entries
                             .map(
                               (entry) => DropdownMenuItem(
                                 value: entry.key,
-                                child: Text(entry.value),
+                                child: Text(entry.value,
+                                    overflow: TextOverflow.ellipsis),
                               ),
                             )
                             .toList(),

@@ -86,6 +86,7 @@ class _LiteGeneratePageState extends State<LiteGeneratePage> {
   String _ratio = '';
   String _sampler = '';
   String _scheduler = '';
+  String _referenceMode = 'auto';
   String _reversePreset = 'full';
   bool _customReverseCategories = false;
   final Set<String> _reverseCategories = {'scene', 'action'};
@@ -107,6 +108,8 @@ class _LiteGeneratePageState extends State<LiteGeneratePage> {
   bool _detailFeet = false;
   bool _detailFace = false;
   bool _detailUpscale = false;
+  bool get _reference => _kind == ImageCommandKind.reference;
+  bool get _referenceStyle => _reference && _referenceMode != 'cs';
   bool get _randomKind =>
       _kind == ImageCommandKind.random || _kind == ImageCommandKind.chaos;
   bool get _localRandom => widget.localMode && _kind == ImageCommandKind.random;
@@ -121,7 +124,7 @@ class _LiteGeneratePageState extends State<LiteGeneratePage> {
   bool get _nativeUpscale =>
       _kind == ImageCommandKind.refine && _profile == 'seedvr2';
   bool get _visualSupported =>
-      !widget.localMode && !_nativeUpscale && _kind != ImageCommandKind.multi;
+      !widget.localMode && !_nativeUpscale && _kind != ImageCommandKind.multi && !_reference;
   Map<String, String> get _taskVisual => _visualSupported ? _visual : const {};
   String get _advancedKey =>
       'aaa_advanced_${sha256.convert(utf8.encode('${widget.api.baseUrl}|${widget.api.token}'))}';
@@ -509,6 +512,7 @@ class _LiteGeneratePageState extends State<LiteGeneratePage> {
         steps: _customSamplerParameters && !_nativeUpscale ? _steps : null,
         cfg: _customSamplerParameters && !_nativeUpscale ? _cfg : null,
         prompt: _promptController.text,
+        referenceMode: _referenceMode,
         reversePreset: _reversePreset,
         reverseCategories:
             _customReverseCategories ? _reverseCategories.toList() : const [],
@@ -540,6 +544,8 @@ class _LiteGeneratePageState extends State<LiteGeneratePage> {
         ImageCommandKind.hq => 'hq',
         ImageCommandKind.refine => 'refine',
         ImageCommandKind.multi => 'multi',
+        ImageCommandKind.turbo => 'turbo',
+        ImageCommandKind.reference => 'reference',
       };
 
   Future<void> _pickSourceImage() async {
@@ -584,7 +590,7 @@ class _LiteGeneratePageState extends State<LiteGeneratePage> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
-          _kind == ImageCommandKind.reverse || _kind == ImageCommandKind.refine
+          _kind == ImageCommandKind.reverse || _kind == ImageCommandKind.refine || _reference
               ? '指令已复制；在 QQ 使用时仍需同时附图或填写历史任务 ID。'
               : '指令已复制，可作为直投失败时的备用方式。',
         ),
@@ -620,7 +626,7 @@ class _LiteGeneratePageState extends State<LiteGeneratePage> {
     }
     if ((_kind == ImageCommandKind.direct ||
             _kind == ImageCommandKind.chinese ||
-            _kind == ImageCommandKind.hq) &&
+            _kind == ImageCommandKind.hq || _kind == ImageCommandKind.turbo || _reference) &&
         _promptController.text.trim().isEmpty) {
       _notice(
         _kind == ImageCommandKind.chinese
@@ -631,11 +637,11 @@ class _LiteGeneratePageState extends State<LiteGeneratePage> {
       return;
     }
     final imageMode =
-        _kind == ImageCommandKind.reverse || _kind == ImageCommandKind.refine;
+        _kind == ImageCommandKind.reverse || _kind == ImageCommandKind.refine || _reference;
     if (imageMode &&
         _sourceImage == null &&
         !(_kind == ImageCommandKind.refine && _parentJobId.trim().isNotEmpty)) {
-      _notice('图片反推/精修必须选择图片，精修也可以填写历史任务 ID。', error: true);
+      _notice('参考生图、反推或精修需要选择图片；精修也可以填写历史任务 ID。', error: true);
       return;
     }
     if (_kind == ImageCommandKind.refine &&
@@ -695,7 +701,7 @@ class _LiteGeneratePageState extends State<LiteGeneratePage> {
               ),
             if (imageMode && _sourceImage != null)
               Text(
-                  '${_kind == ImageCommandKind.refine ? '精修' : '反推'}图片：$_sourceImageName'),
+                  '${_reference ? '参考' : _kind == ImageCommandKind.refine ? '精修' : '反推'}图片：$_sourceImageName'),
             const SizedBox(height: 12),
             Text(widget.localMode
                 ? '生成完成后可在本机记录查看或保存，不经过 AstrBot。'
@@ -763,19 +769,19 @@ class _LiteGeneratePageState extends State<LiteGeneratePage> {
               'pool_filter': _poolFilter,
               if (_randomKind && _customGroup.isNotEmpty)
                 'custom_groups': [_customGroup],
-              'character': _kind == ImageCommandKind.multi ? '' : _character,
+              'character': _kind == ImageCommandKind.multi || _reference ? '' : _character,
               'character_tag_mode':
                   _useDictionaryCharacter ? _characterTagMode : 'off',
               'character_variant': _useDictionaryCharacter ||
                       _kind == ImageCommandKind.chaos ||
-                      _kind == ImageCommandKind.multi
+                      _kind == ImageCommandKind.multi || _reference
                   ? ''
                   : _characterVariant,
-              'style': _kind == ImageCommandKind.multi
+              'style': _kind == ImageCommandKind.multi || (_reference && !_referenceStyle)
                   ? ''
                   : (_randomStyle ? '随机模式' : _style),
               if (_kind != ImageCommandKind.chaos &&
-                  _kind != ImageCommandKind.multi &&
+                  _kind != ImageCommandKind.multi && (!_reference || _referenceStyle) &&
                   !_randomStyle &&
                   _personalStyleSlot > 0)
                 'personal_style_slot': _personalStyleSlot,
@@ -807,6 +813,11 @@ class _LiteGeneratePageState extends State<LiteGeneratePage> {
               if (_customSamplerParameters && !_nativeUpscale) 'cfg': _cfg,
               'prompt': _promptController.text.trim(),
               'safety_code': _safety,
+              if (_reference) ...{
+                'reference_mode': _referenceMode,
+                'source_image_name': _sourceImageName,
+                'source_image_data': 'data:$_sourceImageMime;base64,${base64Encode(_sourceImage!)}',
+              },
               if (_kind == ImageCommandKind.reverse) ...{
                 'reverse_preset': _reversePreset,
                 'reverse_categories':
@@ -1078,6 +1089,8 @@ class _LiteGeneratePageState extends State<LiteGeneratePage> {
                             child: Text('来张好图'),
                           ),
                         if (!widget.localMode) ...const [
+                          DropdownMenuItem(value: ImageCommandKind.turbo, child: Text('Anima Turbo /aturbo')),
+                          DropdownMenuItem(value: ImageCommandKind.reference, child: Text('参考生图 SnapRef /aref')),
                           DropdownMenuItem(
                               value: ImageCommandKind.reverse,
                               child: Text('图片反推 /aip')),
@@ -1095,11 +1108,18 @@ class _LiteGeneratePageState extends State<LiteGeneratePage> {
                               child: Text('混沌时刻')),
                           DropdownMenuItem(
                               value: ImageCommandKind.multi,
-                              child: Text('裸模多人图 /amulti')),
+                              child: Text('多人图 /amulti（可用角色预设）')),
                         ],
                       ],
                       onChanged: (value) => setState(() {
                         _kind = value ?? _kind;
+                        if (_kind == ImageCommandKind.turbo || _reference) {
+                          _sampler = ''; _scheduler = ''; _customSamplerParameters = false;
+                        }
+                        if (_kind == ImageCommandKind.turbo) { _cfg = 1; _steps = 10; }
+                        if (_reference) {
+                          _character = ''; _characterVariant = ''; _style = ''; _randomStyle = false; _personalStyleSlot = 0;
+                        }
                         if (widget.localMode) {
                           _customGroup = _localRandom ? 'v' : '';
                           _poolFilter = '';
@@ -1279,6 +1299,31 @@ class _LiteGeneratePageState extends State<LiteGeneratePage> {
                           );
                         },
                       ),
+                    if (_reference) ...[
+                      const Text('SnapRef：选择单张角色参考图，再填写新场景或动作。'),
+                      DropdownButtonFormField<String>(initialValue: _referenceMode,
+                        isExpanded: true,
+                        decoration: const InputDecoration(labelText: '参考模式'),
+                        items: const [DropdownMenuItem(value: 'auto', child: Text('自动（默认全部参考）')),
+                          DropdownMenuItem(value: 'char', child: Text('角色 char')),
+                          DropdownMenuItem(value: 'cs', child: Text('角色与画风 cs'))],
+                        onChanged: (value) => setState(() {
+                          _referenceMode = value ?? 'auto';
+                          if (!_referenceStyle) { _style = ''; _randomStyle = false; _personalStyleSlot = 0; }
+                        })),
+                      Text(_referenceMode == 'auto' ? '默认参考角色与画风；选择画风预设后自动转为 char。'
+                          : _referenceStyle ? '参考图提供角色；可在下方选择公共或个人画风预设。' : '角色与画风均来自参考图。'),
+                      OutlinedButton.icon(onPressed: _submitting ? null : _pickSourceImage,
+                        icon: const Icon(Icons.add_photo_alternate_outlined), label: const Text('选择参考图片')),
+                      if (_sourceImage != null) ...[
+                        Image.memory(_sourceImage!, height: 160, fit: BoxFit.contain),
+                        Text(_sourceImageName),
+                      ],
+                    ],
+                    if (_kind == ImageCommandKind.turbo)
+                      const Text('Anima Turbo 专用模型：默认 10 步、CFG 1。'),
+                    if (_kind == ImageCommandKind.multi)
+                      const SelectableText('使用现有角色预设：第一行填“预设”，随后逐行填 人物1：预设名 | | 动作位置。最后填场景。复制为 QQ 指令时可把“预设”换成“预览”先核对最终提示词。'),
                     if (reverse) ...[
                       const SizedBox(height: 12),
                       DropdownButtonFormField<String>(
@@ -1556,7 +1601,7 @@ class _LiteGeneratePageState extends State<LiteGeneratePage> {
                             value: _suiteId,
                             onChanged: (v) => setState(() => _suiteId = v)),
                     ],
-                    if (!_suiteActive) ...[
+                    if (!_suiteActive && !_reference && _kind != ImageCommandKind.multi) ...[
                       DropdownButtonFormField<String>(
                         key: ValueKey('preset-character-$_presetCharacter'),
                         initialValue: _presetCharacter,
@@ -1702,6 +1747,8 @@ class _LiteGeneratePageState extends State<LiteGeneratePage> {
                               () => _characterTagMode = value ?? 'weak'),
                         ),
                       ],
+                    ],
+                    if (!_suiteActive && _kind != ImageCommandKind.multi && (!_reference || _referenceStyle)) ...[
                       const SizedBox(height: 12),
                       DropdownButtonFormField<String>(
                         key: ValueKey('global-style-$_style'),
@@ -1769,7 +1816,7 @@ class _LiteGeneratePageState extends State<LiteGeneratePage> {
                     const SizedBox(height: 12),
                     if (!widget.localMode &&
                         !chaos &&
-                        _kind != ImageCommandKind.multi &&
+                        _kind != ImageCommandKind.multi && !_reference &&
                         !_suiteActive)
                       SwitchListTile(
                         title: const Text('随机画风预设'),
@@ -1945,8 +1992,8 @@ class _LiteGeneratePageState extends State<LiteGeneratePage> {
                                       onChanged: (value) => setState(() {
                                         _sampler = value ?? '';
                                         if (!_customSamplerParameters) {
-                                          _steps = 30;
-                                          _cfg = _sampler.isEmpty ? 5.0 : 6.0;
+                                          _steps = _kind == ImageCommandKind.turbo ? 10 : 30;
+                                          _cfg = _kind == ImageCommandKind.turbo ? 1.0 : (_sampler.isEmpty ? 5.0 : 6.0);
                                         }
                                         unawaited(_saveAdvanced());
                                       }),
@@ -2001,7 +2048,7 @@ class _LiteGeneratePageState extends State<LiteGeneratePage> {
                                         max: 30,
                                         divisions: 60,
                                         label: _cfg.toStringAsFixed(1),
-                                        onChanged: (value) => setState(() {
+                                        onChanged: _kind == ImageCommandKind.turbo ? null : (value) => setState(() {
                                           _cfg = value;
                                           unawaited(_saveAdvanced());
                                         }),

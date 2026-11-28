@@ -1,5 +1,7 @@
 # NapCat 部署、QQ 登录与 OneBot 对接
 
+> **2026-11-23 社区公开留档**：[XingYunStar/NapCatQQ](https://github.com/XingYunStar/NapCatQQ) · [历史版本下载](https://github.com/XingYunStar/NapCatQQ/releases)。该第三方留档提供源码及历史发布文件；下载程序请进入 Releases。已有 NapCat 可继续按本文配置 OneBot；新装请先看[留档与安装说明](NAPCAT_ARCHIVE.md)，下文旧向导仍固定校验 v4.18.38 入口文件。
+
 2026-10-20 本地候选版说明。加入统一安装中心和独立 NapCat 四页引导；尚未据此更新 GitHub 发布附件。QQ 登录、上游安装器的确认与设备验证必须由本人完成。
 
 ## 打开入口

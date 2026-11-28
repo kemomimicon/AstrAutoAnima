@@ -16,10 +16,14 @@ import sys
 import tempfile
 import threading
 import queue
+import shutil
+from contextlib import contextmanager
 from datetime import datetime
 from urllib.parse import urlsplit
 
 VERSION='0.5.2-1.44'
+TARGET_CORE=(0,5,2)
+TARGET_BETA=1
 PAYLOAD=Path(__file__).resolve().parent/'payload'
 HUB_REQUIREMENTS=[('fastapi','fastapi',(0,115),(1,)),('uvicorn','uvicorn',(0,30),(1,)),
  ('pydantic','pydantic',(2,8),(3,)),('httpx','httpx',(0,27),(1,)),
@@ -142,10 +146,10 @@ def version(path):
     raw=m[1];core=re.match(r'(\d+)\.(\d+)\.(\d+)(.*)',raw)
     if not core:raise ValueError('版本格式不支持')
     base=tuple(int(x) for x in core.groups()[:3]);suffix=core[4].lower().split('+')[0]
-    if base<(0,3,0) or base>(0,5,2):raise ValueError('版本超出本补丁升级范围：'+raw)
-    if base==(0,5,2):
+    if base<(0,3,0) or base>TARGET_CORE:raise ValueError('版本超出本补丁升级范围：'+raw)
+    if base==TARGET_CORE:
         beta=re.search(r'(?:beta[.-]?|b)(\d+)',suffix)
-        if not beta or int(beta[1])>1:raise ValueError('现有版本更新，停止降级：'+raw)
+        if not beta or int(beta[1])>TARGET_BETA:raise ValueError('现有版本更新，停止降级：'+raw)
     return raw
 
 
@@ -188,9 +192,13 @@ print(json.dumps({'python_ok':sys.version_info>=(3,10),'origin':spec.origin if s
 def payload_files(payload):
     manifest=read_json(payload.parent/'payload-manifest.json');rows=manifest['files']
     expected={r['path']:r for r in rows}
+    if len(expected)!=len(rows) or len({n.casefold() for n in expected})!=len(expected):raise ValueError('补丁清单有重复路径')
     actual={p.relative_to(payload).as_posix():p for p in tree(payload)}
     if set(expected)!=set(actual):raise ValueError('补丁文件清单不完整')
     for name,p in actual.items():
+        parts={v.casefold() for v in Path(name).parts}
+        if parts & {'models','inputs','outputs','job_store','hub_state','.venv','__pycache__'} or p.name.lower().startswith(('.env','runtime-env')) or p.suffix.lower() in {'.key','.pem','.safetensors','.onnx','.gguf','.ckpt','.sqlite','.sqlite3'}:
+            raise ValueError('补丁包含非程序数据，拒绝覆盖：'+name)
         r=expected[name]
         if p.stat().st_size!=r['size'] or digest(p)!=r['sha256']:raise ValueError('补丁校验失败：'+name)
         if p.suffix=='.py':ast.parse(p.read_text('utf-8-sig'),filename=name)
@@ -243,10 +251,10 @@ def prepare(plan,payload=PAYLOAD):
         c=safe(plan.comfyui_root)
         if not (c/'main.py').is_file():raise ValueError('ComfyUI 目录缺少 main.py')
         copy_section('node',c/'custom_nodes/ComfyUI-AstrAutoAnima-Workflow-Tools')
-        copy_section('workflows',c/'user/default/workflows/AAA_Update_0.5.2-1.44',{'*'})
+        copy_section('workflows',c/f'user/default/workflows/AAA_Update_{VERSION}',{'*'})
         # Templates are add-only, including already customized templates in the update folder.
         for op in list(ops):
-            if '/AAA_Update_0.5.2-1.44/' in op['target'].replace('\\','/') and op['old_sha256'] is not None:ops.remove(op)
+            if f'/AAA_Update_{VERSION}/' in op['target'].replace('\\','/') and op['old_sha256'] is not None:ops.remove(op)
         if plan.comfy_python:dependencies.append((plan.comfy_python,'',[('numpy','numpy',(1,),()),('PIL','Pillow',(1,),())],payload/'node/requirements.txt'))
     if not old:raise ValueError('没有选择已有插件或 Hub')
     if plan.install_root:
@@ -273,7 +281,47 @@ def unchanged(state):
         if (digest(p) if p.is_file() else None)!=op['old_sha256']:raise ValueError('预检后目标文件发生变化，停止')
 
 
+@contextmanager
+def install_lock(plan):
+    """Kernel locks survive neither crashes nor reboot; keep the lock inode stable."""
+    handles=[]
+    try:
+        for root in sorted({str(safe(p)) for p in (plan.plugin_dir,plan.hub_home) if p}):
+            path=safe(Path(root)/'.aaa-update.lock')
+            handle=path.open('a+b')
+            try:
+                if path.stat().st_size==0:handle.write(b'0');handle.flush()
+                handle.seek(0)
+                if os.name=='nt':
+                    import msvcrt
+                    msvcrt.locking(handle.fileno(),msvcrt.LK_NBLCK,1)
+                else:
+                    import fcntl
+                    fcntl.flock(handle.fileno(),fcntl.LOCK_EX|fcntl.LOCK_NB)
+            except OSError as exc:
+                handle.close();raise ValueError('已有更新或回退正在操作此安装，请等待其完成') from exc
+            handles.append(handle)
+        yield
+    finally:
+        for handle in reversed(handles):
+            try:
+                handle.seek(0)
+                if os.name=='nt':
+                    import msvcrt
+                    msvcrt.locking(handle.fileno(),msvcrt.LK_UNLCK,1)
+                else:
+                    import fcntl
+                    fcntl.flock(handle.fileno(),fcntl.LOCK_UN)
+            finally:handle.close()
+
+
 def rollback(backup,log=print,payload=PAYLOAD):
+    state=read_json(safe(backup)/'update-state.json')
+    with install_lock(Plan(**state['plan'])):
+        return _rollback(backup,log,payload)
+
+
+def _rollback(backup,log=print,payload=PAYLOAD):
     backup=safe(backup);state=read_json(backup/'update-state.json');plan=Plan(**state['plan']);idle(plan)
     sources=payload_files(payload)
     def allowed(op):
@@ -288,7 +336,7 @@ def rollback(backup,log=print,payload=PAYLOAD):
             candidates=[safe(plan.hub_home)/'web'/r]
             if plan.web_dir:candidates.append(safe(plan.web_dir)/r)
         elif section=='node' and plan.comfyui_root:candidates=[safe(plan.comfyui_root)/'custom_nodes/ComfyUI-AstrAutoAnima-Workflow-Tools'/r]
-        elif section=='workflows' and plan.comfyui_root:candidates=[safe(plan.comfyui_root)/'user/default/workflows/AAA_Update_0.5.2-1.44'/r]
+        elif section=='workflows' and plan.comfyui_root:candidates=[safe(plan.comfyui_root)/f'user/default/workflows/AAA_Update_{VERSION}'/r]
         elif section=='runtime' and plan.install_root:candidates=[safe(plan.install_root)/r]
         return any(p==safe(c) for c in candidates)
     # All conflicts are checked before the first restore.
@@ -308,6 +356,13 @@ def rollback(backup,log=print,payload=PAYLOAD):
 
 
 def apply(plan,*,payload=PAYLOAD,confirm_stopped=False,install_dependencies=False,log=print):
+    if not confirm_stopped:raise ValueError('请先正常退出 Hub、AstrBot 和 ComfyUI，再确认已停止服务')
+    prepare(plan,payload);idle(plan)
+    with install_lock(plan):
+        return _apply(plan,payload=payload,confirm_stopped=True,install_dependencies=install_dependencies,log=log)
+
+
+def _apply(plan,*,payload=PAYLOAD,confirm_stopped=False,install_dependencies=False,log=print):
     if not confirm_stopped:raise ValueError('请先正常退出 Hub、AstrBot 和 ComfyUI，再勾选已停止服务')
     state,deps=prepare(plan,payload);idle(plan);unchanged(state)
     missing=[]
@@ -317,9 +372,19 @@ def apply(plan,*,payload=PAYLOAD,confirm_stopped=False,install_dependencies=Fals
     if missing and not install_dependencies:raise ValueError('需补齐服务依赖：'+', '.join(sorted({n for *_,names in missing for n in names}))+'。可勾选允许补齐依赖后再更新。')
     if not state['operations']:log('程序文件已是本次版本，无需重复覆盖。');return None
     backup_root=safe(plan.backup_root or str(Path(plan.hub_home or plan.plugin_dir).parent/'aaa_update_backups'))
-    backup=backup_root/('to_0.5.2-1.44_'+datetime.now().strftime('%Y%m%d_%H%M%S')+'_'+secrets.token_hex(4))
+    backup=backup_root/('to_'+VERSION+'_'+datetime.now().strftime('%Y%m%d_%H%M%S')+'_'+secrets.token_hex(4))
     for r in state['allowed_roots']:
         if backup_root==safe(r):raise ValueError('备份目录不能等于程序目标目录')
+    sources=payload_files(payload)
+    needed=sum(p.stat().st_size for p in sources.values())+sum(Path(o['target']).stat().st_size for o in state['operations'] if o['old_sha256'])+sum(Path(p).stat().st_size for p in state['guards'])+16*1024*1024
+    ancestor=backup_root
+    while not ancestor.exists():ancestor=ancestor.parent
+    if shutil.disk_usage(ancestor).free<needed:raise ValueError('备份与恢复程序所需空间不足，未覆盖程序文件')
+    for root in state['allowed_roots']:
+        target=safe(root)
+        while not target.exists():target=target.parent
+        required=sum(Path(o['source']).stat().st_size for o in state['operations'] if Path(o['target']).is_relative_to(safe(root)))
+        if shutil.disk_usage(target).free<required+needed:raise ValueError('更新目标剩余空间不足，未覆盖程序文件')
     backup.mkdir(parents=True,exist_ok=False)
     if os.name!='nt':backup.chmod(0o700)
     for i,op in enumerate(state['operations']):
@@ -328,7 +393,15 @@ def apply(plan,*,payload=PAYLOAD,confirm_stopped=False,install_dependencies=Fals
             old=Path(op['target']);write_atomic(backup/op['backup_file'],old.read_bytes(),0o600)
             if digest(backup/op['backup_file'])!=op['old_sha256']:raise ValueError('备份校验失败，未写程序文件')
     for i,name in enumerate(state['guards']):write_atomic(backup/'private-config-snapshots'/str(i),Path(name).read_bytes(),0o600)
-    state['status']='backed_up';save(backup/'update-state.json',state);log('备份完成：'+str(backup))
+    # Preserve an independent recovery copy before the first destination write.
+    for name,source in sources.items():write_atomic(backup/'payload'/name,source.read_bytes(),0o644)
+    write_atomic(backup/'payload-manifest.json',(payload.parent/'payload-manifest.json').read_bytes(),0o600)
+    write_atomic(backup/'update.py',Path(__file__).read_bytes(),0o600)
+    cmd=b'@echo off\r\nsetlocal\r\nchcp 65001 >nul\r\nset "AAA_STOP="\r\nset /p "AAA_STOP=Stop all AAA services. Type STOPPED to roll back: "\r\nif not "%AAA_STOP%"=="STOPPED" exit /b 1\r\nwhere py >nul 2>nul\r\nif errorlevel 1 (python "%~dp0update.py" --rollback "%~dp0." --confirm-stopped) else (py -3 "%~dp0update.py" --rollback "%~dp0." --confirm-stopped)\r\nset "AAA_EXIT=%errorlevel%"\r\npause\r\nexit /b %AAA_EXIT%\r\n'
+    write_atomic(backup/'Rollback-Windows.cmd',cmd)
+    write_atomic(backup/'Rollback-Linux.sh',b'#!/bin/sh\nset -eu\nprintf "Stop all AAA services. Type STOPPED to roll back: "\nread -r answer\n[ "$answer" = STOPPED ] || exit 1\nD=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)\nexec "${AAA_PYTHON:-python3}" -B "$D/update.py" --rollback "$D" --confirm-stopped\n',0o755)
+    payload_files(backup/'payload')
+    state['status']='backed_up';save(backup/'update-state.json',state);log('备份完成（自带独立回退入口）：'+str(backup))
     # Network access is opt-in and restricted to this project's declared dependencies.
     for python,source,req,reqfile,names in missing:
         log('正在补齐所选服务依赖：'+', '.join(names))
@@ -347,16 +420,19 @@ def apply(plan,*,payload=PAYLOAD,confirm_stopped=False,install_dependencies=Fals
         for name,h in state['guards'].items():
             if digest(name)!=h:raise ValueError('个人配置在更新期间被其他程序修改')
         state['status']='completed';save(backup/'update-state.json',state)
-    except Exception:
-        rollback(backup,log,payload);raise
-    log('更新完成：0.5.2-1.44。按原方式启动服务，再更新客户端并验证首图。')
+    except BaseException as failure:
+        try:_rollback(backup,log,backup/'payload')
+        except Exception as recovery:
+            raise RuntimeError('自动回退未完成，请保留并使用恢复目录 '+str(backup)+'；原因：'+str(recovery)) from failure
+        raise
+    log('更新完成：'+VERSION+'。按原方式启动服务，再更新客户端并验证首图。')
     return backup
 
 
 def gui():
     import tkinter as tk
     from tkinter import ttk,filedialog,messagebox
-    app=tk.Tk();app.title('AstrAutoAnima · 旧版本升级到 0.5.2-1.44');app.geometry('900x620')
+    app=tk.Tk();app.title('AstrAutoAnima · 升级到 '+VERSION);app.geometry('900x620')
     path=tk.StringVar();stopped=tk.BooleanVar();deps=tk.BooleanVar();messages=queue.Queue();busy=False
     ttk.Label(app,text='选择已有安装目录（含 Start 与 runtime-env.json），先预检，再更新。').pack(anchor='w',padx=16,pady=12)
     row=ttk.Frame(app);row.pack(fill='x',padx=16);ttk.Entry(row,textvariable=path).pack(side='left',fill='x',expand=True)

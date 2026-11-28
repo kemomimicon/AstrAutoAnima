@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path
 import posixpath
+import re
 import shutil
 import subprocess
 import tarfile
@@ -18,6 +19,8 @@ ROOT = BASE / 'aaa-install'
 STUDIO = BASE / 'apps/AnimaLoraStudio'
 IMAGE = Path('/opt/aaa-image-052144')
 PUBLIC = Path('/root/AstrAutoAnima')
+IMAGE_VERSION = '0.5.2-1.44-image.1'
+SOURCE_COMMIT = '29882ba009719f1707ac0bb2690b04df1763dff7'
 SKIP = {'.git','__pycache__','.pytest_cache','.cache','node_modules','logs','temp'}
 
 
@@ -84,7 +87,7 @@ def schema_defaults(schema):
 
 
 def virtual():
-    envs={}
+    envs={'image_version': IMAGE_VERSION}
     keys={'AAH_EXECUTION_MODE','AAH_HOST','AAH_PORT','AAH_PLUGIN_DIR','AAH_PLUGIN_DATA_DIR','AAH_COMFYUI_ROOT',
           'AAH_ASTRBOT_URL','AAH_COMFYUI_URL','AAH_WEB_ROOT','AAH_LOCAL_WORKFLOW_PATH','AAH_LOCAL_GUFENG_CATALOG_PATH'}
     for name in ('full','local'):
@@ -175,16 +178,30 @@ def build():
         finally:
             process.stdin.close()
             if process.wait()!=0:raise ValueError('Payload compression')
-    manifest={'schema':1,'image':'0.5.2-1.44-image.1','sha256':digest(archive),'compressed_bytes':archive.stat().st_size,
+    manifest={'schema':1,'image':IMAGE_VERSION,'sha256':digest(archive),'compressed_bytes':archive.stat().st_size,
         'unique_bytes':total,'entries':count,'top_roots':['aaa-install','apps/AnimaLoraStudio','apps/node-v22.20.0-linux-x64','apps/Start-Studio.sh','aaa-bootstrap-py312'],
         'optional_downloads':['SeedVR2 weights','JoyCaption','CL Tagger','NapCat/QQ'],
-        'software_source_commit':'29882ba009719f1707ac0bb2690b04df1763dff7',
+        'software_source_commit':SOURCE_COMMIT,
         'V_version':'0.4.2','V_catalog_sha256':digest(ROOT/'hub/resources/gufeng/cards.sqlite3')}
     (IMAGE/'payload-manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')
     print('PAYLOAD_BUILT',json.dumps(manifest),flush=True)
 
 
 if __name__=='__main__':
-    parser=argparse.ArgumentParser();parser.add_argument('--build',action='store_true');args=parser.parse_args()
+    parser=argparse.ArgumentParser();parser.add_argument('--build',action='store_true')
+    parser.add_argument('--image-dir', type=Path)
+    parser.add_argument('--image-version')
+    parser.add_argument('--source-commit')
+    args=parser.parse_args()
+    if args.image_version:
+        if not re.fullmatch(r'[A-Za-z0-9.+_-]+', args.image_version):parser.error('Invalid image version')
+        if not args.source_commit:parser.error('A new image requires --source-commit')
+        IMAGE_VERSION=args.image_version
+    if args.source_commit:
+        if not re.fullmatch(r'[0-9a-f]{40}', args.source_commit):parser.error('Expected full source commit')
+        SOURCE_COMMIT=args.source_commit
+    if args.image_dir:
+        if not args.image_dir.is_absolute():parser.error('Image directory must be absolute')
+        IMAGE=args.image_dir
     if args.build:build()
     else:print('Build prepared application runtime: --build')

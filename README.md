@@ -1,13 +1,21 @@
 # AstrAutoAnima
 
-**0.5.2-1.44 · build44 · install.2**
+**0.5.3-beta.1 · build45**
 
 面向 AstrBot + QQ/NapCat + ComfyUI/Anima 的跑图桥接套件，支持 Windows 本地电脑和 Linux 云服务器。
 包含 QQ 生图、动态角色/画风 LoRA、随机提示词、图片反推、HQ、放大精修、Hub 和 Windows/Android/Web 客户端。
 
-[下载最新完整包](https://github.com/kemomimicon/AstrAutoAnima/releases/tag/v0.5.2-1.44) ·
+[版本与下载](https://github.com/kemomimicon/AstrAutoAnima/releases) ·
 [安装说明](docs/EASY_INSTALL.md) · [初次配置](docs/FIRST_RUN_WIZARD.md) ·
-[本次验收](docs/PUBLICATION_0.5.2-1.44.md) · [AutoDL 镜像使用](docs/AUTODL_IMAGE.md)
+[本次更新](docs/RELEASE_BUILD45_20261125.md) · [更新与回退](docs/NEXT_CANDIDATE_UPDATE.md) · [AutoDL 镜像准备](docs/AUTODL_BUILD45.md)
+
+本版加入 [Anima Turbo、角色画廊、预设多人图与 SnapRef `/aref`](docs/NEXT_ANIMA_FEATURES.md)，恢复 NapCat 登录助手和余额查询，并整合可复用收藏与 QQ 回执修复。
+
+已有环境请同时更新 Hub 和 AstrBot 插件。更新器自动备份，提供独立回退入口，保留模型、词库、预设、密钥与已有收藏。
+
+Agent 接入：[Codex / DeepSeek Harness 插件](optional/aaa-agent/README.md)。独立 QQ 插件：[astrbot_plugin_comfy_bridge](https://github.com/kemomimicon/astrbot_plugin_comfy_bridge)。
+
+使用问题欢迎到 GitHub 或 bilibili——ケモミミロリコン反馈。
 
 ## 0.5.2-1.44 热修 · 2026-10-27
 
@@ -63,11 +71,11 @@ SeedVR2 3B FP16 整图 682×1024。QQ 投递由维护者验证通过。
   并在独立实例测试命令冲突、Provider、图片返回和工作流覆盖行为。
 - AstrAutoAnima 的 `/aimg` 等指令可能与其他绘图插件重名；同一命令只保留一个处理插件。
 
-基础环境只列官方入口，本仓库不重复提供其安装教程：
+基础环境与留档入口：
 
 - AstrBot：<https://github.com/AstrBotDevs/AstrBot> / <https://docs.astrbot.app/>
 - ComfyUI：<https://github.com/Comfy-Org/ComfyUI> / <https://docs.comfy.org/>
-- NapCatQQ：<https://github.com/NapNeko/NapCatQQ> / <https://napneko.github.io/>
+- NapCatQQ：[社区公开留档](https://github.com/XingYunStar/NapCatQQ) · [历史版本下载](https://github.com/XingYunStar/NapCatQQ/releases) · [留档与安装说明](docs/NAPCAT_ARCHIVE.md)；原项目为 [NapNeko/NapCatQQ](https://github.com/NapNeko/NapCatQQ)。
 - Anima Master：<https://github.com/YayiMiko/anima-master>
 - Anima 模型：<https://huggingface.co/circlestone-labs/Anima>
 

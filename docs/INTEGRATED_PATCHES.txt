@@ -1,4 +1,5 @@
-AstrAutoAnima 0.5.2-beta.1+44 完整公开候选包
+AstrAutoAnima 0.5.3-beta.1+45 完整公开候选包
+2026-11-18 更新候选：Turbo、角色画廊、预设多人图与 SnapRef；先按 NEXT_ANIMA_FEATURES.md 验收。
 整合日期：2026-10-24；本文件描述源码范围，不替代随包构建与校验报告。
 
 本次整合

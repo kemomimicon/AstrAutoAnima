@@ -225,6 +225,8 @@ def build_remote_command(
         raise RemoteJobError("reverse generation can only be delivered to a private target")
     if payload.five_draw and not random_kind:
         raise RemoteJobError("five draw is only valid for random or chaos jobs")
+    if payload.kind == "turbo" and payload.cfg is not None and payload.cfg != 1:
+        raise RemoteJobError("Anima Turbo 使用 CFG=1")
 
     prefix = {
         ("direct", False): "/aimg",
@@ -243,8 +245,20 @@ def build_remote_command(
         ("refine", True): "/arefine",
         ("remake", False): "/aremake",
         ("multi", False): "/amulti",
+        ("turbo", False): "/aturbo",
+        ("reference", False): "/aref",
     }[(payload.kind, payload.five_draw)]
     parts = [prefix]
+    if payload.kind == "reference":
+        reference_mode = payload.reference_mode
+        has_style = bool(payload.style or payload.personal_style_slot or payload.trial_style)
+        if reference_mode == "auto":
+            reference_mode = "char" if has_style else "cs"
+        if payload.character:
+            raise RemoteJobError("参考生图由参考图提供角色；char 模式可选择画风预设")
+        if reference_mode != "char" and has_style:
+            raise RemoteJobError("cs 沿用参考图画风；调用画风预设请选择 char 模式")
+        parts.append(reference_mode)
     visual = (("主光", payload.lighting_key), ("效果光", payload.lighting_effect),
               ("主材质", payload.material_primary), ("细节材质", ','.join(payload.material_details)),
               ("表面效果", payload.material_surface),
@@ -360,17 +374,17 @@ def build_remote_command(
     parts.extend(f"{name}={value}" for name, value in visual if value)
     if payload.prompt.strip():
         parts.append(payload.prompt.strip())
-    if payload.kind in {"direct", "chinese", "hq"} and not payload.prompt.strip():
+    if payload.kind in {"direct", "chinese", "hq", "turbo", "reference"} and not payload.prompt.strip():
         raise RemoteJobError(f"{payload.kind} generation requires a prompt")
     return " ".join(parts), effective_safety
 
 
 def _decode_source_image(payload: RemoteJobCreateRequest) -> tuple[bytes, str, str] | None:
     encoded = payload.source_image_data.strip()
-    image_kinds = {"reverse", "refine"}
+    image_kinds = {"reverse", "refine", "reference"}
     if payload.kind not in image_kinds:
         if encoded or payload.source_image_name.strip():
-            raise RemoteJobError("source images are only valid for reverse/refine jobs")
+            raise RemoteJobError("source images are only valid for reverse/refine/reference jobs")
         return None
     if not encoded:
         if payload.kind == "refine" and payload.parent_job_id.strip():
@@ -858,23 +872,17 @@ class RemoteJobManager:
             return set()
 
     def _liked_view(self, job, principal, saved):
-        from .prompt_favorites import favorite_id, full_prompt
-        if saved and job.bridge_job_ids:
-            from .image_prompts import resolve_image_prompt
+        from .prompt_favorites import favorite_id
+        from .image_prompts import resolve_favorite_prompt
+        images = []
+        if saved:
             for image in job.images:
-                if image.final_prompt:
-                    continue
                 try:
-                    snapshot = resolve_image_prompt(self.settings, job, image)
-                    if snapshot.get('kind') == 'compiled':
-                        image.final_prompt = snapshot['positive']
-                        image.negative_prompt = snapshot.get('negative', '')
-                        image.prompt_stage = snapshot['stage']
+                    snapshot = resolve_favorite_prompt(self.settings, job, image)
+                    if snapshot.get('available') and favorite_id(principal.subject, snapshot['positive']) in saved:
+                        images.append(image)
                 except (OSError, ValueError, RepositoryError):
                     pass
-        images = [image for image in job.images if (image.final_prompt or image.source_prompt) and
-                  favorite_id(principal.subject, image.final_prompt or full_prompt(
-                      image.source_prompt, image.user_addition)) in saved]
         return job.model_copy(update={
             "liked_image_ids": [image.id for image in images],
             "liked_prompt_ids": list(dict.fromkeys(image.prompt_id for image in images if image.prompt_id)),
@@ -918,7 +926,7 @@ class RemoteJobManager:
         normalized_kind = str(kind or "").strip().casefold()
         normalized_status = str(status or "").strip().casefold()
         allowed_kinds = {
-            "direct", "chinese", "reverse", "random", "chaos", "hq", "refine", "remake", "multi"
+            "direct", "chinese", "reverse", "random", "chaos", "hq", "refine", "remake", "multi", "turbo", "reference"
         }
         allowed_statuses = {"queued", "running", "succeeded", "failed"}
         if normalized_kind and normalized_kind not in allowed_kinds:

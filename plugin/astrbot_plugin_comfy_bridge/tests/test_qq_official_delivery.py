@@ -207,7 +207,8 @@ class OfficialDeliveryTests(DeliveryTests):
         methods=[n for n in cls.body if isinstance(n,ast.AsyncFunctionDef) and n.name in {'aremake','_quoted_job'}]
         for n in methods: n.decorator_list=[]
         logger=Mock()
-        ns=dict(globals(),__package__='astrbot_plugin_comfy_bridge',AstrMessageEvent=object,
+        from astrbot_plugin_comfy_bridge.next_generation_runtime import SNAPREF
+        ns=dict(globals(),__package__='astrbot_plugin_comfy_bridge',AstrMessageEvent=object,SNAPREF=SNAPREF,
                 Comp=SimpleNamespace(Reply=Reply),logger=logger,
                 aiohttp=SimpleNamespace(ClientSession=session,ClientTimeout=lambda **kw:kw),
                 extract_output_images=lambda record:[{'filename':'replayed.png'}])

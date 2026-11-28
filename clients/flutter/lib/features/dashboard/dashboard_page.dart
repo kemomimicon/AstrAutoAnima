@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/hub_api.dart';
 import '../../core/models.dart';
-import 'napcat_login_dialog.dart';
+import 'napcat_status_card.dart';
 
 class DashboardPage extends StatefulWidget {
   const DashboardPage({
@@ -122,15 +122,11 @@ class _DashboardPageState extends State<DashboardPage> {
                             : _refresh,
                     icon: const Icon(Icons.refresh),
                   ),
-                  IconButton(
-                      tooltip: 'NapCat 登录助手',
-                      icon: const Icon(Icons.login),
-                      onPressed: () => showDialog<void>(
-                          context: context,
-                          builder: (_) => NapcatLoginDialog(api: widget.api))),
                 ],
               ),
               const SizedBox(height: 24),
+              NapcatStatusCard(key: ValueKey(widget.api), api: widget.api),
+              const SizedBox(height: 18),
               ServerReminderCard(
                 enabled: widget.serverOnlineReminderEnabled,
                 reachable: widget.serverReachable,

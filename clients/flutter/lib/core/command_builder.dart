@@ -11,7 +11,9 @@ enum ImageCommandKind {
   chaos,
   hq,
   refine,
-  multi
+  multi,
+  turbo,
+  reference
 }
 
 String _numberText(num value) => value == value.roundToDouble()
@@ -34,6 +36,7 @@ String buildImageCommand({
   int? steps,
   double? cfg,
   String prompt = '',
+  String referenceMode = 'auto',
   String reversePreset = 'full',
   List<String> reverseCategories = const [],
   bool reverseOnly = false,
@@ -56,8 +59,13 @@ String buildImageCommand({
     ImageCommandKind.hq => '/ahq',
     ImageCommandKind.refine => '/arefine',
     ImageCommandKind.multi => '/amulti',
+    ImageCommandKind.turbo => '/aturbo',
+    ImageCommandKind.reference => '/aref',
   };
   final parts = <String>[prefix];
+  final effectiveReferenceMode = referenceMode == 'auto'
+      ? (style.trim().isNotEmpty ? 'char' : 'cs') : referenceMode;
+  if (kind == ImageCommandKind.reference) parts.add(effectiveReferenceMode);
   if (kind == ImageCommandKind.hq) {
     parts.add(profile.isEmpty ? 'stable' : profile);
     parts.add('修手=${detailHands ? '开启' : '关闭'}');
@@ -104,7 +112,7 @@ String buildImageCommand({
       randomSubjectTag.isNotEmpty) {
     parts.add('起手=${randomSubjectTag == 'none' ? '无' : randomSubjectTag}');
   }
-  if (kind != ImageCommandKind.chaos && kind != ImageCommandKind.multi) {
+  if (kind != ImageCommandKind.chaos && kind != ImageCommandKind.multi && kind != ImageCommandKind.reference) {
     if (character.trim().isNotEmpty) {
       parts.add('角色=${_directiveText(character.trim())}');
       if (characterVariant.isNotEmpty) parts.add('造型=$characterVariant');
@@ -120,8 +128,11 @@ String buildImageCommand({
     }
     if (ratio.trim().isNotEmpty) parts.add('比例=${ratio.trim()}');
   }
+  if (kind == ImageCommandKind.reference && effectiveReferenceMode == 'char' && style.trim().isNotEmpty) {
+    parts.add('画风=${_directiveText(style.trim())}');
+  }
   if (sampler.trim().isNotEmpty) parts.add('采样器=${sampler.trim()}');
-  if (kind == ImageCommandKind.multi && ratio.isNotEmpty) {
+  if ((kind == ImageCommandKind.multi || kind == ImageCommandKind.reference) && ratio.isNotEmpty) {
     parts.add('比例=$ratio');
   }
   if (scheduler.trim().isNotEmpty) parts.add('调度器=${scheduler.trim()}');

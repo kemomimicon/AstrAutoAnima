@@ -88,10 +88,10 @@ class _NapcatStatusCardState extends State<NapcatStatusCard>
           const SizedBox(height: 8),
           Text(
               '前台每 30 秒检查 · 上次成功读取：${_checked?.toLocal().toString().split('.').first ?? "尚无"}'),
-          const Text('此状态由 NapCat 报告，不代表 QQ 消息投递链路已验证。'),
+          const Text('扫码或快捷登录后，可在此刷新 QQ 状态。'),
           TextButton.icon(
               icon: const Icon(Icons.login),
-              label: const Text('打开登录助手'),
+              label: const Text('NapCat 登录助手'),
               onPressed: () async {
                 await showDialog<void>(
                     context: context,

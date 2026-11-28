@@ -749,5 +749,20 @@
     "type": "int",
     "default": 60,
     "hint": "插件启动时会先扫描一次，此后按该间隔扫描；最小实际间隔为 5 分钟。"
+  },
+  "turbo_txt2img_anima_path": {
+    "description": "turbo_txt2img_anima_v1 独立工作流路径（留空使用随包模板）",
+    "type": "string",
+    "default": ""
+  },
+  "snapref_anima_path": {
+    "description": "snapref_anima_v1 独立工作流路径（留空使用随包模板）",
+    "type": "string",
+    "default": ""
+  },
+  "preset_multi_anima_path": {
+    "description": "preset_multi_anima_v1 独立工作流路径（留空使用随包模板）",
+    "type": "string",
+    "default": ""
   }
 }
